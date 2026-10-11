@@ -116,7 +116,6 @@ export class EmbedPlayer {
     iframe.height = String(EMBED_HEIGHT);
     // Permissions only; playback still starts from an explicit user action.
     iframe.allow = "autoplay; encrypted-media; fullscreen; picture-in-picture";
-    iframe.allowFullscreen = true;
     slot.replaceChildren(iframe);
     this.iframe = iframe;
     this.onMessage = (e: MessageEvent) => {
