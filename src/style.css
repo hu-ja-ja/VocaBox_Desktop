@@ -16,24 +16,50 @@ body {
   margin: 0;
   min-height: 100vh;
   display: grid;
-  place-items: center;
+  grid-template-rows: auto 1fr auto;
+}
+
+header,
+main,
+footer {
+  padding: 1rem;
 }
 
 main {
-  text-align: center;
+  display: grid;
+  gap: 1rem;
+  align-content: start;
 }
 
-h1 {
-  font-size: 2.25rem;
-  margin: 0;
+footer {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  border-top: 1px solid currentColor;
 }
 
 p {
   color: #6b7280;
+  margin: 0.5rem 0 0;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+h1 {
+  font-size: 1.5rem;
 }
 
 @media (prefers-color-scheme: dark) {
   p {
     color: #9aa0a6;
   }
+}
+
+:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
