@@ -88,3 +88,31 @@ func hasCommand(commands []PlayerCommand, action string) bool {
 	}
 	return false
 }
+
+func TestNativeUIThumbnailPlaceholderNeedsWindow(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.playerLoaded = true
+	app.saved = []SavedMylist{{
+		ID:   "123",
+		Name: "作業用サムネ",
+		Items: []MylistItem{{
+			WatchID:   "sm27718606",
+			Title:     "サンプル曲",
+			Available: true,
+			ThumbURL:  "https://nicovideo.cdn.nimg.jp/thumbnails/27718606/27718606",
+		}},
+	}}
+
+	tester := ui.NewTester(app.view, 1120, 760)
+	if err := tester.Click("作業用サムネ"); err != nil {
+		t.Fatal(err)
+	}
+	if !tester.HasText("サンプル曲") {
+		t.Fatalf("track is not shown: %q", tester.Texts())
+	}
+	// Without a window there is nothing to load into: the row keeps its
+	// placeholder and no background load starts.
+	if len(app.thumbBusy) != 0 || len(app.thumbs) != 0 {
+		t.Fatalf("unexpected thumbnail load: busy=%v thumbs=%d", app.thumbBusy, len(app.thumbs))
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,24 @@ import (
 const (
 	// nvapiBaseURL is the only host this app fetches mylist metadata from.
 	nvapiBaseURL = "https://nvapi.nicovideo.jp/v2"
+	// thumbnailCDNHost is the only host this app fetches thumbnail pictures
+	// from, whether the URL comes from the API or is derived from a watch ID.
+	thumbnailCDNHost = "nicovideo.cdn.nimg.jp"
+	// maxThumbBody bounds a thumbnail image response and the disk cache file.
+	maxThumbBody = 1 << 20
+	// Thumbnail fetches are spaced and bounded: at most thumbConcurrency run
+	// at once, each started at least thumbInterval after the last, and a 429
+	// pauses all of them for thumbCooldown.
+	thumbConcurrency = 2
+	thumbInterval    = 100 * time.Millisecond
+	thumbCooldown    = 30 * time.Second
+	// mylistPageInterval spaces the pages of a full snapshot fetch, so saving
+	// a large mylist does not hammer the metadata API.
+	mylistPageInterval = 200 * time.Millisecond
+	// retryAfterMax bounds how long a Retry-After header can pause a request;
+	// a missing header waits retryAfterDefault.
+	retryAfterMax     = 30 * time.Second
+	retryAfterDefault = 5 * time.Second
 	// mylistPageSize is the number of entries requested per page.
 	mylistPageSize = 100
 	// maxMylistBody bounds a metadata response body.
@@ -42,6 +61,11 @@ type MylistItem struct {
 	Title     string `json:"title,omitempty"`
 	Uploader  string `json:"uploader,omitempty"`
 	Duration  int    `json:"duration,omitempty"`
+	// ThumbURL is the extension-less picture URL the mylist API gives, kept
+	// with the item so saved snapshots show pictures without a refresh.
+	// Videos have one only when the API knew them; entries saved before
+	// this field existed fall back to a URL derived from the watch ID.
+	ThumbURL string `json:"thumbnailUrl,omitempty"`
 }
 
 // MylistPage is one page of public mylist metadata.
@@ -65,6 +89,15 @@ type Mylist struct {
 	// configDir overrides the user config directory holding mylists.json.
 	// Empty means os.UserConfigDir()/VocaBox. Tests set a temp dir.
 	configDir string
+	// thumbHost overrides the host thumbnail pictures are fetched from.
+	// Tests point it at their server; empty means the real CDN.
+	thumbHost string
+	// thumbLimiter spaces and bounds thumbnail fetches. Nil means no limit,
+	// as in tests that build a Mylist directly.
+	thumbLimiter *thumbnailLimiter
+	// pageInterval spaces the pages of a full snapshot fetch. Zero means
+	// none, as in tests.
+	pageInterval time.Duration
 	// savedMu serializes saved-list file operations on this instance.
 	// HTTP fetches never take it.
 	savedMu sync.Mutex
@@ -73,8 +106,10 @@ type Mylist struct {
 // NewMylist returns the bound Mylist service.
 func NewMylist() *Mylist {
 	return &Mylist{
-		client:  &http.Client{Timeout: 15 * time.Second},
-		baseURL: nvapiBaseURL,
+		client:       &http.Client{Timeout: 15 * time.Second},
+		baseURL:      nvapiBaseURL,
+		thumbLimiter: newThumbnailLimiter(thumbConcurrency, thumbInterval, thumbCooldown),
+		pageInterval: mylistPageInterval,
 	}
 }
 
@@ -193,6 +228,11 @@ func (m *Mylist) RemoveSaved(input string) ([]SavedMylist, error) {
 }
 
 func (m *Mylist) savedPath() (string, error) {
+	return m.configPath("mylists.json")
+}
+
+// configPath returns the path of name inside the app's config directory.
+func (m *Mylist) configPath(name string) (string, error) {
 	dir := m.configDir
 	if dir == "" {
 		base, err := os.UserConfigDir()
@@ -201,7 +241,252 @@ func (m *Mylist) savedPath() (string, error) {
 		}
 		dir = filepath.Join(base, "VocaBox")
 	}
-	return filepath.Join(dir, "mylists.json"), nil
+	return filepath.Join(dir, name), nil
+}
+
+// Thumbnail returns the picture of the video at watchID: the disk cache
+// when it has one, the picture at thumbURL fetched and cached otherwise.
+// Empty thumbURL comes from entries saved before pictures were kept, where
+// the CDN's own URL shape is derived from the watch ID. Fetches only ever
+// go to the thumbnail CDN.
+func (m *Mylist) Thumbnail(watchID, thumbURL string) ([]byte, error) {
+	cache, cacheOK := m.thumbCachePath(watchID)
+	if cacheOK {
+		if body, ok := readThumbFile(cache); ok {
+			return body, nil
+		}
+	}
+	var lastErr error
+	for _, u := range m.thumbnailCandidates(watchID, thumbURL) {
+		body, err := m.fetchThumbnail(u)
+		if err != nil {
+			lastErr = err
+			if errors.Is(err, errThumbPaused) {
+				// The CDN asked to slow down: another candidate URL would only
+				// ask again.
+				break
+			}
+			continue
+		}
+		if cacheOK {
+			writeThumbFile(cache, body)
+		}
+		return body, nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("サムネイルがありません")
+	}
+	return nil, lastErr
+}
+
+// errThumbPaused reports the CDN rate limiting: the limiter has paused every
+// fetch, and the caller should stop rather than try another URL.
+var errThumbPaused = errors.New("ニコニコが混み合っています。しばらくしてからもう一度お試しください")
+
+// thumbnailLimiter bounds how fast pictures are fetched: at most the slot
+// count run at once, each start at least interval after the last, and a
+// cooldown after the CDN asked to slow down.
+type thumbnailLimiter struct {
+	slots    chan struct{}
+	interval time.Duration
+	cooldown time.Duration
+	mu       sync.Mutex
+	next     time.Time
+	paused   time.Time
+}
+
+func newThumbnailLimiter(slots int, interval, cooldown time.Duration) *thumbnailLimiter {
+	return &thumbnailLimiter{
+		slots:    make(chan struct{}, slots),
+		interval: interval,
+		cooldown: cooldown,
+	}
+}
+
+// acquire takes a slot and waits until this fetch's turn. release returns
+// the slot once the fetch is done.
+func (l *thumbnailLimiter) acquire() {
+	l.slots <- struct{}{}
+	l.mu.Lock()
+	now := time.Now()
+	start := l.next
+	if start.Before(now) {
+		start = now
+	}
+	if l.paused.After(start) {
+		start = l.paused
+	}
+	l.next = start.Add(l.interval)
+	l.mu.Unlock()
+	if wait := time.Until(start); wait > 0 {
+		time.Sleep(wait)
+	}
+}
+
+func (l *thumbnailLimiter) release() { <-l.slots }
+
+// pausedFor stops every fetch for d, as after a 429. A pause only ever
+// lengthens.
+func (l *thumbnailLimiter) pausedFor(d time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if until := time.Now().Add(d); until.After(l.paused) {
+		l.paused = until
+	}
+}
+
+// thumbCachePath returns the disk cache path of watchID's picture, or
+// ok=false for an ID of an unexpected shape: cache file names come from
+// IDs, so only the simple shape CDN IDs have becomes a path.
+func (m *Mylist) thumbCachePath(watchID string) (path string, ok bool) {
+	if !isSafeID(watchID) {
+		return "", false
+	}
+	path, err := m.configPath(filepath.Join("thumbs", watchID+".jpg"))
+	if err != nil {
+		return "", false
+	}
+	return path, true
+}
+
+func readThumbFile(path string) ([]byte, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	body, err := io.ReadAll(io.LimitReader(f, maxThumbBody+1))
+	if err != nil || len(body) == 0 || len(body) > maxThumbBody {
+		return nil, false
+	}
+	return body, true
+}
+
+// writeThumbFile stores a picture through a temp file and rename, so a
+// crash mid-write never leaves a torn image behind. Caching is best effort:
+// a write that fails leaves the picture uncached, not the row empty.
+func writeThumbFile(path string, body []byte) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	tmp, err := os.CreateTemp(dir, "thumb-*.tmp")
+	if err != nil {
+		return
+	}
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+	}
+}
+
+// thumbnailCandidates returns the URLs to try for one video: the 240x180
+// .M picture before the smaller fallback older entries have. A stored URL
+// comes from the mylist API; without one the URL shape the CDN advertises
+// is derived from the video number.
+func (m *Mylist) thumbnailCandidates(watchID, thumbURL string) []string {
+	base := thumbURL
+	if base == "" {
+		if num := videoNumber(watchID); num != "" {
+			base = "https://" + m.thumbHostName() + "/thumbnails/" + num + "/" + num
+		}
+	}
+	if base == "" {
+		return nil
+	}
+	return []string{base + ".M", base}
+}
+
+// thumbHostName is the only host pictures are fetched from: the CDN, or the
+// test server when a test set the field.
+func (m *Mylist) thumbHostName() string {
+	if m.thumbHost != "" {
+		return m.thumbHost
+	}
+	return thumbnailCDNHost
+}
+
+func (m *Mylist) fetchThumbnail(rawURL string) ([]byte, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" || u.Host != m.thumbHostName() {
+		return nil, errors.New("サムネイルの取得先が不正です")
+	}
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, errors.New("サムネイルの取得に失敗しました")
+	}
+	req.Header.Set("User-Agent", mylistUserAgent)
+	if m.thumbLimiter != nil {
+		m.thumbLimiter.acquire()
+		defer m.thumbLimiter.release()
+	}
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil, errors.New("サムネイルの取得に失敗しました（通信エラー）")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+		if m.thumbLimiter != nil {
+			m.thumbLimiter.pausedFor(m.thumbLimiter.cooldown)
+		}
+		return nil, errThumbPaused
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("サムネイルの取得に失敗しました（HTTP %d）", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "image/") {
+		return nil, errors.New("サムネイルの応答が画像ではありません")
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxThumbBody+1))
+	if err != nil || len(body) == 0 {
+		return nil, errors.New("サムネイルの取得に失敗しました")
+	}
+	if len(body) > maxThumbBody {
+		return nil, errors.New("サムネイルの応答が大きすぎます")
+	}
+	return body, nil
+}
+
+// videoNumber returns the numeric part of a video ID like sm123 or nm456,
+// which the CDN's thumbnail paths use; "" when the ID has no number.
+func videoNumber(id string) string {
+	i := 0
+	for i < len(id) && (id[i] < '0' || id[i] > '9') {
+		i++
+	}
+	j := i
+	for j < len(id) && id[j] >= '0' && id[j] <= '9' {
+		j++
+	}
+	if i == j {
+		return ""
+	}
+	return id[i:j]
+}
+
+// isSafeID reports whether id has only letters, digits, hyphens and
+// underscores: the shape CDN video IDs have, safe as a file name.
+func isSafeID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Mylist) readSaved() ([]SavedMylist, error) {
@@ -253,17 +538,9 @@ func (m *Mylist) writeSaved(saved []SavedMylist) error {
 }
 
 func (m *Mylist) fetchPage(id string, page int) (MylistPage, error) {
-	req, err := http.NewRequest(http.MethodGet,
-		fmt.Sprintf("%s/mylists/%s?pageSize=%d&page=%d", m.baseURL, id, mylistPageSize, page), nil)
+	resp, err := m.mylistRequest(id, page)
 	if err != nil {
-		return MylistPage{}, errors.New("マイリストの取得に失敗しました")
-	}
-	req.Header.Set("X-Frontend-ID", "6")
-	req.Header.Set("X-Frontend-Version", "0")
-	req.Header.Set("User-Agent", mylistUserAgent)
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return MylistPage{}, errors.New("マイリストの取得に失敗しました（通信エラー）")
+		return MylistPage{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -279,9 +556,49 @@ func (m *Mylist) fetchPage(id string, page int) (MylistPage, error) {
 	return mapMylistPage(id, body)
 }
 
+// mylistRequest sends one page request, waiting out one Retry-After when the
+// API asks to slow down. A second refusal returns, so a busy API does not
+// hold the caller any longer.
+func (m *Mylist) mylistRequest(id string, page int) (*http.Response, error) {
+	rawURL := fmt.Sprintf("%s/mylists/%s?pageSize=%d&page=%d", m.baseURL, id, mylistPageSize, page)
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, errors.New("マイリストの取得に失敗しました")
+		}
+		req.Header.Set("X-Frontend-ID", "6")
+		req.Header.Set("X-Frontend-Version", "0")
+		req.Header.Set("User-Agent", mylistUserAgent)
+		resp, err := m.client.Do(req)
+		if err != nil {
+			return nil, errors.New("マイリストの取得に失敗しました（通信エラー）")
+		}
+		busy := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable
+		if !busy || attempt > 0 {
+			return resp, nil
+		}
+		wait := retryAfter(resp)
+		resp.Body.Close()
+		time.Sleep(wait)
+	}
+}
+
+// retryAfter reads a Retry-After header, in seconds or as an HTTP date, up
+// to retryAfterMax; a missing or unreadable header waits retryAfterDefault.
+func retryAfter(resp *http.Response) time.Duration {
+	value := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if secs, err := strconv.Atoi(value); err == nil && secs >= 0 {
+		return min(time.Duration(secs)*time.Second, retryAfterMax)
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		return min(max(time.Until(when), 0), retryAfterMax)
+	}
+	return retryAfterDefault
+}
+
 // fetchAll fetches every page of the mylist and returns one snapshot: header
 // fields from page 1, all items merged, HasNext cleared. maxMylistPages bounds
-// the loop.
+// the loop, and pageInterval spaces the requests.
 func (m *Mylist) fetchAll(id string) (MylistPage, error) {
 	snapshot := MylistPage{ID: id, Items: []MylistItem{}}
 	for page := 1; page <= maxMylistPages; page++ {
@@ -297,6 +614,9 @@ func (m *Mylist) fetchAll(id string) (MylistPage, error) {
 		if !p.HasNext {
 			break
 		}
+		if m.pageInterval > 0 {
+			time.Sleep(m.pageInterval)
+		}
 	}
 	snapshot.HasNext = false
 	return snapshot, nil
@@ -308,6 +628,9 @@ func mylistHTTPError(status int) error {
 	}
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		return errors.New("マイリストを表示できません（非公開または利用できない可能性があります。公開マイリストのIDまたはURLを入力してください）")
+	}
+	if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
+		return errors.New("ニコニコが混み合っています。しばらくしてからもう一度お試しください")
 	}
 	return fmt.Errorf("マイリストの取得に失敗しました（HTTP %d）", status)
 }
@@ -341,10 +664,29 @@ type nvapiItem struct {
 }
 
 type nvapiVideo struct {
-	ID       string      `json:"id"`
-	Title    string      `json:"title"`
-	Duration int         `json:"duration"`
-	Owner    *nvapiOwner `json:"owner"`
+	ID        string          `json:"id"`
+	Title     string          `json:"title"`
+	Duration  int             `json:"duration"`
+	Owner     *nvapiOwner     `json:"owner"`
+	Thumbnail *nvapiThumbnail `json:"thumbnail"`
+}
+
+type nvapiThumbnail struct {
+	URL       string `json:"url"`
+	MiddleURL string `json:"middleUrl"`
+}
+
+// nvapiThumbBase picks the extension-less thumbnail URL of an entry: the
+// .M and .L sized pictures are asked for by suffix. Older entries carry
+// only a middleUrl.
+func nvapiThumbBase(t *nvapiThumbnail) string {
+	if t == nil {
+		return ""
+	}
+	if t.URL != "" {
+		return t.URL
+	}
+	return strings.TrimSuffix(t.MiddleURL, ".M")
 }
 
 func mapMylistPage(id string, body []byte) (MylistPage, error) {
@@ -377,6 +719,7 @@ func mapMylistPage(id string, body []byte) (MylistPage, error) {
 			item.VideoID = it.Video.ID
 			item.Title = it.Video.Title
 			item.Duration = it.Video.Duration
+			item.ThumbURL = nvapiThumbBase(it.Video.Thumbnail)
 			if it.Video.Owner != nil {
 				item.Uploader = it.Video.Owner.Name
 			}

@@ -65,6 +65,10 @@ type nativeApp struct {
 	playerSession   string
 	playerSequence  uint64
 	pendingAdvance  bool
+
+	thumbs    map[string]*ui.Bitmap
+	thumbBusy map[string]bool
+	thumbFail map[string]bool
 }
 
 func newNativeApp(mylist *Mylist) *nativeApp {
@@ -83,7 +87,15 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	t.Focus = ui.Hex("#f29bc1")
 	t.Radius = 8
 	t.Spacing = 4
-	return &nativeApp{mylist: mylist, theme: t, sidebarOpen: true, player: PlayerReport{Volume: 1}}
+	return &nativeApp{
+		mylist:      mylist,
+		theme:       t,
+		sidebarOpen: true,
+		player:      PlayerReport{Volume: 1},
+		thumbs:      map[string]*ui.Bitmap{},
+		thumbBusy:   map[string]bool{},
+		thumbFail:   map[string]bool{},
+	}
 }
 
 func (app *nativeApp) view(c *ui.Context) {
@@ -206,6 +218,7 @@ func (app *nativeApp) content(c *ui.Context) {
 		app.listHeader(c)
 		ui.Row(c).Gap(14).Justify(ui.Start).Padding(10, 12).Children(func() {
 			ui.Text(c, "#").Width(28).FontSize(12).TextColor(app.theme.TextMuted)
+			ui.Box(c).Width(64).Shrink(0)
 			ui.Text(c, "曲名 / 投稿者").FontSize(12).TextColor(app.theme.TextMuted)
 			ui.Spacer(c).Grow(1)
 			ui.Text(c, "時間").Width(54).FontSize(12).TextAlign(ui.End).TextColor(app.theme.TextMuted)
@@ -287,6 +300,7 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		row.Children(func() {
 			ui.Row(c).Gap(14).AlignItems(ui.Center).Justify(ui.Start).FillWidth().Children(func() {
 				ui.Text(c, fmt.Sprintf("%02d", i+1)).Width(28).FontSize(12).TextColor(app.theme.TextMuted)
+				app.thumbnail(c, item, 64, 48)
 				ui.Column(c).Gap(3).Justify(ui.Start).AlignItems(ui.Start).Children(func() {
 					ui.Text(c, label).FontSize(14).Bold().SingleLine().Ellipsis("…")
 					if playable && item.Uploader != "" {
@@ -310,6 +324,76 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 	}
 }
 
+// maxThumbsInMemory caps the decoded pictures kept in memory; at the cap
+// the whole map is dropped and pictures reload from the disk cache as rows
+// ask again.
+const maxThumbsInMemory = 300
+
+// thumbnail shows one video's picture at a fixed size, or its placeholder
+// box until the picture arrives. The fixed size keeps rows still, and the
+// picture is loaded in the background.
+func (app *nativeApp) thumbnail(c *ui.Context, item MylistItem, w, h float32) {
+	if bitmap := app.thumbs[item.WatchID]; bitmap != nil {
+		ui.Image(c, bitmap).Size(w, h).Fit(ui.Cover).Radius(4).Shrink(0)
+		return
+	}
+	if item.Available {
+		app.requestThumbnail(item)
+	}
+	ui.Box(c).Size(w, h).Radius(4).Shrink(0).Background(app.theme.SurfaceHover)
+}
+
+// requestThumbnail loads item's picture in the background: the memory
+// cache, the disk cache, then the CDN. Loads of one video collapse into one
+// goroutine, and a failure is remembered until the list is loaded anew.
+func (app *nativeApp) requestThumbnail(item MylistItem) {
+	if app.window == nil || item.WatchID == "" || app.thumbBusy[item.WatchID] || app.thumbFail[item.WatchID] {
+		return
+	}
+	if len(app.thumbs) >= maxThumbsInMemory {
+		// ponytail: drop the whole memory cache at the cap; pictures reload from
+		// the disk cache, so an LRU can wait for a profile that asks for it.
+		app.thumbs = map[string]*ui.Bitmap{}
+	}
+	app.thumbBusy[item.WatchID] = true
+	watchID, thumbURL := item.WatchID, item.ThumbURL
+	go func() {
+		body, err := app.mylist.Thumbnail(watchID, thumbURL)
+		if err != nil {
+			app.window.Update(func() {
+				delete(app.thumbBusy, watchID)
+				app.thumbFail[watchID] = true
+			})
+			return
+		}
+		app.window.Update(func() {
+			delete(app.thumbBusy, watchID)
+			bitmap, err := ui.DecodeBitmap(body)
+			if err != nil || !thumbSizeOK(bitmap) {
+				app.thumbFail[watchID] = true
+				return
+			}
+			app.thumbs[watchID] = bitmap
+		})
+	}()
+}
+
+// thumbSizeOK rejects absurd pictures, so neither a corrupt cache file nor
+// a strange server response becomes a giant texture.
+func thumbSizeOK(b *ui.Bitmap) bool {
+	if b == nil {
+		return false
+	}
+	w, h := b.Size()
+	return w > 0 && h > 0 && w <= 2048 && h <= 2048
+}
+
+// resetThumbFailures lets pictures that once failed try again, after the
+// list was loaded anew.
+func (app *nativeApp) resetThumbFailures() {
+	app.thumbFail = map[string]bool{}
+}
+
 func (app *nativeApp) playerBar(c *ui.Context) {
 	ui.Column(c).Padding(14, 22, 16).Gap(8).Background(app.theme.Surface).
 		BorderWidth(1, 0, 0, 0).BorderColor(app.theme.Border).Children(func() {
@@ -326,11 +410,15 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			ui.Text(c, formatMillis(app.player.DurationMS)).Width(42).FontSize(11).TextAlign(ui.End).TextColor(app.theme.TextMuted)
 		})
 		ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
-			ui.Column(c).Width(220).Gap(3).Children(func() {
+			ui.Row(c).Width(320).Gap(10).AlignItems(ui.Center).Children(func() {
 				if item := app.currentTrack(); item != nil {
-					ui.Text(c, item.Title).FontSize(14).Bold().SingleLine().Ellipsis("…")
-					ui.Text(c, item.Uploader).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
+					app.thumbnail(c, *item, 48, 36)
+					ui.Column(c).Grow(1).Gap(3).Children(func() {
+						ui.Text(c, item.Title).FontSize(14).Bold().SingleLine().Ellipsis("…")
+						ui.Text(c, item.Uploader).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
+					})
 				} else {
+					ui.Box(c).Size(48, 36).Shrink(0)
 					ui.Text(c, "再生する曲を選んでください").FontSize(13).TextColor(app.theme.TextMuted)
 				}
 			})
@@ -455,6 +543,7 @@ func (app *nativeApp) openSaved(id string) {
 		app.page = &page
 		app.nextPage = 1
 		app.hasMore = false
+		app.resetThumbFailures()
 		app.setStatus("保存内容から表示中（更新するまで通信しません）")
 		app.resetPlayerState()
 		app.sendPlayer(PlayerCommand{Action: "setItems", Items: page.Items})
@@ -495,6 +584,7 @@ func (app *nativeApp) lookup() {
 			app.page = &page
 			app.nextPage = 2
 			app.hasMore = page.HasNext
+			app.resetThumbFailures()
 			app.setStatus("")
 			app.sendPlayer(PlayerCommand{Action: "setItems", Items: page.Items})
 		})
@@ -525,6 +615,7 @@ func (app *nativeApp) loadMore() {
 			app.nextPage++
 			app.hasMore = page.HasNext
 			app.page.HasNext = page.HasNext
+			app.resetThumbFailures()
 			app.setStatus("")
 			app.sendPlayer(PlayerCommand{Action: "appendItems", Items: page.Items})
 		})
@@ -602,6 +693,7 @@ func (app *nativeApp) saveEntry(id, name string) {
 					app.page = &page
 					app.nextPage = 1
 					app.hasMore = false
+					app.resetThumbFailures()
 					app.sendPlayer(PlayerCommand{Action: "replaceItems", Items: page.Items})
 				}
 			}

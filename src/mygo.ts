@@ -16,6 +16,13 @@ export interface MylistItem {
   title?: string;
   uploader?: string;
   duration?: number;
+  /**
+   * ThumbURL is the extension-less picture URL the mylist API gives, kept
+   * with the item so saved snapshots show pictures without a refresh.
+   * Videos have one only when the API knew them; entries saved before
+   * this field existed fall back to a URL derived from the watch ID.
+   */
+  thumbnailUrl?: string;
 }
 
 /** MylistPage is one page of public mylist metadata. */
@@ -109,6 +116,16 @@ export const Mylist = {
    */
   saveMylist(input: string, name: string): Promise<SavedMylist[]> {
     return call("Mylist.SaveMylist", input, name);
+  },
+  /**
+   * Thumbnail returns the picture of the video at watchID: the disk cache
+   * when it has one, the picture at thumbURL fetched and cached otherwise.
+   * Empty thumbURL comes from entries saved before pictures were kept, where
+   * the CDN's own URL shape is derived from the watch ID. Fetches only ever
+   * go to the thumbnail CDN.
+   */
+  thumbnail(watchID: string, thumbURL: string): Promise<string> {
+    return call("Mylist.Thumbnail", watchID, thumbURL);
   },
 } as const;
 
