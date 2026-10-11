@@ -409,8 +409,36 @@ func TestThumbnailCandidates(t *testing.T) {
 	if got := m.thumbnailCandidates("sm1", "https://example.com/a/b"); !slices.Equal(got, want) {
 		t.Errorf("stored candidates = %q; want %q", got, want)
 	}
+	// A URL that already names a file, and carries a query as the
+	// deleted-video placeholder does, is used as it is.
+	deleted := "https://resource.video.nimg.jp/web/img/common/video_deleted.jpg?_t=20181018"
+	if got := m.thumbnailCandidates("sm1", deleted); !slices.Equal(got, []string{deleted}) {
+		t.Errorf("file-named candidates = %q; want just the URL", got)
+	}
 	if got := m.thumbnailCandidates("lv", ""); got != nil {
 		t.Errorf("candidates without a number = %q; want none", got)
+	}
+}
+
+func TestThumbHostAllowed(t *testing.T) {
+	m := &Mylist{}
+	for _, host := range []string{"nicovideo.cdn.nimg.jp", "resource.video.nimg.jp", "img.cdn.nimg.jp", "nimg.jp", "NICOVIDEO.CDN.NIMG.JP"} {
+		if !m.thumbHostAllowed(host) {
+			t.Errorf("thumbHostAllowed(%q) = false; want true", host)
+		}
+	}
+	for _, host := range []string{"example.com", "nimg.jp.evil.example", "evil-nimg.jp", "xnimg.jp", "", "127.0.0.1:8443"} {
+		if m.thumbHostAllowed(host) {
+			t.Errorf("thumbHostAllowed(%q) = true; want false", host)
+		}
+	}
+	// A test override allows its own server only.
+	override := &Mylist{thumbHost: "127.0.0.1:8443"}
+	if !override.thumbHostAllowed("127.0.0.1:8443") {
+		t.Error("the test host must be allowed")
+	}
+	if override.thumbHostAllowed("resource.video.nimg.jp") {
+		t.Error("a test override must not allow the live CDN")
 	}
 }
 
@@ -550,6 +578,29 @@ func TestThumbnailRejectsUntrustedResponses(t *testing.T) {
 	}
 	if _, err := m.Thumbnail("sm1", "https://"+host+"/big"); err == nil {
 		t.Error("an oversized response must be rejected")
+	}
+}
+
+func TestThumbnailFetchesFileNamedURL(t *testing.T) {
+	var hits int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("deleted-picture"))
+	}))
+	t.Cleanup(srv.Close)
+	host := srv.Listener.Addr().String()
+	m := &Mylist{client: srv.Client(), configDir: t.TempDir(), thumbHost: host}
+
+	// A URL that names a jpg with a query, as the API's deleted-video
+	// placeholder does, is fetched once and as it is.
+	picture := "https://" + host + "/web/img/common/video_deleted.jpg?_t=20181018"
+	got, err := m.Thumbnail("sm1", picture)
+	if err != nil || string(got) != "deleted-picture" {
+		t.Fatalf("Thumbnail() = %q, %v; want the placeholder picture", got, err)
+	}
+	if n := atomic.LoadInt32(&hits); n != 1 {
+		t.Errorf("requests = %d; want the file-named URL fetched as it is", n)
 	}
 }
 

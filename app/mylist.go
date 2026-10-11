@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,9 +19,11 @@ import (
 const (
 	// nvapiBaseURL is the only host this app fetches mylist metadata from.
 	nvapiBaseURL = "https://nvapi.nicovideo.jp/v2"
-	// thumbnailCDNHost is the only host this app fetches thumbnail pictures
-	// from, whether the URL comes from the API or is derived from a watch ID.
+	// thumbnailCDNHost is the host this app derives picture URLs from.
 	thumbnailCDNHost = "nicovideo.cdn.nimg.jp"
+	// thumbnailImageDomain is nicovideo's image domain: the only domain
+	// pictures are ever fetched from, however the API names their host.
+	thumbnailImageDomain = "nimg.jp"
 	// maxThumbBody bounds a thumbnail image response and the disk cache file.
 	maxThumbBody = 1 << 20
 	// Thumbnail fetches are spaced and bounded: at most thumbConcurrency run
@@ -389,9 +392,11 @@ func writeThumbFile(path string, body []byte) {
 }
 
 // thumbnailCandidates returns the URLs to try for one video: the 240x180
-// .M picture before the smaller fallback older entries have. A stored URL
-// comes from the mylist API; without one the URL shape the CDN advertises
-// is derived from the video number.
+// .M picture before the smaller fallback older entries have. Only the CDN's
+// extension-less picture URLs take the .M size; a URL that already names a
+// file, as the deleted-video placeholder does, is used as it is. A stored
+// URL comes from the mylist API; without one the URL shape the CDN
+// advertises is derived from the video number.
 func (m *Mylist) thumbnailCandidates(watchID, thumbURL string) []string {
 	base := thumbURL
 	if base == "" {
@@ -402,11 +407,14 @@ func (m *Mylist) thumbnailCandidates(watchID, thumbURL string) []string {
 	if base == "" {
 		return nil
 	}
+	if u, err := url.Parse(base); err != nil || u.RawQuery != "" || strings.Contains(path.Base(u.Path), ".") {
+		return []string{base}
+	}
 	return []string{base + ".M", base}
 }
 
-// thumbHostName is the only host pictures are fetched from: the CDN, or the
-// test server when a test set the field.
+// thumbHostName is the host derived picture URLs are built from: the CDN,
+// or the test server when a test set the field.
 func (m *Mylist) thumbHostName() string {
 	if m.thumbHost != "" {
 		return m.thumbHost
@@ -414,9 +422,21 @@ func (m *Mylist) thumbHostName() string {
 	return thumbnailCDNHost
 }
 
+// thumbHostAllowed reports whether a picture URL's host may be fetched:
+// nicovideo's image domain, whose subdomains the API uses for pictures and
+// for the deleted-video placeholder, or the test server when tests set the
+// field. Every other host is never contacted.
+func (m *Mylist) thumbHostAllowed(host string) bool {
+	host = strings.ToLower(host)
+	if m.thumbHost != "" {
+		return host == strings.ToLower(m.thumbHost)
+	}
+	return host == thumbnailImageDomain || strings.HasSuffix(host, "."+thumbnailImageDomain)
+}
+
 func (m *Mylist) fetchThumbnail(rawURL string) ([]byte, error) {
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Scheme != "https" || u.Host != m.thumbHostName() {
+	if err != nil || u.Scheme != "https" || !m.thumbHostAllowed(u.Host) {
 		return nil, errors.New("サムネイルの取得先が不正です")
 	}
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
