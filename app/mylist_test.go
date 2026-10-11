@@ -398,22 +398,26 @@ func TestMapMylistPageThumbnailURLs(t *testing.T) {
 
 func TestThumbnailCandidates(t *testing.T) {
 	m := &Mylist{}
-	want := []string{
-		"https://nicovideo.cdn.nimg.jp/thumbnails/27718606/27718606.M",
-		"https://nicovideo.cdn.nimg.jp/thumbnails/27718606/27718606",
-	}
+	// A derived URL takes the .M size.
+	derived := "https://nicovideo.cdn.nimg.jp/thumbnails/27718606/27718606"
+	want := []string{derived + ".M", derived}
 	if got := m.thumbnailCandidates("sm27718606", ""); !slices.Equal(got, want) {
 		t.Errorf("derived candidates = %q; want %q", got, want)
 	}
-	want = []string{"https://example.com/a/b.M", "https://example.com/a/b"}
-	if got := m.thumbnailCandidates("sm1", "https://example.com/a/b"); !slices.Equal(got, want) {
-		t.Errorf("stored candidates = %q; want %q", got, want)
+	// So does the API's own URL, version hash and all.
+	hashed := "https://nicovideo.cdn.nimg.jp/thumbnails/42448221/42448221.86845938"
+	want = []string{hashed + ".M", hashed}
+	if got := m.thumbnailCandidates("sm42448221", hashed); !slices.Equal(got, want) {
+		t.Errorf("hashed candidates = %q; want %q", got, want)
 	}
-	// A URL that already names a file, and carries a query as the
-	// deleted-video placeholder does, is used as it is.
+	// A URL of another shape is used as it is.
 	deleted := "https://resource.video.nimg.jp/web/img/common/video_deleted.jpg?_t=20181018"
 	if got := m.thumbnailCandidates("sm1", deleted); !slices.Equal(got, []string{deleted}) {
-		t.Errorf("file-named candidates = %q; want just the URL", got)
+		t.Errorf("deleted candidates = %q; want just the URL", got)
+	}
+	foreign := "https://example.com/a/b"
+	if got := m.thumbnailCandidates("sm1", foreign); !slices.Equal(got, []string{foreign}) {
+		t.Errorf("foreign candidates = %q; want just the URL", got)
 	}
 	if got := m.thumbnailCandidates("lv", ""); got != nil {
 		t.Errorf("candidates without a number = %q; want none", got)
@@ -501,28 +505,91 @@ func TestThumbnailCachesToDisk(t *testing.T) {
 	}
 }
 
-func TestThumbnailFallsBackToSmallPicture(t *testing.T) {
+func TestThumbnailPrefersMiddleSizeForHashedURL(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, ".M") {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		if !strings.HasSuffix(r.URL.Path, ".M") {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write([]byte("small-picture"))
+		_, _ = w.Write([]byte("middle-picture"))
 	}))
 	t.Cleanup(srv.Close)
 	host := srv.Listener.Addr().String()
 	m := &Mylist{client: srv.Client(), configDir: t.TempDir(), thumbHost: host}
-	base := "https://" + host + "/thumbnails/9/9"
 
-	got, err := m.Thumbnail("sm9", base)
-	if err != nil || string(got) != "small-picture" {
-		t.Fatalf("Thumbnail() = %q, %v; want the small fallback picture", got, err)
+	// The API names the small picture under a version hash; the .M size is
+	// that same URL with .M appended.
+	base := "https://" + host + "/thumbnails/42448221/42448221.86845938"
+	got, err := m.Thumbnail("sm42448221", base)
+	if err != nil || string(got) != "middle-picture" {
+		t.Fatalf("Thumbnail() = %q, %v; want the .M picture", got, err)
 	}
-	// The fallback picture is cached like any other.
-	if got, err = m.Thumbnail("sm9", base); err != nil || string(got) != "small-picture" {
-		t.Fatalf("cached Thumbnail() = %q, %v; want the small fallback picture", got, err)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) != 1 || paths[0] != "/thumbnails/42448221/42448221.86845938.M" {
+		t.Errorf("requested %v; want the hashed .M picture first", paths)
 	}
+}
+
+func TestThumbnailFallsBackOnlyWhenMissing(t *testing.T) {
+	t.Run("a 404 falls back to the small picture and caches it", func(t *testing.T) {
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, ".M") {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write([]byte("small-picture"))
+		}))
+		t.Cleanup(srv.Close)
+		host := srv.Listener.Addr().String()
+		m := &Mylist{client: srv.Client(), configDir: t.TempDir(), thumbHost: host}
+
+		got, err := m.Thumbnail("sm9", "https://"+host+"/thumbnails/9/9")
+		if err != nil || string(got) != "small-picture" {
+			t.Fatalf("Thumbnail() = %q, %v; want the small picture", got, err)
+		}
+		if !m.HasThumbnail("sm9") {
+			t.Error("the fallback picture must be cached")
+		}
+	})
+
+	t.Run("a server error keeps the lesser picture out of the cache", func(t *testing.T) {
+		var mu sync.Mutex
+		var paths []string
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			paths = append(paths, r.URL.Path)
+			mu.Unlock()
+			if strings.HasSuffix(r.URL.Path, ".M") {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write([]byte("small-picture"))
+		}))
+		t.Cleanup(srv.Close)
+		host := srv.Listener.Addr().String()
+		m := &Mylist{client: srv.Client(), configDir: t.TempDir(), thumbHost: host}
+
+		if _, err := m.Thumbnail("sm9", "https://"+host+"/thumbnails/9/9"); err == nil {
+			t.Fatal("Thumbnail() = nil error; want the server error")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(paths) != 1 {
+			t.Errorf("requested %v; want only the .M attempt", paths)
+		}
+		if m.HasThumbnail("sm9") {
+			t.Error("a temporary failure must not cache a lesser picture")
+		}
+	})
 }
 
 func TestThumbnailDerivesURLForOldSnapshots(t *testing.T) {
@@ -601,6 +668,26 @@ func TestThumbnailFetchesFileNamedURL(t *testing.T) {
 	}
 	if n := atomic.LoadInt32(&hits); n != 1 {
 		t.Errorf("requests = %d; want the file-named URL fetched as it is", n)
+	}
+}
+
+func TestHasThumbnail(t *testing.T) {
+	dir := t.TempDir()
+	m := &Mylist{configDir: dir}
+	if m.HasThumbnail("sm1") {
+		t.Error("HasThumbnail before a fetch = true; want false")
+	}
+	if m.HasThumbnail("bad/../id") {
+		t.Error("HasThumbnail of an unsafe ID = true; want false")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "thumbs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "thumbs", "sm1.jpg"), []byte("picture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !m.HasThumbnail("sm1") {
+		t.Error("HasThumbnail with the cache file in place = false; want true")
 	}
 }
 

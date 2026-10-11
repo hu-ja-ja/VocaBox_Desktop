@@ -69,6 +69,10 @@ type nativeApp struct {
 	thumbs    map[string]*ui.Bitmap
 	thumbBusy map[string]bool
 	thumbFail map[string]bool
+	// fillQueue holds the entries of the loaded list whose pictures are not
+	// cached yet; the view fills them one at a time in the background.
+	fillQueue  []MylistItem
+	fillActive bool
 }
 
 func newNativeApp(mylist *Mylist) *nativeApp {
@@ -215,10 +219,11 @@ func (app *nativeApp) content(c *ui.Context) {
 			return
 		}
 
+		app.pumpThumbnailFill()
 		app.listHeader(c)
 		ui.Row(c).Gap(14).Justify(ui.Start).Padding(10, 12).Children(func() {
 			ui.Text(c, "#").Width(28).FontSize(12).TextColor(app.theme.TextMuted)
-			ui.Box(c).Width(64).Shrink(0)
+			ui.Box(c).Width(thumbSlotWidth(thumbRowHeight, 0)).Shrink(0)
 			ui.Text(c, "曲名 / 投稿者").FontSize(12).TextColor(app.theme.TextMuted)
 			ui.Spacer(c).Grow(1)
 			ui.Text(c, "時間").Width(54).FontSize(12).TextAlign(ui.End).TextColor(app.theme.TextMuted)
@@ -300,7 +305,7 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		row.Children(func() {
 			ui.Row(c).Gap(14).AlignItems(ui.Center).Justify(ui.Start).FillWidth().Children(func() {
 				ui.Text(c, fmt.Sprintf("%02d", i+1)).Width(28).FontSize(12).TextColor(app.theme.TextMuted)
-				app.thumbnail(c, item, 64, 48)
+				app.thumbnail(c, item, thumbRowHeight)
 				ui.Column(c).Gap(3).Justify(ui.Start).AlignItems(ui.Start).Children(func() {
 					ui.Text(c, label).FontSize(14).Bold().SingleLine().Ellipsis("…")
 					if playable && item.Uploader != "" {
@@ -329,18 +334,105 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 // ask again.
 const maxThumbsInMemory = 300
 
-// thumbnail shows one video's picture at a fixed size, or its placeholder
-// box until the picture arrives. The fixed size keeps rows still, and the
-// picture is loaded in the background.
-func (app *nativeApp) thumbnail(c *ui.Context, item MylistItem, w, h float32) {
-	if bitmap := app.thumbs[item.WatchID]; bitmap != nil {
-		ui.Image(c, bitmap).Size(w, h).Fit(ui.Cover).Radius(4).Shrink(0)
-		return
-	}
-	if item.Available {
+// Picture sizes: a row and the player bar fix the height, and the width
+// follows each picture's own aspect ratio.
+const (
+	thumbRowHeight = 45
+	thumbBarHeight = 36
+)
+
+// thumbnail shows one video's picture with a fixed height and a width that
+// follows the picture's aspect ratio, inside a slot that keeps titles lined
+// up however narrow the picture is.
+func (app *nativeApp) thumbnail(c *ui.Context, item MylistItem, h float32) {
+	bitmap := app.thumbs[item.WatchID]
+	width := thumbWidth(h, 0, 0)
+	if bitmap != nil {
+		w, hh := bitmap.Size()
+		width = thumbWidth(h, w, hh)
+	} else if item.Available {
 		app.requestThumbnail(item)
 	}
-	ui.Box(c).Size(w, h).Radius(4).Shrink(0).Background(app.theme.SurfaceHover)
+	ui.Row(c).Width(thumbSlotWidth(h, width)).Shrink(0).Children(func() {
+		if bitmap != nil {
+			ui.Image(c, bitmap).Size(width, h).Fit(ui.Cover).Radius(4).Shrink(0)
+		} else {
+			ui.Box(c).Size(width, h).Radius(4).Shrink(0).Background(app.theme.SurfaceHover)
+		}
+		ui.Spacer(c).Grow(1)
+	})
+}
+
+// thumbWidth returns how wide a picture shows at height h: its own aspect
+// ratio, 16:9 for a picture whose size is not known.
+func thumbWidth(h float32, w, hh int) float32 {
+	if w <= 0 || hh <= 0 {
+		return h * 16 / 9
+	}
+	return h * float32(w) / float32(hh)
+}
+
+// thumbSlotSlack is the room a slot keeps past the usual 16:9 picture, so a
+// picture a little wider than 16:9 does not move the title either.
+const thumbSlotSlack = 8
+
+// thumbSlotWidth returns the width of the slot a picture of width w at
+// height h sits in: the usual 16:9 width plus thumbSlotSlack, or the
+// picture's own width when that is wider, so a wider picture takes the room
+// it needs instead of being squeezed.
+func thumbSlotWidth(h, w float32) float32 {
+	return max(w, h*16/9+thumbSlotSlack)
+}
+
+// queueThumbnailFill schedules the pictures of a loaded list to be cached in
+// the background, so a list refreshed or reopened gains its pictures without
+// every row having to be scrolled into view.
+func (app *nativeApp) queueThumbnailFill(items []MylistItem) {
+	app.fillQueue = append(app.fillQueue, items...)
+}
+
+// pumpThumbnailFill caches the next missing picture of the queued list, one
+// load at a time, as the view builds. Keeping to one load keeps the shared
+// limiter's queue short, so a row the user scrolls to is never stuck behind
+// the whole list.
+func (app *nativeApp) pumpThumbnailFill() {
+	if app.window == nil || app.fillActive {
+		return
+	}
+	for len(app.fillQueue) > 0 {
+		item := app.fillQueue[0]
+		app.fillQueue = app.fillQueue[1:]
+		if !app.needsThumbnail(item) {
+			continue
+		}
+		app.fillActive = true
+		app.fillThumbnail(item)
+		return
+	}
+}
+
+// needsThumbnail reports whether item's picture still has to be cached.
+func (app *nativeApp) needsThumbnail(item MylistItem) bool {
+	return item.WatchID != "" && item.Available &&
+		!app.thumbFail[item.WatchID] && !app.thumbBusy[item.WatchID] &&
+		app.thumbs[item.WatchID] == nil && !app.mylist.HasThumbnail(item.WatchID)
+}
+
+// fillThumbnail caches one picture on disk without decoding it: a row that
+// shows it later reads the disk cache.
+func (app *nativeApp) fillThumbnail(item MylistItem) {
+	app.thumbBusy[item.WatchID] = true
+	watchID, thumbURL := item.WatchID, item.ThumbURL
+	go func() {
+		_, err := app.mylist.Thumbnail(watchID, thumbURL)
+		app.window.Update(func() {
+			app.fillActive = false
+			delete(app.thumbBusy, watchID)
+			if err != nil {
+				app.thumbFail[watchID] = true
+			}
+		})
+	}()
 }
 
 // requestThumbnail loads item's picture in the background: the memory
@@ -412,13 +504,13 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 		ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
 			ui.Row(c).Width(320).Gap(10).AlignItems(ui.Center).Children(func() {
 				if item := app.currentTrack(); item != nil {
-					app.thumbnail(c, *item, 48, 36)
+					app.thumbnail(c, *item, thumbBarHeight)
 					ui.Column(c).Grow(1).Gap(3).Children(func() {
 						ui.Text(c, item.Title).FontSize(14).Bold().SingleLine().Ellipsis("…")
 						ui.Text(c, item.Uploader).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
 					})
 				} else {
-					ui.Box(c).Size(48, 36).Shrink(0)
+					ui.Box(c).Size(thumbSlotWidth(thumbBarHeight, 0), thumbBarHeight).Shrink(0)
 					ui.Text(c, "再生する曲を選んでください").FontSize(13).TextColor(app.theme.TextMuted)
 				}
 			})
@@ -544,6 +636,7 @@ func (app *nativeApp) openSaved(id string) {
 		app.nextPage = 1
 		app.hasMore = false
 		app.resetThumbFailures()
+		app.queueThumbnailFill(page.Items)
 		app.setStatus("保存内容から表示中（更新するまで通信しません）")
 		app.resetPlayerState()
 		app.sendPlayer(PlayerCommand{Action: "setItems", Items: page.Items})
@@ -585,6 +678,7 @@ func (app *nativeApp) lookup() {
 			app.nextPage = 2
 			app.hasMore = page.HasNext
 			app.resetThumbFailures()
+			app.queueThumbnailFill(page.Items)
 			app.setStatus("")
 			app.sendPlayer(PlayerCommand{Action: "setItems", Items: page.Items})
 		})
@@ -616,6 +710,7 @@ func (app *nativeApp) loadMore() {
 			app.hasMore = page.HasNext
 			app.page.HasNext = page.HasNext
 			app.resetThumbFailures()
+			app.queueThumbnailFill(page.Items)
 			app.setStatus("")
 			app.sendPlayer(PlayerCommand{Action: "appendItems", Items: page.Items})
 		})
@@ -694,6 +789,7 @@ func (app *nativeApp) saveEntry(id, name string) {
 					app.nextPage = 1
 					app.hasMore = false
 					app.resetThumbFailures()
+					app.queueThumbnailFill(page.Items)
 					app.sendPlayer(PlayerCommand{Action: "replaceItems", Items: page.Items})
 				}
 			}

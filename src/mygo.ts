@@ -95,6 +95,13 @@ export const Mylist = {
     return call("Mylist.GetPage", input, page);
   },
   /**
+   * HasThumbnail reports whether the picture of watchID is already in the
+   * disk cache.
+   */
+  hasThumbnail(watchID: string): Promise<boolean> {
+    return call("Mylist.HasThumbnail", watchID);
+  },
+  /**
    * ListSaved returns saved public-mylist snapshots, oldest first. A missing
    * file means none saved yet.
    */
@@ -121,8 +128,8 @@ export const Mylist = {
    * Thumbnail returns the picture of the video at watchID: the disk cache
    * when it has one, the picture at thumbURL fetched and cached otherwise.
    * Empty thumbURL comes from entries saved before pictures were kept, where
-   * the CDN's own URL shape is derived from the watch ID. Fetches only ever
-   * go to the thumbnail CDN.
+   * the CDN's own URL shape is derived from the watch ID. Pictures are only
+   * ever fetched from nicovideo's image domain.
    */
   thumbnail(watchID: string, thumbURL: string): Promise<string> {
     return call("Mylist.Thumbnail", watchID, thumbURL);

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -250,8 +249,8 @@ func (m *Mylist) configPath(name string) (string, error) {
 // Thumbnail returns the picture of the video at watchID: the disk cache
 // when it has one, the picture at thumbURL fetched and cached otherwise.
 // Empty thumbURL comes from entries saved before pictures were kept, where
-// the CDN's own URL shape is derived from the watch ID. Fetches only ever
-// go to the thumbnail CDN.
+// the CDN's own URL shape is derived from the watch ID. Pictures are only
+// ever fetched from nicovideo's image domain.
 func (m *Mylist) Thumbnail(watchID, thumbURL string) ([]byte, error) {
 	cache, cacheOK := m.thumbCachePath(watchID)
 	if cacheOK {
@@ -262,19 +261,19 @@ func (m *Mylist) Thumbnail(watchID, thumbURL string) ([]byte, error) {
 	var lastErr error
 	for _, u := range m.thumbnailCandidates(watchID, thumbURL) {
 		body, err := m.fetchThumbnail(u)
-		if err != nil {
-			lastErr = err
-			if errors.Is(err, errThumbPaused) {
-				// The CDN asked to slow down: another candidate URL would only
-				// ask again.
-				break
+		if err == nil {
+			if cacheOK {
+				writeThumbFile(cache, body)
 			}
-			continue
+			return body, nil
 		}
-		if cacheOK {
-			writeThumbFile(cache, body)
+		lastErr = err
+		if !errors.Is(err, errThumbMissing) {
+			// Only a picture the CDN genuinely does not have moves on to the
+			// smaller sibling. A temporary failure, or a 429 that paused the
+			// fetches, must leave no lesser picture cached in its place.
+			break
 		}
-		return body, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("サムネイルがありません")
@@ -285,6 +284,10 @@ func (m *Mylist) Thumbnail(watchID, thumbURL string) ([]byte, error) {
 // errThumbPaused reports the CDN rate limiting: the limiter has paused every
 // fetch, and the caller should stop rather than try another URL.
 var errThumbPaused = errors.New("ニコニコが混み合っています。しばらくしてからもう一度お試しください")
+
+// errThumbMissing reports the CDN has no picture at a URL, as an older video
+// has no .M size: the caller may move on to the URL's smaller sibling.
+var errThumbMissing = errors.New("サムネイルが見つかりません")
 
 // thumbnailLimiter bounds how fast pictures are fetched: at most the slot
 // count run at once, each start at least interval after the last, and a
@@ -336,6 +339,17 @@ func (l *thumbnailLimiter) pausedFor(d time.Duration) {
 	if until := time.Now().Add(d); until.After(l.paused) {
 		l.paused = until
 	}
+}
+
+// HasThumbnail reports whether the picture of watchID is already in the
+// disk cache.
+func (m *Mylist) HasThumbnail(watchID string) bool {
+	path, ok := m.thumbCachePath(watchID)
+	if !ok {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // thumbCachePath returns the disk cache path of watchID's picture, or
@@ -391,12 +405,12 @@ func writeThumbFile(path string, body []byte) {
 	}
 }
 
-// thumbnailCandidates returns the URLs to try for one video: the 240x180
-// .M picture before the smaller fallback older entries have. Only the CDN's
-// extension-less picture URLs take the .M size; a URL that already names a
-// file, as the deleted-video placeholder does, is used as it is. A stored
-// URL comes from the mylist API; without one the URL shape the CDN
-// advertises is derived from the video number.
+// thumbnailCandidates returns the URLs to try for one video: the .M picture
+// before the small one the API's URL names. The CDN asks for sizes by
+// suffix, but its picture URLs are either extension-less or carry a version
+// hash (…/{number}.{hash}), so the path decides: everything under the CDN's
+// /thumbnails/ takes .M, and a URL of any other shape is used as it is (the
+// deleted-video placeholder, for one).
 func (m *Mylist) thumbnailCandidates(watchID, thumbURL string) []string {
 	base := thumbURL
 	if base == "" {
@@ -407,10 +421,20 @@ func (m *Mylist) thumbnailCandidates(watchID, thumbURL string) []string {
 	if base == "" {
 		return nil
 	}
-	if u, err := url.Parse(base); err != nil || u.RawQuery != "" || strings.Contains(path.Base(u.Path), ".") {
+	if !m.isThumbnailCDNURL(base) {
 		return []string{base}
 	}
 	return []string{base + ".M", base}
+}
+
+// isThumbnailCDNURL reports whether rawURL is one of the thumbnail CDN's
+// /thumbnails/ pictures, whose .M and .L sizes are asked for by suffix.
+func (m *Mylist) isThumbnailCDNURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host != m.thumbHostName() {
+		return false
+	}
+	return strings.HasPrefix(u.Path, "/thumbnails/")
 }
 
 // thumbHostName is the host derived picture URLs are built from: the CDN,
@@ -458,6 +482,9 @@ func (m *Mylist) fetchThumbnail(rawURL string) ([]byte, error) {
 			m.thumbLimiter.pausedFor(m.thumbLimiter.cooldown)
 		}
 		return nil, errThumbPaused
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errThumbMissing
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("サムネイルの取得に失敗しました（HTTP %d）", resp.StatusCode)
