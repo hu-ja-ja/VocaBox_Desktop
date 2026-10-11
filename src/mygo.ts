@@ -30,19 +30,25 @@ export interface MylistPage {
 }
 
 /**
- * SavedMylist is one persisted public-mylist reference: ID plus display
- * name. Tracks, credentials, and media are never persisted.
+ * SavedMylist is one persisted public-mylist snapshot: ID, display name, and
+ * the mylist's contents as fetched when saved or last refreshed. This is the
+ * local source of truth for reading a saved mylist back. Tracks, credentials,
+ * and media are never persisted.
  */
 export interface SavedMylist {
   id: string;
   name: string;
+  owner?: string;
+  description?: string;
+  totalItemCount?: number;
+  items?: MylistItem[];
 }
 
 // ---- Services ----
 
 /**
  * Mylist looks up public NicoNico mylist metadata. This stage covers public
- * metadata lookup plus local ID/name references for saved public mylists:
+ * metadata lookup plus locally held snapshots of saved public mylists:
  * no auth, playback, or download. The lookup uses the community-documented
  * unofficial NVAPI endpoint, with explicit user approval for public metadata.
  */
@@ -55,22 +61,24 @@ export const Mylist = {
     return call("Mylist.GetPage", input, page);
   },
   /**
-   * ListSaved returns saved public-mylist references, oldest first. A missing
+   * ListSaved returns saved public-mylist snapshots, oldest first. A missing
    * file means none saved yet.
    */
   listSaved(): Promise<SavedMylist[]> {
     return call("Mylist.ListSaved");
   },
   /**
-   * RemoveSaved drops the local reference to the mylist identified by input.
+   * RemoveSaved drops the local snapshot of the mylist identified by input.
    * Server data is never touched.
    */
   removeSaved(input: string): Promise<SavedMylist[]> {
     return call("Mylist.RemoveSaved", input);
   },
   /**
-   * SaveMylist upserts the public mylist identified by input under name and
-   * returns the saved references. Input accepts an ID or a supported URL.
+   * SaveMylist fetches every page of the public mylist identified by input and
+   * upserts a local snapshot of it under name, returning the saved snapshots.
+   * Input accepts an ID or a supported URL. Fetching happens before the file
+   * lock, so HTTP never blocks other file operations.
    */
   saveMylist(input: string, name: string): Promise<SavedMylist[]> {
     return call("Mylist.SaveMylist", input, name);

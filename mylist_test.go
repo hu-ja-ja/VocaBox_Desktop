@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -181,8 +182,30 @@ func TestGetPageErrors(t *testing.T) {
 	})
 }
 
+// savedFixture is a one-page mylist used by the saved-snapshot tests.
+const savedFixture = `{"meta":{"status":200},"data":{"mylist":{` +
+	`"name":"保存リスト","description":"保存説明","isPublic":true,` +
+	`"owner":{"name":"保存者"},` +
+	`"items":[` +
+	`{"watchId":"sm1","video":{"id":"sm1","title":"曲A","duration":125,"owner":{"name":"作者A"}}},` +
+	`{"watchId":"sm2","video":null}` +
+	`],` +
+	`"totalItemCount":2,"hasNext":false}}}`
+
+// newSavedService returns a Mylist over a temp config dir and a test server
+// serving body for every page, plus a request counter.
+func newSavedService(t *testing.T, body string) (*Mylist, *int32) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return &Mylist{client: srv.Client(), baseURL: srv.URL, configDir: t.TempDir()}, &hits
+}
+
 func TestSavedMylists(t *testing.T) {
-	m := &Mylist{configDir: t.TempDir()}
+	m, _ := newSavedService(t, savedFixture)
 
 	// Missing file means none saved yet.
 	got, err := m.ListSaved()
@@ -190,7 +213,7 @@ func TestSavedMylists(t *testing.T) {
 		t.Fatalf("ListSaved() = %v, %v; want [], nil", got, err)
 	}
 
-	// Invalid IDs are rejected at the boundary.
+	// Invalid IDs and blank names are rejected before any request.
 	if _, err := m.SaveMylist("not a mylist", "x"); err == nil {
 		t.Error("SaveMylist(bad input) = nil error; want an error")
 	}
@@ -209,19 +232,28 @@ func TestSavedMylists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveMylist upsert = %v; want nil", err)
 	}
-	if len(got) != 2 || got[0] != (SavedMylist{ID: "27411728", Name: "リストA更新"}) ||
-		got[1] != (SavedMylist{ID: "100", Name: "リストB"}) {
+	if len(got) != 2 || got[0].ID != "27411728" || got[0].Name != "リストA更新" ||
+		got[1].ID != "100" || got[1].Name != "リストB" {
 		t.Fatalf("upserted list = %+v; want 2 records, updated name, no duplicates", got)
 	}
 
-	// A fresh service over the same dir lists the same records.
-	same := &Mylist{configDir: m.configDir}
-	got, err = same.ListSaved()
-	if err != nil || len(got) != 2 {
-		t.Fatalf("ListSaved() = %v, %v; want 2 records, nil", got, err)
+	// The stored record holds the fetched contents, not just the reference.
+	snap := got[0]
+	if snap.Owner != "保存者" || snap.Description != "保存説明" || snap.TotalItemCount != 2 || len(snap.Items) != 2 {
+		t.Fatalf("stored snapshot = %+v; want fetched contents", snap)
+	}
+	if snap.Items[0].Title != "曲A" || snap.Items[1].Available {
+		t.Errorf("stored items = %+v; want fetched contents", snap.Items)
 	}
 
-	// Remove drops only the local reference; unknown IDs are idempotent.
+	// A fresh service over the same dir lists the same records, contents intact.
+	same := &Mylist{configDir: m.configDir}
+	got, err = same.ListSaved()
+	if err != nil || len(got) != 2 || len(got[0].Items) != 2 {
+		t.Fatalf("ListSaved() = %+v, %v; want 2 records with 2 items, nil", got, err)
+	}
+
+	// Remove drops only the local snapshot; unknown IDs are idempotent.
 	got, err = m.RemoveSaved("100")
 	if err != nil || len(got) != 1 || got[0].ID != "27411728" {
 		t.Fatalf("RemoveSaved() = %v, %v; want [27411728], nil", got, err)
@@ -270,5 +302,65 @@ func TestSavedMylists(t *testing.T) {
 	raw, _ := os.ReadFile(badPath)
 	if string(raw) != "{oops" {
 		t.Errorf("corrupt file was overwritten: %q", raw)
+	}
+}
+
+func TestSaveMylistFetchError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	m := &Mylist{client: srv.Client(), baseURL: srv.URL, configDir: t.TempDir()}
+	if _, err := m.SaveMylist("27411728", "リスト"); err == nil {
+		t.Error("SaveMylist(bad fetch) = nil error; want an error")
+	}
+	if got, err := m.ListSaved(); err != nil || len(got) != 0 {
+		t.Errorf("a failed save must not persist: %v, %v", got, err)
+	}
+}
+
+func TestFetchAllMergesPages(t *testing.T) {
+	final := `{"meta":{"status":200},"data":{"mylist":{"name":"テストリスト","isPublic":true,` +
+		`"items":[{"watchId":"sm4","video":{"id":"sm4","title":"曲D"}}],` +
+		`"totalItemCount":4,"hasNext":false}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "1" {
+			_, _ = w.Write([]byte(mylistFixture)) // 3 items, hasNext true
+			return
+		}
+		_, _ = w.Write([]byte(final))
+	}))
+	t.Cleanup(srv.Close)
+	m := &Mylist{client: srv.Client(), baseURL: srv.URL}
+
+	got, err := m.fetchAll("27411728")
+	if err != nil {
+		t.Fatalf("fetchAll returned an error: %v", err)
+	}
+	if len(got.Items) != 4 || got.Items[3].Title != "曲D" {
+		t.Errorf("merged items = %+v; want 4 items incl. 曲D", got.Items)
+	}
+	if got.Name != "テストリスト" {
+		t.Errorf("header must come from page 1: %+v", got)
+	}
+	if got.HasNext {
+		t.Error("a snapshot must clear HasNext")
+	}
+}
+
+func TestFetchAllStopsAtPageCap(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = w.Write([]byte(mylistFixture)) // always hasNext true
+	}))
+	t.Cleanup(srv.Close)
+	m := &Mylist{client: srv.Client(), baseURL: srv.URL}
+
+	if _, err := m.fetchAll("27411728"); err != nil {
+		t.Fatalf("fetchAll returned an error: %v", err)
+	}
+	if n := atomic.LoadInt32(&hits); n != maxMylistPages {
+		t.Errorf("requests = %d; want the cap %d", n, maxMylistPages)
 	}
 }

@@ -274,11 +274,9 @@ async function fetchPage(append: boolean): Promise<boolean> {
   }
 }
 
-form.addEventListener("submit", (e) => {
-  e.preventDefault();
-  if (busy) return;
-  currentInput = input.value;
-  nextPage = 1;
+// resetView clears the loaded list and player, mirroring a fresh lookup. It
+// does not touch currentInput/nextPage; callers set those first.
+function resetView(): void {
   result.hidden = true;
   more.hidden = true;
   queue.reset([]);
@@ -286,6 +284,14 @@ form.addEventListener("submit", (e) => {
   setToggleUI(loopToggle, false, "ループ（オン）", "ループ");
   disposePlayer();
   updateQueueButtons();
+}
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (busy) return;
+  currentInput = input.value;
+  nextPage = 1;
+  resetView();
   void requestPage(false);
 });
 
@@ -295,6 +301,47 @@ more.addEventListener("click", () => {
 
 function savedError(err: unknown): void {
   savedStatus.textContent = err instanceof Error ? err.message : String(err);
+}
+
+// A saved snapshot is shown as one complete page: no pagination and no fetch.
+// It comes from mylists.json and is refreshed only on demand.
+function toPage(entry: SavedMylist): MylistPage {
+  return {
+    id: entry.id,
+    name: entry.name,
+    owner: entry.owner ?? "",
+    description: entry.description ?? "",
+    totalItemCount: entry.totalItemCount ?? entry.items?.length ?? 0,
+    hasNext: false,
+    items: entry.items ?? [],
+  };
+}
+
+function showLocal(entry: SavedMylist): void {
+  showPage(toPage(entry), false);
+  status.textContent = `保存した内容を表示しています（${entry.items?.length ?? 0}件）。最新にするには「更新」を押してください。`;
+}
+
+function loadLocal(entry: SavedMylist): void {
+  if (busy) return;
+  currentInput = entry.id;
+  nextPage = 1;
+  input.value = entry.id;
+  resetView();
+  showLocal(entry);
+}
+
+function refreshEntry(entry: SavedMylist): void {
+  savedStatus.textContent = "更新中…";
+  void Mylist.saveMylist(entry.id, entry.name).then(
+    (list) => {
+      renderSaved(list);
+      savedStatus.textContent = "更新しました。";
+      const updated = list.find((s) => s.id === entry.id);
+      if (updated && loadedId === entry.id) showLocal(updated);
+    },
+    (err: unknown) => savedError(err),
+  );
 }
 
 function renderSaved(saved: SavedMylist[]): void {
@@ -311,11 +358,12 @@ function renderSaved(saved: SavedMylist[]): void {
     const load = document.createElement("button");
     load.type = "button";
     load.textContent = "読み込む";
-    load.addEventListener("click", () => {
-      if (busy) return;
-      input.value = entry.id;
-      form.requestSubmit();
-    });
+    load.addEventListener("click", () => loadLocal(entry));
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.textContent = "更新";
+    refresh.setAttribute("aria-label", `保存した${entry.name}を最新に更新`);
+    refresh.addEventListener("click", () => refreshEntry(entry));
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "削除";
@@ -329,7 +377,7 @@ function renderSaved(saved: SavedMylist[]): void {
         (err: unknown) => savedError(err),
       );
     });
-    li.append(load, remove);
+    li.append(load, refresh, remove);
     savedList.append(li);
   }
 }
@@ -343,6 +391,7 @@ async function refreshSaved(): Promise<void> {
 }
 
 saveCurrent.addEventListener("click", () => {
+  savedStatus.textContent = "保存中…";
   void Mylist.saveMylist(loadedId, loadedName).then(
     (list) => {
       renderSaved(list);

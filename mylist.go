@@ -21,6 +21,9 @@ const (
 	mylistPageSize = 100
 	// maxMylistBody bounds a metadata response body.
 	maxMylistBody = 8 << 20
+	// maxMylistPages bounds a snapshot fetch so a server that keeps reporting
+	// hasNext cannot loop forever (200 pages * 100 items).
+	maxMylistPages = 200
 	// mylistUserAgent identifies this client, as the community docs ask.
 	mylistUserAgent = "VocaBox/0.1.0"
 )
@@ -53,7 +56,7 @@ type MylistPage struct {
 }
 
 // Mylist looks up public NicoNico mylist metadata. This stage covers public
-// metadata lookup plus local ID/name references for saved public mylists:
+// metadata lookup plus locally held snapshots of saved public mylists:
 // no auth, playback, or download. The lookup uses the community-documented
 // unofficial NVAPI endpoint, with explicit user approval for public metadata.
 type Mylist struct {
@@ -88,17 +91,23 @@ func (m *Mylist) GetPage(input string, page int) (MylistPage, error) {
 	return m.fetchPage(id, page)
 }
 
-// SavedMylist is one persisted public-mylist reference: ID plus display
-// name. Tracks, credentials, and media are never persisted.
+// SavedMylist is one persisted public-mylist snapshot: ID, display name, and
+// the mylist's contents as fetched when saved or last refreshed. This is the
+// local source of truth for reading a saved mylist back. Tracks, credentials,
+// and media are never persisted.
 type SavedMylist struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID             string       `json:"id"`
+	Name           string       `json:"name"`
+	Owner          string       `json:"owner,omitempty"`
+	Description    string       `json:"description,omitempty"`
+	TotalItemCount int          `json:"totalItemCount,omitempty"`
+	Items          []MylistItem `json:"items,omitempty"`
 }
 
 // maxSavedBody bounds the saved-list file.
 const maxSavedBody = 1 << 20
 
-// ListSaved returns saved public-mylist references, oldest first. A missing
+// ListSaved returns saved public-mylist snapshots, oldest first. A missing
 // file means none saved yet.
 func (m *Mylist) ListSaved() ([]SavedMylist, error) {
 	m.savedMu.Lock()
@@ -106,11 +115,11 @@ func (m *Mylist) ListSaved() ([]SavedMylist, error) {
 	return m.readSaved()
 }
 
-// SaveMylist upserts the public mylist identified by input under name and
-// returns the saved references. Input accepts an ID or a supported URL.
+// SaveMylist fetches every page of the public mylist identified by input and
+// upserts a local snapshot of it under name, returning the saved snapshots.
+// Input accepts an ID or a supported URL. Fetching happens before the file
+// lock, so HTTP never blocks other file operations.
 func (m *Mylist) SaveMylist(input, name string) ([]SavedMylist, error) {
-	m.savedMu.Lock()
-	defer m.savedMu.Unlock()
 	id, err := ParseMylistInput(input)
 	if err != nil {
 		return nil, err
@@ -119,19 +128,38 @@ func (m *Mylist) SaveMylist(input, name string) ([]SavedMylist, error) {
 	if name == "" {
 		return nil, errors.New("保存するマイリストの名前がありません")
 	}
+	snapshot, err := m.fetchAll(id)
+	if err != nil {
+		return nil, err
+	}
+	m.savedMu.Lock()
+	defer m.savedMu.Unlock()
+	return m.upsertSaved(SavedMylist{
+		ID:             id,
+		Name:           name,
+		Owner:          snapshot.Owner,
+		Description:    snapshot.Description,
+		TotalItemCount: snapshot.TotalItemCount,
+		Items:          snapshot.Items,
+	})
+}
+
+// upsertSaved replaces or appends entry and persists the list. Callers hold
+// savedMu.
+func (m *Mylist) upsertSaved(entry SavedMylist) ([]SavedMylist, error) {
 	saved, err := m.readSaved()
 	if err != nil {
 		return nil, err
 	}
 	found := false
 	for i, s := range saved {
-		if s.ID == id {
-			saved[i].Name = name
+		if s.ID == entry.ID {
+			saved[i] = entry
 			found = true
 		}
 	}
 	if !found {
-		saved = append(saved, SavedMylist{ID: id, Name: name})
+		saved = append(saved, entry)
 	}
 	if err := m.writeSaved(saved); err != nil {
 		return nil, err
@@ -139,7 +167,7 @@ func (m *Mylist) SaveMylist(input, name string) ([]SavedMylist, error) {
 	return saved, nil
 }
 
-// RemoveSaved drops the local reference to the mylist identified by input.
+// RemoveSaved drops the local snapshot of the mylist identified by input.
 // Server data is never touched.
 func (m *Mylist) RemoveSaved(input string) ([]SavedMylist, error) {
 	m.savedMu.Lock()
@@ -249,6 +277,29 @@ func (m *Mylist) fetchPage(id string, page int) (MylistPage, error) {
 		return MylistPage{}, errors.New("マイリストの応答が大きすぎます")
 	}
 	return mapMylistPage(id, body)
+}
+
+// fetchAll fetches every page of the mylist and returns one snapshot: header
+// fields from page 1, all items merged, HasNext cleared. maxMylistPages bounds
+// the loop.
+func (m *Mylist) fetchAll(id string) (MylistPage, error) {
+	snapshot := MylistPage{ID: id, Items: []MylistItem{}}
+	for page := 1; page <= maxMylistPages; page++ {
+		p, err := m.fetchPage(id, page)
+		if err != nil {
+			return MylistPage{}, err
+		}
+		if page == 1 {
+			snapshot = p
+			snapshot.Items = []MylistItem{}
+		}
+		snapshot.Items = append(snapshot.Items, p.Items...)
+		if !p.HasNext {
+			break
+		}
+	}
+	snapshot.HasNext = false
+	return snapshot, nil
 }
 
 func mylistHTTPError(status int) error {
