@@ -7,6 +7,8 @@ import (
 )
 
 func main() {
+	mygo.Bind(NewMylist())
+
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{
 			Title:           "VocaBox",

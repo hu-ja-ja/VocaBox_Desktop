@@ -63,3 +63,36 @@ h1 {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
+
+#mylist-form {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+#mylist-input {
+  flex: 1;
+  min-width: 12rem;
+}
+
+#mylist-description {
+  overflow-wrap: break-word;
+}
+
+#mylist-items {
+  display: grid;
+  gap: 0.25rem;
+  padding-left: 1.5rem;
+}
+
+#mylist-items span {
+  color: #6b7280;
+}
+
+@media (prefers-color-scheme: dark) {
+  #mylist-items span {
+    color: #9aa0a6;
+  }
+}

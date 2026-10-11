@@ -8,12 +8,33 @@
   <body>
     <header>
       <h1>VocaBox</h1>
-      <p>マイリスト取り込み・再生は準備中のため、操作できません。</p>
+      <p>公開マイリストの表示ができます。再生は準備中のため、操作できません。</p>
     </header>
     <main>
       <section aria-labelledby="library-heading">
         <h2 id="library-heading">マイリスト</h2>
-        <p>取り込み機能が未実装のため、一覧はまだ表示できません。</p>
+        <p>公開マイリストの表示には非公式のAPIを使っています。</p>
+        <form id="mylist-form">
+          <label for="mylist-input">マイリストのIDまたはURL</label>
+          <input
+            id="mylist-input"
+            name="mylist"
+            type="text"
+            required
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="例: https://www.nicovideo.jp/mylist/12345678"
+          />
+          <button type="submit">読み込む</button>
+        </form>
+        <p id="mylist-status" role="status"></p>
+        <div id="mylist-result" hidden>
+          <h3 id="mylist-name"></h3>
+          <p id="mylist-meta"></p>
+          <p id="mylist-description"></p>
+          <ol id="mylist-items"></ol>
+          <button id="mylist-more" type="button" hidden>もっと読み込む</button>
+        </div>
       </section>
       <section aria-labelledby="now-playing-heading">
         <h2 id="now-playing-heading">再生中</h2>
