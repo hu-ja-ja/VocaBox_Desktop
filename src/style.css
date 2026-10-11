@@ -35,6 +35,7 @@ footer {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  align-items: center;
   border-top: 1px solid currentColor;
 }
 
@@ -95,4 +96,18 @@ h1 {
   #mylist-items span {
     color: #9aa0a6;
   }
+}
+
+#mylist-items button {
+  margin-left: 0.5rem;
+}
+
+#player-slot:empty {
+  display: none;
+}
+
+#player-slot iframe {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
 }
