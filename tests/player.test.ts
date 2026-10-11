@@ -8,6 +8,7 @@ import {
   playCommand,
   playerStatusToPlaying,
   seekCommand,
+  shouldFireEnded,
   volumeCommand,
 } from "../src/player";
 
@@ -88,6 +89,25 @@ describe("playerStatusToPlaying", () => {
     expect(playerStatusToPlaying(0)).toBeNull();
     expect(playerStatusToPlaying("2")).toBeNull();
     expect(playerStatusToPlaying(undefined)).toBeNull();
+  });
+});
+
+describe("shouldFireEnded", () => {
+  test("one END transition fires once across duplicate status aliases", () => {
+    // playerStatusChange(END) then statusChange(END) for one transition.
+    let last: number | null = null;
+    let fires = 0;
+    for (const status of [4, 4]) {
+      if (shouldFireEnded(last, status)) fires += 1;
+      last = status;
+    }
+    expect(fires).toBe(1);
+    // A new END after leaving END fires again; non-END never fires.
+    expect(shouldFireEnded(4, 4)).toBe(false);
+    expect(shouldFireEnded(2, 4)).toBe(true);
+    expect(shouldFireEnded(null, 4)).toBe(true);
+    expect(shouldFireEnded(null, 2)).toBe(false);
+    expect(shouldFireEnded(4, 2)).toBe(false);
   });
 });
 

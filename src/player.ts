@@ -85,6 +85,7 @@ export function isPlayerEvent(
 export interface PlayerCallbacks {
   onReady?: () => void;
   onPlayingChange?: (playing: boolean) => void;
+  onEnded?: () => void;
   onError?: () => void;
   onMetadata?: (currentTimeMs: number, durationMs: number) => void;
   onVolume?: (volume: number) => void;
@@ -100,12 +101,23 @@ export function playerStatusToPlaying(playerStatus: unknown): boolean | null {
   return null;
 }
 
+// shouldFireEnded reports whether an incoming status starts a new END
+// transition (END is the community-documented status 4; unofficial like the
+// rest of this protocol). Both status aliases report the same transition, so
+// only the first END after a non-END status fires.
+export function shouldFireEnded(lastStatus: number | null, status: number): boolean {
+  return status === 4 && lastStatus !== status;
+}
+
 // EmbedPlayer owns one visible iframe and its message listener. dispose()
 // removes both; call it before switching items.
 export class EmbedPlayer {
   private readonly playerId: string;
   private readonly iframe: HTMLIFrameElement;
   private readonly onMessage: (e: MessageEvent) => void;
+  // Last status heard; one END transition fires onEnded once even though
+  // both playerStatusChange and statusChange aliases report it.
+  private lastStatus: number | null = null;
 
   constructor(slot: HTMLElement, videoId: string, title: string, cb: PlayerCallbacks = {}) {
     this.playerId = createPlayerId();
@@ -127,10 +139,14 @@ export class EmbedPlayer {
         cb.onReady?.();
       } else if (data.eventName === "playerStatusChange" || data.eventName === "statusChange") {
         const st = data.data as { playerStatus?: unknown } | null;
-        const playing = playerStatusToPlaying(
-          typeof st === "object" && st !== null ? st.playerStatus : undefined,
-        );
-        if (playing !== null) cb.onPlayingChange?.(playing);
+        const status = typeof st === "object" && st !== null ? st.playerStatus : undefined;
+        if (typeof status === "number") {
+          const fireEnded = shouldFireEnded(this.lastStatus, status);
+          this.lastStatus = status;
+          const playing = playerStatusToPlaying(status);
+          if (playing !== null) cb.onPlayingChange?.(playing);
+          if (fireEnded) cb.onEnded?.();
+        }
       } else if (data.eventName === "playerMetadataChange") {
         const meta = data.data as {
           currentTime?: unknown;
