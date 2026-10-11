@@ -1,5 +1,5 @@
 import "./style.css";
-import { Mylist, type MylistItem, type MylistPage } from "./mygo";
+import { Mylist, type MylistItem, type MylistPage, type SavedMylist } from "./mygo";
 import { EmbedPlayer } from "./player";
 import { PlayQueue } from "./queue";
 
@@ -16,6 +16,9 @@ const meta = $("#mylist-meta");
 const description = $("#mylist-description");
 const items = $<HTMLOListElement>("#mylist-items");
 const more = $<HTMLButtonElement>("#mylist-more");
+const saveCurrent = $<HTMLButtonElement>("#mylist-save");
+const savedList = $<HTMLUListElement>("#saved-list");
+const savedStatus = $("#saved-status");
 const nowPlaying = $("#now-playing");
 const playerSlot = $("#player-slot");
 const playerToggle = $<HTMLButtonElement>("#player-toggle");
@@ -32,6 +35,9 @@ const nextTrack = $<HTMLButtonElement>("#next-track");
 let currentInput = "";
 let nextPage = 1;
 let busy = false;
+// ID and display name of the currently loaded public mylist, for saving.
+let loadedId = "";
+let loadedName = "";
 // Playable entries live only in the queue; unavailable entries stay visible
 // in the list but never enter it.
 const queue = new PlayQueue<MylistItem>();
@@ -211,6 +217,8 @@ function showPage(page: MylistPage, append: boolean): void {
     ? `${page.owner}・全${page.totalItemCount}件`
     : `全${page.totalItemCount}件`;
   description.textContent = page.description;
+  loadedId = page.id;
+  loadedName = page.name;
   const playableItems = page.items.filter(isPlayable);
   if (!append) {
     items.replaceChildren();
@@ -285,6 +293,65 @@ more.addEventListener("click", () => {
   void requestPage(true);
 });
 
+function savedError(err: unknown): void {
+  savedStatus.textContent = err instanceof Error ? err.message : String(err);
+}
+
+function renderSaved(saved: SavedMylist[]): void {
+  savedList.replaceChildren();
+  if (saved.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "保存したマイリストはありません。";
+    savedList.append(li);
+    return;
+  }
+  for (const entry of saved) {
+    const li = document.createElement("li");
+    li.textContent = entry.name;
+    const load = document.createElement("button");
+    load.type = "button";
+    load.textContent = "読み込む";
+    load.addEventListener("click", () => {
+      if (busy) return;
+      input.value = entry.id;
+      form.requestSubmit();
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "削除";
+    remove.setAttribute("aria-label", `保存した${entry.name}を削除`);
+    remove.addEventListener("click", () => {
+      void Mylist.removeSaved(entry.id).then(
+        (list) => {
+          renderSaved(list);
+          savedStatus.textContent = "保存を削除しました。";
+        },
+        (err: unknown) => savedError(err),
+      );
+    });
+    li.append(load, remove);
+    savedList.append(li);
+  }
+}
+
+async function refreshSaved(): Promise<void> {
+  try {
+    renderSaved(await Mylist.listSaved());
+  } catch (err) {
+    savedError(err);
+  }
+}
+
+saveCurrent.addEventListener("click", () => {
+  void Mylist.saveMylist(loadedId, loadedName).then(
+    (list) => {
+      renderSaved(list);
+      savedStatus.textContent = "保存しました。";
+    },
+    (err: unknown) => savedError(err),
+  );
+});
+
 playerToggle.addEventListener("click", () => {
   if (player === null) return;
   // The label follows player status events only; sending a command alone
@@ -339,3 +406,5 @@ prevTrack.addEventListener("click", () => {
 nextTrack.addEventListener("click", () => {
   void stepNext();
 });
+
+void refreshSaved();

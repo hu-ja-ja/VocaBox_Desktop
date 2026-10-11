@@ -7,7 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -50,12 +53,18 @@ type MylistPage struct {
 }
 
 // Mylist looks up public NicoNico mylist metadata. This stage covers public
-// metadata lookup only (one page per call): no auth, playback, download or
-// persistence. The lookup uses the community-documented unofficial NVAPI
-// endpoint, with explicit user approval for public metadata.
+// metadata lookup plus local ID/name references for saved public mylists:
+// no auth, playback, or download. The lookup uses the community-documented
+// unofficial NVAPI endpoint, with explicit user approval for public metadata.
 type Mylist struct {
 	client  *http.Client
 	baseURL string
+	// configDir overrides the user config directory holding mylists.json.
+	// Empty means os.UserConfigDir()/VocaBox. Tests set a temp dir.
+	configDir string
+	// savedMu serializes saved-list file operations on this instance.
+	// HTTP fetches never take it.
+	savedMu sync.Mutex
 }
 
 // NewMylist returns the bound Mylist service.
@@ -77,6 +86,142 @@ func (m *Mylist) GetPage(input string, page int) (MylistPage, error) {
 		page = 1
 	}
 	return m.fetchPage(id, page)
+}
+
+// SavedMylist is one persisted public-mylist reference: ID plus display
+// name. Tracks, credentials, and media are never persisted.
+type SavedMylist struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// maxSavedBody bounds the saved-list file.
+const maxSavedBody = 1 << 20
+
+// ListSaved returns saved public-mylist references, oldest first. A missing
+// file means none saved yet.
+func (m *Mylist) ListSaved() ([]SavedMylist, error) {
+	m.savedMu.Lock()
+	defer m.savedMu.Unlock()
+	return m.readSaved()
+}
+
+// SaveMylist upserts the public mylist identified by input under name and
+// returns the saved references. Input accepts an ID or a supported URL.
+func (m *Mylist) SaveMylist(input, name string) ([]SavedMylist, error) {
+	m.savedMu.Lock()
+	defer m.savedMu.Unlock()
+	id, err := ParseMylistInput(input)
+	if err != nil {
+		return nil, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errors.New("保存するマイリストの名前がありません")
+	}
+	saved, err := m.readSaved()
+	if err != nil {
+		return nil, err
+	}
+	found := false
+	for i, s := range saved {
+		if s.ID == id {
+			saved[i].Name = name
+			found = true
+		}
+	}
+	if !found {
+		saved = append(saved, SavedMylist{ID: id, Name: name})
+	}
+	if err := m.writeSaved(saved); err != nil {
+		return nil, err
+	}
+	return saved, nil
+}
+
+// RemoveSaved drops the local reference to the mylist identified by input.
+// Server data is never touched.
+func (m *Mylist) RemoveSaved(input string) ([]SavedMylist, error) {
+	m.savedMu.Lock()
+	defer m.savedMu.Unlock()
+	id, err := ParseMylistInput(input)
+	if err != nil {
+		return nil, err
+	}
+	saved, err := m.readSaved()
+	if err != nil {
+		return nil, err
+	}
+	kept := saved[:0]
+	for _, s := range saved {
+		if s.ID != id {
+			kept = append(kept, s)
+		}
+	}
+	if err := m.writeSaved(kept); err != nil {
+		return nil, err
+	}
+	return kept, nil
+}
+
+func (m *Mylist) savedPath() (string, error) {
+	dir := m.configDir
+	if dir == "" {
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return "", errors.New("保存先フォルダーを取得できませんでした")
+		}
+		dir = filepath.Join(base, "VocaBox")
+	}
+	return filepath.Join(dir, "mylists.json"), nil
+}
+
+func (m *Mylist) readSaved() ([]SavedMylist, error) {
+	path, err := m.savedPath()
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return []SavedMylist{}, nil
+	}
+	if err != nil {
+		return nil, errors.New("保存したマイリストを読み込めませんでした")
+	}
+	defer f.Close()
+	body, err := io.ReadAll(io.LimitReader(f, maxSavedBody+1))
+	if err != nil {
+		return nil, errors.New("保存したマイリストを読み込めませんでした")
+	}
+	if len(body) > maxSavedBody {
+		return nil, errors.New("保存したマイリストの記録が大きすぎます")
+	}
+	var saved []SavedMylist
+	if err := json.Unmarshal(body, &saved); err != nil {
+		return nil, errors.New("保存したマイリストの記録が壊れています")
+	}
+	if saved == nil {
+		saved = []SavedMylist{}
+	}
+	return saved, nil
+}
+
+func (m *Mylist) writeSaved(saved []SavedMylist) error {
+	path, err := m.savedPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return errors.New("保存先フォルダーを作成できませんでした")
+	}
+	body, err := json.MarshalIndent(saved, "", "  ")
+	if err != nil {
+		return errors.New("保存したマイリストを書き込めませんでした")
+	}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		return errors.New("保存したマイリストを書き込めませんでした")
+	}
+	return nil
 }
 
 func (m *Mylist) fetchPage(id string, page int) (MylistPage, error) {

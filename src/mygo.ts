@@ -29,13 +29,22 @@ export interface MylistPage {
   items: MylistItem[];
 }
 
+/**
+ * SavedMylist is one persisted public-mylist reference: ID plus display
+ * name. Tracks, credentials, and media are never persisted.
+ */
+export interface SavedMylist {
+  id: string;
+  name: string;
+}
+
 // ---- Services ----
 
 /**
  * Mylist looks up public NicoNico mylist metadata. This stage covers public
- * metadata lookup only (one page per call): no auth, playback, download or
- * persistence. The lookup uses the community-documented unofficial NVAPI
- * endpoint, with explicit user approval for public metadata.
+ * metadata lookup plus local ID/name references for saved public mylists:
+ * no auth, playback, or download. The lookup uses the community-documented
+ * unofficial NVAPI endpoint, with explicit user approval for public metadata.
  */
 export const Mylist = {
   /**
@@ -44,5 +53,26 @@ export const Mylist = {
    */
   getPage(input: string, page: number): Promise<MylistPage> {
     return call("Mylist.GetPage", input, page);
+  },
+  /**
+   * ListSaved returns saved public-mylist references, oldest first. A missing
+   * file means none saved yet.
+   */
+  listSaved(): Promise<SavedMylist[]> {
+    return call("Mylist.ListSaved");
+  },
+  /**
+   * RemoveSaved drops the local reference to the mylist identified by input.
+   * Server data is never touched.
+   */
+  removeSaved(input: string): Promise<SavedMylist[]> {
+    return call("Mylist.RemoveSaved", input);
+  },
+  /**
+   * SaveMylist upserts the public mylist identified by input under name and
+   * returns the saved references. Input accepts an ID or a supported URL.
+   */
+  saveMylist(input: string, name: string): Promise<SavedMylist[]> {
+    return call("Mylist.SaveMylist", input, name);
   },
 } as const;

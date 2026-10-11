@@ -3,7 +3,10 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -176,4 +179,96 @@ func TestGetPageErrors(t *testing.T) {
 			t.Errorf("want page=1 in %q", path)
 		}
 	})
+}
+
+func TestSavedMylists(t *testing.T) {
+	m := &Mylist{configDir: t.TempDir()}
+
+	// Missing file means none saved yet.
+	got, err := m.ListSaved()
+	if err != nil || len(got) != 0 {
+		t.Fatalf("ListSaved() = %v, %v; want [], nil", got, err)
+	}
+
+	// Invalid IDs are rejected at the boundary.
+	if _, err := m.SaveMylist("not a mylist", "x"); err == nil {
+		t.Error("SaveMylist(bad input) = nil error; want an error")
+	}
+	if _, err := m.SaveMylist("27411728", "  "); err == nil {
+		t.Error("SaveMylist(blank name) = nil error; want an error")
+	}
+
+	// Save two, then upsert one by URL without duplicating.
+	if _, err := m.SaveMylist("27411728", "リストA"); err != nil {
+		t.Fatalf("SaveMylist = %v; want nil", err)
+	}
+	if _, err := m.SaveMylist("https://www.nicovideo.jp/mylist/100", "リストB"); err != nil {
+		t.Fatalf("SaveMylist = %v; want nil", err)
+	}
+	got, err = m.SaveMylist("https://nico.ms/mylist/27411728", "リストA更新")
+	if err != nil {
+		t.Fatalf("SaveMylist upsert = %v; want nil", err)
+	}
+	if len(got) != 2 || got[0] != (SavedMylist{ID: "27411728", Name: "リストA更新"}) ||
+		got[1] != (SavedMylist{ID: "100", Name: "リストB"}) {
+		t.Fatalf("upserted list = %+v; want 2 records, updated name, no duplicates", got)
+	}
+
+	// A fresh service over the same dir lists the same records.
+	same := &Mylist{configDir: m.configDir}
+	got, err = same.ListSaved()
+	if err != nil || len(got) != 2 {
+		t.Fatalf("ListSaved() = %v, %v; want 2 records, nil", got, err)
+	}
+
+	// Remove drops only the local reference; unknown IDs are idempotent.
+	got, err = m.RemoveSaved("100")
+	if err != nil || len(got) != 1 || got[0].ID != "27411728" {
+		t.Fatalf("RemoveSaved() = %v, %v; want [27411728], nil", got, err)
+	}
+	got, err = m.RemoveSaved("999")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("RemoveSaved(unknown) = %v, %v; want unchanged, nil", got, err)
+	}
+
+	// Concurrent saves on one instance keep both entries.
+	var wg sync.WaitGroup
+	for _, id := range []string{"200", "300"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := m.SaveMylist(id, "並行"+id); err != nil {
+				t.Errorf("concurrent SaveMylist(%s) = %v; want nil", id, err)
+			}
+		}()
+	}
+	wg.Wait()
+	got, err = m.ListSaved()
+	if err != nil {
+		t.Fatalf("ListSaved() = %v; want nil", err)
+	}
+	ids := map[string]bool{}
+	for _, s := range got {
+		ids[s.ID] = true
+	}
+	if !ids["200"] || !ids["300"] {
+		t.Errorf("after concurrent saves, ids = %v; want both 200 and 300", ids)
+	}
+
+	// Malformed JSON is reported, never silently overwritten.
+	bad := &Mylist{configDir: t.TempDir()}
+	badPath := filepath.Join(bad.configDir, "mylists.json")
+	if err := os.MkdirAll(bad.configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(badPath, []byte("{oops"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bad.ListSaved(); err == nil {
+		t.Error("ListSaved(corrupt) = nil error; want an error")
+	}
+	raw, _ := os.ReadFile(badPath)
+	if string(raw) != "{oops" {
+		t.Errorf("corrupt file was overwritten: %q", raw)
+	}
 }
