@@ -1,6 +1,11 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      input: "player.html",
+    },
+  },
   server: {
     // Keep this in sync with devUrl in mygo.config.ts.
     port: 5173,
