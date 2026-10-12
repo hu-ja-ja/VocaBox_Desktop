@@ -3,6 +3,7 @@ import {
   EMBED_ORIGIN,
   buildEmbedUrl,
   createPlayerId,
+  findTrack,
   isPlayerEvent,
   pauseCommand,
   playCommand,
@@ -118,6 +119,20 @@ describe("previousRestarts", () => {
     expect(previousRestarts(0)).toBe(false);
     expect(previousRestarts(previousRestartMs)).toBe(false);
     expect(previousRestarts(previousRestartMs + 1)).toBe(true);
+  });
+});
+
+describe("findTrack", () => {
+  test("matches the playing track by watch ID, not by identity", () => {
+    // A list arrives as fresh objects with every command, so the copy the
+    // player holds is never one of them.
+    const items = [
+      { watchId: "sm1", title: "一曲目" },
+      { watchId: "sm2", title: "二曲目" },
+    ];
+    expect(findTrack(items, "sm2")).toEqual({ watchId: "sm2", title: "二曲目" });
+    expect(findTrack(items, "sm9")).toBeNull();
+    expect(findTrack([], "sm1")).toBeNull();
   });
 });
 

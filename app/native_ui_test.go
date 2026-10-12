@@ -139,6 +139,66 @@ func lastCommand(commands []PlayerCommand, action string) (PlayerCommand, bool) 
 	return PlayerCommand{}, false
 }
 
+// TestNativeUIKeepsPlayingTrackAcrossLists checks that opening another list
+// neither stops the track playing nor hands the queue to the shown list.
+func TestNativeUIKeepsPlayingTrackAcrossLists(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.playerLoaded = true
+	app.saved = []SavedMylist{
+		{ID: "111", Name: "リストA", Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}},
+		{ID: "222", Name: "リストB", Items: []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}}},
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	if err := tester.Click("リストA"); err != nil {
+		t.Fatal(err)
+	}
+	// The player reports a track of A playing, as it does while the list
+	// plays on in its webview.
+	app.player = PlayerReport{WatchID: "sm1", ListID: "111", Title: "Aの曲", Ready: true, Playing: true, Volume: 1}
+	app.pending = nil
+
+	if err := tester.Click("リストB"); err != nil {
+		t.Fatal(err)
+	}
+	if app.player.WatchID != "sm1" || !app.player.Playing {
+		t.Fatalf("switching lists stopped the playing track: %#v", app.player)
+	}
+	set, ok := lastCommand(app.pending, "setItems")
+	if !ok || set.ID != "222" {
+		t.Fatalf("the opened list was not sent: %#v", app.pending)
+	}
+	if !tester.HasText("Aの曲") {
+		t.Fatalf("the player bar lost the playing track: %q", tester.Texts())
+	}
+}
+
+// TestNativeUICanLoadNextOnlyForPlayingList checks that only the queue built
+// from the shown list takes its next page: a list merely shown must not feed
+// the queue of the list playing.
+func TestNativeUICanLoadNextOnlyForPlayingList(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.page = &MylistPage{ID: "222"}
+	app.hasMore = true
+	app.player = PlayerReport{WatchID: "sm1", ListID: "111"}
+
+	if app.canLoadNext() {
+		t.Fatal("loading the shown list must not extend another list's queue")
+	}
+	app.advance(true)
+	if app.pendingAdvance || app.loading || hasCommand(app.pending, "next") {
+		t.Fatalf("advancing left the playing queue: pending=%v loading=%v", app.pendingAdvance, app.loading)
+	}
+
+	app.player.ListID = "222"
+	if !app.canLoadNext() {
+		t.Fatal("the playing list's next page can extend its queue")
+	}
+	app.page = nil
+	if app.canLoadNext() {
+		t.Fatal("no page means no next page to load")
+	}
+}
+
 func TestNativeUITrackClickPlaysIt(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.playerLoaded = true

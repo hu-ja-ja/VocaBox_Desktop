@@ -1,10 +1,17 @@
 import { events, PlayerBridge, type MylistItem, type PlayerCommand, type PlayerReport } from "./mygo";
-import { EmbedPlayer, previousRestarts } from "./player";
+import { EmbedPlayer, findTrack, previousRestarts } from "./player";
 import { PlayQueue } from "./queue";
 
 const slot = document.querySelector<HTMLElement>("#player-slot")!;
 const queue = new PlayQueue<MylistItem>();
+// items and listId are the list shown: they answer a row click. The queue is
+// the list playing, which another list opening does not take over.
 let items: MylistItem[] = [];
+let listId = "";
+let queueId = "";
+// current is the track playing, apart from the queue: it keeps playing, and
+// its metadata keeps being reported, while the shown list changes.
+let current: MylistItem | null = null;
 let player: EmbedPlayer | null = null;
 let ready = false;
 let playing = false;
@@ -20,12 +27,15 @@ function playable(item: MylistItem): boolean {
 }
 
 function report(type = "state"): void {
-  const current = queue.current();
   const payload: PlayerReport = {
     type,
     session,
     sequence: ++sequence,
     watchId: current?.watchId ?? "",
+    listId: queueId,
+    title: current?.title ?? "",
+    uploader: current?.uploader ?? "",
+    thumbnailUrl: current?.thumbnailUrl ?? "",
     ready,
     playing,
     canPrev: queue.hasPrev(),
@@ -40,8 +50,29 @@ function report(type = "state"): void {
   void PlayerBridge.report(payload).catch((cause: unknown) => console.error("player bridge:", cause));
 }
 
-function select(item: MylistItem, autoplay = false): void {
-  if (queue.select(item) === null) return;
+// adoptQueue makes the shown list the playback queue, keeping shuffle,
+// repeat, and the track playing when the list still holds it. Items arrive
+// as fresh objects with every command, so the track is matched by ID.
+function adoptQueue(): void {
+  const shuffle = queue.isShuffle();
+  const repeat = queue.repeat;
+  queue.reset(items);
+  if (shuffle) queue.setShuffle(true);
+  queue.repeat = repeat;
+  queueId = listId;
+  if (current !== null) {
+    const again = findTrack(items, current.watchId);
+    if (again !== null) {
+      queue.select(again);
+      current = again;
+    }
+  }
+}
+
+// play starts item from its beginning in a fresh embed player; the caller
+// has positioned the queue on it.
+function play(item: MylistItem, autoplay: boolean): void {
+  current = item;
   player?.dispose();
   ready = false;
   playing = false;
@@ -83,47 +114,29 @@ function select(item: MylistItem, autoplay = false): void {
   report();
 }
 
+// select plays a track of the shown list; a queue owned by another list
+// moves to the shown one first, so the track's neighbours come from there.
+function select(item: MylistItem, autoplay = false): void {
+  if (queueId !== listId) adoptQueue();
+  if (queue.select(item) === null) return;
+  play(item, autoplay);
+}
+
 function handle(command: PlayerCommand): void {
   switch (command.action) {
     case "setItems":
-      player?.dispose();
-      player = null;
+      listId = command.id ?? "";
       items = (command.items ?? []).filter(playable);
-      queue.reset(items);
-      ready = false;
-      playing = false;
-      positionMs = 0;
-      durationMs = NaN;
-      error = "";
+      // Opening a list shows its tracks without touching the queue playing:
+      // the track keeps playing, and keeps its list, until a track of the
+      // shown list is played.
+      if (current === null || queueId === listId) adoptQueue();
       report();
       break;
-    case "replaceItems": {
-      const current = queue.current();
-      const shuffle = queue.isShuffle();
-      const repeat = queue.repeat;
-      items = (command.items ?? []).filter(playable);
-      queue.reset(items);
-      if (shuffle) queue.setShuffle(true);
-      queue.repeat = repeat;
-      const replacement = current && items.find((item) => item.watchId === current.watchId);
-      if (replacement) {
-        queue.select(replacement);
-      } else {
-        player?.dispose();
-        player = null;
-        ready = false;
-        playing = false;
-        positionMs = 0;
-        durationMs = NaN;
-      }
-      error = "";
-      report();
-      break;
-    }
     case "appendItems": {
       const more = (command.items ?? []).filter(playable);
       items.push(...more);
-      queue.append(more);
+      if (queueId === listId) queue.append(more);
       report();
       break;
     }
@@ -134,7 +147,7 @@ function handle(command: PlayerCommand): void {
     }
     case "next": {
       const item = queue.moveNext();
-      if (item) select(item, command.autoplay);
+      if (item) play(item, command.autoplay ?? false);
       else report("needsNext");
       break;
     }
@@ -148,7 +161,7 @@ function handle(command: PlayerCommand): void {
         break;
       }
       const item = queue.movePrev();
-      if (item) select(item, true);
+      if (item) play(item, true);
       report();
       break;
     }

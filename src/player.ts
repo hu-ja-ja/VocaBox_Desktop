@@ -120,6 +120,13 @@ export function previousRestarts(positionMs: number): boolean {
   return positionMs > previousRestartMs;
 }
 
+// findTrack returns the entry of items carrying the watch ID, or null.
+// Items arrive as fresh objects with every command, so the track playing is
+// matched by ID, never by object identity.
+export function findTrack<T extends { watchId: string }>(items: T[], watchId: string): T | null {
+  return items.find((item) => item.watchId === watchId) ?? null;
+}
+
 // EmbedPlayer owns one visible iframe and its message listener. dispose()
 // removes both; call it before switching items.
 export class EmbedPlayer {

@@ -13,7 +13,10 @@ import (
 var PlayerCommandEvent = mygo.NewEvent[PlayerCommand]("playerCommand")
 
 type PlayerCommand struct {
-	Action     string       `json:"action"`
+	Action string `json:"action"`
+	// ID names the list the items belong to: the player keeps the queue of
+	// the list the playing track came from, so it has to tell the lists apart.
+	ID         string       `json:"id,omitempty"`
 	Items      []MylistItem `json:"items,omitempty"`
 	WatchID    string       `json:"watchId,omitempty"`
 	Autoplay   bool         `json:"autoplay,omitempty"`
@@ -23,10 +26,18 @@ type PlayerCommand struct {
 }
 
 type PlayerReport struct {
-	Type       string  `json:"type"`
-	Session    string  `json:"session"`
-	Sequence   uint64  `json:"sequence"`
-	WatchID    string  `json:"watchId"`
+	Type     string `json:"type"`
+	Session  string `json:"session"`
+	Sequence uint64 `json:"sequence"`
+	WatchID  string `json:"watchId"`
+	// ListID names the list the playback queue was built from; it can differ
+	// from the list shown while its track keeps playing.
+	ListID string `json:"listId"`
+	// Title, Uploader and ThumbURL describe the playing track, so the bar
+	// shows it even where the loaded list does not hold it.
+	Title      string  `json:"title"`
+	Uploader   string  `json:"uploader"`
+	ThumbURL   string  `json:"thumbnailUrl"`
 	Ready      bool    `json:"ready"`
 	Playing    bool    `json:"playing"`
 	CanPrev    bool    `json:"canPrev"`
@@ -532,14 +543,15 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 
 // followTrack scrolls the list to the track the player moved to, so one
 // played out of order, as under shuffle, shows where it is; a track already
-// in view stays where the user left the list.
+// in view stays where the user left the list, and one the list does not hold
+// is remembered only once the list showing it opens.
 func (app *nativeApp) followTrack() {
 	if app.page == nil || app.player.WatchID == "" || app.player.WatchID == app.followedTrack {
 		return
 	}
-	app.followedTrack = app.player.WatchID
 	for i := range app.page.Items {
 		if app.page.Items[i].WatchID == app.player.WatchID {
+			app.followedTrack = app.player.WatchID
 			app.trackList.ScrollIntoView(i)
 			return
 		}
@@ -722,11 +734,11 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			// The track playing and the volume grow by the same amount,
 			// which keeps the transport buttons in the middle of the bar.
 			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Gap(10).AlignItems(ui.Center).Children(func() {
-				if item := app.currentTrack(); item != nil {
-					app.thumbnail(c, *item, thumbBarHeight)
+				if app.player.WatchID != "" {
+					app.thumbnail(c, app.nowPlaying(), thumbBarHeight)
 					ui.Column(c).Grow(1).Gap(3).Children(func() {
-						ui.Text(c, item.Title).FontSize(14).Bold().SingleLine().Ellipsis("…")
-						ui.Text(c, item.Uploader).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
+						ui.Text(c, app.player.Title).FontSize(14).Bold().SingleLine().Ellipsis("…")
+						ui.Text(c, app.player.Uploader).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
 					})
 				} else {
 					ui.Box(c).Size(thumbSlotWidth(thumbBarHeight, 0), thumbBarHeight).Shrink(0)
@@ -766,7 +778,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			}
 			next := ui.Button(c, "").Label("次へ").Tooltip("次へ").Children(func() {
 				ui.Icon(c, iconSkipForward).FontSize(18)
-			}).Disabled(app.player.WatchID == "" || (!app.player.CanNext && !app.hasMore && !app.player.Repeat))
+			}).Disabled(app.player.WatchID == "" || (!app.player.CanNext && !app.canLoadNext() && !app.player.Repeat))
 			if next.Clicked() {
 				app.advance(true)
 			}
@@ -817,16 +829,16 @@ func (app *nativeApp) currentSaved() *SavedMylist {
 	return nil
 }
 
-func (app *nativeApp) currentTrack() *MylistItem {
-	if app.page == nil || app.player.WatchID == "" {
-		return nil
+// nowPlaying is the track the report names, built without looking at the
+// loaded list: the playing list is not always the one on screen.
+func (app *nativeApp) nowPlaying() MylistItem {
+	return MylistItem{
+		WatchID:   app.player.WatchID,
+		Available: true,
+		Title:     app.player.Title,
+		Uploader:  app.player.Uploader,
+		ThumbURL:  app.player.ThumbURL,
 	}
-	for i := range app.page.Items {
-		if app.page.Items[i].WatchID == app.player.WatchID {
-			return &app.page.Items[i]
-		}
-	}
-	return nil
 }
 
 // openList shows the list id names: the one loaded, the saved copy, else
@@ -872,8 +884,10 @@ func (app *nativeApp) openSaved(id string) bool {
 		app.resetThumbFailures()
 		app.queueThumbnailFill(page.Items)
 		app.setStatus("保存内容から表示中（更新するまで通信しません）")
-		app.resetPlayerState()
-		app.sendPlayer(PlayerCommand{Action: "setItems", Items: page.Items})
+		app.playerError = ""
+		// The player keeps the queue and the track it is playing; only a
+		// track of this list played from here moves the queue to it.
+		app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Items: page.Items})
 		return true
 	}
 	return false
@@ -893,7 +907,7 @@ func (app *nativeApp) fetchList(input string) {
 	app.page = nil
 	app.hasMore = false
 	app.setStatus("マイリストを読み込んでいます…")
-	app.resetPlayerState()
+	app.playerError = ""
 	app.sendPlayer(PlayerCommand{Action: "setItems"})
 	go func() {
 		page, err := app.mylist.GetPage(input, 1)
@@ -913,7 +927,7 @@ func (app *nativeApp) fetchList(input string) {
 			app.queueThumbnailFill(page.Items)
 			app.setStatus("")
 			app.router.Push(listPath(page.ID))
-			app.sendPlayer(PlayerCommand{Action: "setItems", Items: page.Items})
+			app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Items: page.Items})
 		})
 	}()
 }
@@ -950,12 +964,20 @@ func (app *nativeApp) loadMore() {
 	}()
 }
 
+// canLoadNext reports whether loading the next page of the shown list may
+// extend the playing queue: only the queue built from that list can take it.
+// The playing list is not always the one on screen, and its pages are not
+// loaded from here.
+func (app *nativeApp) canLoadNext() bool {
+	return app.hasMore && app.page != nil && app.player.ListID == app.page.ID
+}
+
 func (app *nativeApp) advance(autoplay bool) {
 	if app.player.CanNext {
 		app.sendPlayer(PlayerCommand{Action: "next", Autoplay: autoplay})
 		return
 	}
-	if app.hasMore {
+	if app.canLoadNext() {
 		app.pendingAdvance = autoplay
 		app.loadMore()
 	} else if app.player.Repeat && app.player.WatchID != "" {
@@ -971,15 +993,6 @@ func (app *nativeApp) selectTrack(item MylistItem) {
 	app.pendingAdvance = false
 	app.playerError = ""
 	app.sendPlayer(PlayerCommand{Action: "select", WatchID: item.WatchID, Autoplay: true})
-}
-
-func (app *nativeApp) resetPlayerState() {
-	volume := app.player.Volume
-	if math.IsNaN(volume) || math.IsInf(volume, 0) || volume < 0 || volume > 1 {
-		volume = 1
-	}
-	app.player = PlayerReport{Volume: volume}
-	app.playerError = ""
 }
 
 func (app *nativeApp) saveCurrent() {
@@ -1023,7 +1036,7 @@ func (app *nativeApp) saveEntry(id, name string) {
 					app.hasMore = false
 					app.resetThumbFailures()
 					app.queueThumbnailFill(page.Items)
-					app.sendPlayer(PlayerCommand{Action: "replaceItems", Items: page.Items})
+					app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Items: page.Items})
 				}
 			}
 			app.setStatus("保存しました。")
@@ -1095,10 +1108,11 @@ func (b *PlayerBridge) Report(report PlayerReport) {
 				app.pending = nil
 				app.player = PlayerReport{Shuffle: shuffle, Repeat: repeat, Volume: volume}
 				items := []MylistItem(nil)
+				id := ""
 				if app.page != nil {
-					items = app.page.Items
+					id, items = app.page.ID, app.page.Items
 				}
-				app.pending = append(app.pending, PlayerCommand{Action: "setItems", Items: items})
+				app.pending = append(app.pending, PlayerCommand{Action: "setItems", ID: id, Items: items})
 				if shuffle {
 					app.pending = append(app.pending, PlayerCommand{Action: "shuffle", Enabled: true})
 				}
@@ -1127,7 +1141,7 @@ func (b *PlayerBridge) Report(report PlayerReport) {
 			if report.CanNext {
 				app.pendingAdvance = false
 				app.sendPlayer(PlayerCommand{Action: "next", Autoplay: true})
-			} else if app.hasMore {
+			} else if app.canLoadNext() {
 				app.loadMore()
 			} else {
 				app.pendingAdvance = false

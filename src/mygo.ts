@@ -38,6 +38,11 @@ export interface MylistPage {
 
 export interface PlayerCommand {
   action: string;
+  /**
+   * ID names the list the items belong to: the player keeps the queue of
+   * the list the playing track came from, so it has to tell the lists apart.
+   */
+  id?: string;
   items?: MylistItem[];
   watchId?: string;
   autoplay?: boolean;
@@ -51,6 +56,18 @@ export interface PlayerReport {
   session: string;
   sequence: number;
   watchId: string;
+  /**
+   * ListID names the list the playback queue was built from; it can differ
+   * from the list shown while its track keeps playing.
+   */
+  listId: string;
+  /**
+   * Title, Uploader and ThumbURL describe the playing track, so the bar
+   * shows it even where the loaded list does not hold it.
+   */
+  title: string;
+  uploader: string;
+  thumbnailUrl: string;
   ready: boolean;
   playing: boolean;
   canPrev: boolean;
