@@ -1,5 +1,5 @@
 import { events, PlayerBridge, type MylistItem, type PlayerCommand, type PlayerReport } from "./mygo";
-import { EmbedPlayer } from "./player";
+import { EmbedPlayer, previousRestarts } from "./player";
 import { PlayQueue } from "./queue";
 
 const slot = document.querySelector<HTMLElement>("#player-slot")!;
@@ -139,6 +139,14 @@ function handle(command: PlayerCommand): void {
       break;
     }
     case "previous": {
+      // Past the opening of the track, the button restarts it; pressing it
+      // again from the start then goes to the one before.
+      if (previousRestarts(positionMs)) {
+        player?.seek(0);
+        positionMs = 0;
+        report();
+        break;
+      }
       const item = queue.movePrev();
       if (item) select(item, true);
       report();

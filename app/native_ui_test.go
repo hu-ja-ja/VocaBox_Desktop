@@ -129,6 +129,69 @@ func hasCommand(commands []PlayerCommand, action string) bool {
 	return false
 }
 
+// lastCommand returns the last command with the given action.
+func lastCommand(commands []PlayerCommand, action string) (PlayerCommand, bool) {
+	for i := len(commands) - 1; i >= 0; i-- {
+		if commands[i].Action == action {
+			return commands[i], true
+		}
+	}
+	return PlayerCommand{}, false
+}
+
+func TestNativeUITrackClickPlaysIt(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.playerLoaded = true
+	app.saved = []SavedMylist{{
+		ID:   "123",
+		Name: "作業用クリック",
+		Items: []MylistItem{{
+			WatchID:   "sm9",
+			Title:     "サンプル曲",
+			Available: true,
+		}},
+	}}
+
+	tester := ui.NewTester(app.view, 1120, 760)
+	if err := tester.Click("作業用クリック"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.Click("サンプル曲"); err != nil {
+		t.Fatal(err)
+	}
+	selected, ok := lastCommand(app.pending, "select")
+	if !ok || !selected.Autoplay || selected.WatchID != "sm9" {
+		t.Fatalf("clicking a track did not play it: %#v", app.pending)
+	}
+}
+
+// TestNativeUIPlayerBarCentersTransport checks the transport buttons sit in
+// the middle of the bar rather than following what shows beside them.
+func TestNativeUIPlayerBarCentersTransport(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	tester := ui.NewTester(app.view, 1120, 760)
+	shuffle, ok := tester.Find("シャッフル")
+	if !ok {
+		t.Fatalf("shuffle is missing: %q", tester.Texts())
+	}
+	loop, ok := tester.Find("ループ")
+	if !ok {
+		t.Fatalf("loop is missing: %q", tester.Texts())
+	}
+	play, ok := tester.Find("再生")
+	if !ok {
+		t.Fatalf("play is missing: %q", tester.Texts())
+	}
+	// The window is 1120 wide, so the middle of the bar is at 560.
+	middle := (shuffle.X + loop.X + loop.W) / 2
+	if delta := middle - 560; delta < -0.5 || delta > 0.5 {
+		t.Fatalf("transport is centered at %v; want 560", middle)
+	}
+	if delta := play.X + play.W/2 - 560; delta < -0.5 || delta > 0.5 {
+		t.Fatalf("the play button is centered at %v; want 560", play.X+play.W/2)
+	}
+}
+
 func TestNativeUIHomeOpensPlaylistCards(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	// With the sidebar closed the card is the only element named after the
@@ -154,11 +217,24 @@ func TestNativeUIHomeOpensPlaylistCards(t *testing.T) {
 	if err := tester.Click("作業用ホーム"); err != nil {
 		t.Fatal(err)
 	}
-	if app.atHome || app.page == nil || app.page.ID != "123" {
-		t.Fatalf("card did not open the playlist: home=%v page=%#v", app.atHome, app.page)
+	if app.router.Path() != "/list/123" || app.page == nil || app.page.ID != "123" {
+		t.Fatalf("card did not open the playlist: path=%q page=%#v", app.router.Path(), app.page)
 	}
 	if !tester.HasText("一曲目") {
 		t.Fatalf("opened list is not shown: %q", tester.Texts())
+	}
+
+	// The side buttons of a mouse arrive as the back and forward keys.
+	tester.Key(0, ui.KeyBack)
+	if app.router.Path() != "/" || !tester.HasText("保存したプレイリストから選んで再生") {
+		t.Fatalf("back did not return home: path=%q", app.router.Path())
+	}
+	if app.page == nil || app.page.ID != "123" {
+		t.Fatalf("the opened list was dropped: %#v", app.page)
+	}
+	tester.Key(0, ui.KeyForward)
+	if app.router.Path() != "/list/123" || !tester.HasText("一曲目") {
+		t.Fatalf("forward did not return to the list: path=%q", app.router.Path())
 	}
 
 	app.sidebarOpen = true
@@ -166,11 +242,8 @@ func TestNativeUIHomeOpensPlaylistCards(t *testing.T) {
 	if err := tester.Click("ホーム"); err != nil {
 		t.Fatal(err)
 	}
-	if !app.atHome || app.selectedSavedID != homeItemID {
-		t.Fatalf("sidebar home item did not return home: home=%v selected=%q", app.atHome, app.selectedSavedID)
-	}
-	if !tester.HasText("保存したプレイリストから選んで再生") {
-		t.Fatalf("home view is not shown: %q", tester.Texts())
+	if app.router.Path() != "/" || !tester.HasText("保存したプレイリストから選んで再生") {
+		t.Fatalf("sidebar home item did not return home: path=%q", app.router.Path())
 	}
 	if app.page == nil || app.page.ID != "123" {
 		t.Fatalf("the opened list was dropped: %#v", app.page)

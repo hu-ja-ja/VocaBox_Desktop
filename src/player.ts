@@ -109,6 +109,17 @@ export function shouldFireEnded(lastStatus: number | null, status: number): bool
   return status === 4 && lastStatus !== status;
 }
 
+// previousRestartMs is how far into a track the previous button restarts it
+// rather than going to the one before, as most players do: a press a short
+// way in is more often a wish to hear the track again.
+export const previousRestartMs = 3000;
+
+// previousRestarts reports whether Previous restarts the track playing at
+// positionMs instead of going to the one before it.
+export function previousRestarts(positionMs: number): boolean {
+  return positionMs > previousRestartMs;
+}
+
 // EmbedPlayer owns one visible iframe and its message listener. dispose()
 // removes both; call it before switching items.
 export class EmbedPlayer {

@@ -46,20 +46,23 @@ type nativeApp struct {
 	playerLoaded bool
 	pending      []PlayerCommand
 	theme        *ui.Theme
+	// router keeps the pages of the window, the home and the lists, so the
+	// side buttons of a mouse and Alt+Left/Right go back and forward
+	// between them.
+	router *ui.Router
 
-	saved           []SavedMylist
-	selectedSavedID string
-	sidebarOpen     bool
-	// atHome shows the home view while the opened list stays in place, so
-	// playback and the player bar survive going home.
-	atHome bool
+	saved       []SavedMylist
+	sidebarOpen bool
 	// importing shows the dialog the home's import card opens.
-	importing      bool
-	input          string
-	page           *MylistPage
-	nextPage       int
-	hasMore        bool
-	loading        bool
+	importing bool
+	input     string
+	page      *MylistPage
+	nextPage  int
+	hasMore   bool
+	loading   bool
+	// loadingID names the list a load is fetching, so a page waiting for it
+	// asks once rather than every frame.
+	loadingID      string
 	saving         bool
 	loadToken      uint64
 	status         string
@@ -70,6 +73,9 @@ type nativeApp struct {
 	playerSession  string
 	playerSequence uint64
 	pendingAdvance bool
+	// followedTrack is the track the list was last scrolled to, so it
+	// follows the player onto the next one.
+	followedTrack string
 
 	thumbs    map[string]*ui.Bitmap
 	thumbBusy map[string]bool
@@ -96,15 +102,18 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	t.Focus = ui.Hex("#f29bc1")
 	t.Radius = 8
 	t.Spacing = 4
+	router := ui.NewRouter(homePath)
+	// Pages show at once: the list a page waits for does not load twice.
+	router.Transition = ui.TransitionNone
 	return &nativeApp{
-		mylist:          mylist,
-		theme:           t,
-		sidebarOpen:     true,
-		selectedSavedID: homeItemID,
-		player:          PlayerReport{Volume: 1},
-		thumbs:          map[string]*ui.Bitmap{},
-		thumbBusy:       map[string]bool{},
-		thumbFail:       map[string]bool{},
+		mylist:      mylist,
+		router:      router,
+		theme:       t,
+		sidebarOpen: true,
+		player:      PlayerReport{Volume: 1},
+		thumbs:      map[string]*ui.Bitmap{},
+		thumbBusy:   map[string]bool{},
+		thumbFail:   map[string]bool{},
 	}
 }
 
@@ -145,20 +154,17 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 			})
 
 			ui.Divider(c)
-			sidebar := ui.Sidebar(c, &app.selectedSavedID, func() {
-				ui.SidebarItem(c, homeItemID, nil, "ホーム")
+			page := app.router.Path()
+			sidebar := ui.Sidebar(c, &page, func() {
+				ui.SidebarItem(c, homePath, nil, "ホーム")
 				ui.SidebarSection(c, "ライブラリ", nil, func() {
 					for _, entry := range app.saved {
-						ui.SidebarItem(c, entry.ID, nil, entry.Name)
+						ui.SidebarItem(c, listPath(entry.ID), nil, entry.Name)
 					}
 				})
 			}).Grow(1)
 			if sidebar.Changed() {
-				if app.selectedSavedID == homeItemID {
-					app.showHome()
-				} else {
-					app.openSaved(app.selectedSavedID)
-				}
+				app.router.Push(page)
 			}
 			if len(app.saved) == 0 {
 				ui.Text(c, "保存したリストはありません").FontSize(12).TextColor(app.theme.TextMuted)
@@ -205,27 +211,22 @@ func (app *nativeApp) sidebarToggle(c *ui.Context, opening bool) {
 	}
 }
 
-// homeItemID selects the home view in the sidebar; saved mylist IDs are
-// digits, so it cannot clash with one.
-const homeItemID = "home"
+// homePath routes to the home; the route of a list is listPath of its ID.
+const homePath = "/"
+
+// listPath is the route showing the list a mylist ID names.
+func listPath(id string) string { return "/list/" + id }
 
 // playlistCardWidth is the width of one playlist card: two 16:9 tiles wide
 // plus its own padding. Two cards fit even at the narrowest window with the
 // sidebar open.
 const playlistCardWidth = 200
 
-// showHome returns to the home view, leaving the opened list and its
-// playback in place.
-func (app *nativeApp) showHome() {
-	app.atHome = true
-	app.selectedSavedID = homeItemID
-}
-
 // homeView shows the import card and the saved playlists as cards, each
 // carrying the pictures of its first four tracks; clicking a playlist card
 // opens it.
 func (app *nativeApp) homeView(c *ui.Context) {
-	ui.Column(c).Grow(1).FillHeight().Gap(16).Children(func() {
+	ui.Column(c).Grow(1).FillHeight().Padding(28, 30, 18).Gap(16).Children(func() {
 		ui.Column(c).Gap(5).Children(func() {
 			ui.Text(c, "ホーム").FontSize(27).Bold()
 			sub := "保存したプレイリストから選んで再生"
@@ -300,7 +301,7 @@ func (app *nativeApp) importInput() {
 		return
 	}
 	app.importing = false
-	app.lookup()
+	app.fetchList(strings.TrimSpace(app.input))
 }
 
 // statusLine shows the app's status, silent when it has none. List pages
@@ -334,7 +335,7 @@ func (app *nativeApp) playlistCard(c *ui.Context, entry SavedMylist) {
 		})
 	})
 	if card.Clicked() {
-		app.openSaved(entry.ID)
+		app.router.Push(listPath(entry.ID))
 	}
 }
 
@@ -379,13 +380,45 @@ func savedMeta(entry SavedMylist) string {
 	return fmt.Sprintf("全%d曲", total)
 }
 
+// content builds the page the router shows: the home, or a list.
 func (app *nativeApp) content(c *ui.Context) {
-	ui.Column(c).Grow(1).FillHeight().Padding(28, 30, 18).Gap(18).Children(func() {
-		if app.page == nil || app.atHome {
+	app.router.View(c, func(r *ui.Route) {
+		switch {
+		case r.Match(homePath):
+			r.Title("ホーム")
 			app.homeView(c)
-			return
+		case r.Match("/list/{id}"):
+			app.listView(c, r)
+		default:
+			app.homeView(c)
 		}
+	})
+}
 
+// listView fills the content area with the list its route names, loading it
+// when it is not the one loaded; the loaded list stays as pages change, so
+// only the page shown asks for one.
+func (app *nativeApp) listView(c *ui.Context, r *ui.Route) {
+	id := r.Param("id")
+	app.openList(id)
+	if app.page == nil || app.page.ID != id {
+		r.Title("読み込み中")
+		ui.Column(c).Grow(1).FillHeight().Padding(28, 30, 18).Children(func() {
+			if app.status == "" {
+				ui.Text(c, "リストを読み込んでいます…").FontSize(13).TextColor(app.theme.TextMuted)
+			} else {
+				app.statusLine(c)
+			}
+		})
+		return
+	}
+	r.Title(app.page.Name)
+	app.listPage(c)
+}
+
+// listPage fills the content area with the loaded list.
+func (app *nativeApp) listPage(c *ui.Context) {
+	ui.Column(c).Grow(1).FillHeight().Padding(28, 30, 18).Gap(18).Children(func() {
 		app.pumpThumbnailFill()
 		app.listHeader(c)
 		ui.Row(c).Gap(14).Justify(ui.Start).Padding(10, 12).Children(func() {
@@ -444,6 +477,7 @@ func (app *nativeApp) listHeader(c *ui.Context) {
 }
 
 func (app *nativeApp) trackRows(c *ui.Context) {
+	app.followTrack()
 	app.trackList.Key = func(row int) any { return app.page.Items[row].WatchID }
 	app.trackList.Label = func(row int) string {
 		item := app.page.Items[row]
@@ -493,6 +527,22 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		list.Children(func() {
 			ui.Text(c, "このマイリストに曲はありません").Padding(20).TextColor(app.theme.TextMuted)
 		})
+	}
+}
+
+// followTrack scrolls the list to the track the player moved to, so one
+// played out of order, as under shuffle, shows where it is; a track already
+// in view stays where the user left the list.
+func (app *nativeApp) followTrack() {
+	if app.page == nil || app.player.WatchID == "" || app.player.WatchID == app.followedTrack {
+		return
+	}
+	app.followedTrack = app.player.WatchID
+	for i := range app.page.Items {
+		if app.page.Items[i].WatchID == app.player.WatchID {
+			app.trackList.ScrollIntoView(i)
+			return
+		}
 	}
 }
 
@@ -669,7 +719,9 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			ui.Text(c, formatMillis(app.player.DurationMS)).Width(42).FontSize(11).TextAlign(ui.End).TextColor(app.theme.TextMuted)
 		})
 		ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
-			ui.Row(c).Width(320).Gap(10).AlignItems(ui.Center).Children(func() {
+			// The track playing and the volume grow by the same amount,
+			// which keeps the transport buttons in the middle of the bar.
+			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Gap(10).AlignItems(ui.Center).Children(func() {
 				if item := app.currentTrack(); item != nil {
 					app.thumbnail(c, *item, thumbBarHeight)
 					ui.Column(c).Grow(1).Gap(3).Children(func() {
@@ -678,10 +730,9 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 					})
 				} else {
 					ui.Box(c).Size(thumbSlotWidth(thumbBarHeight, 0), thumbBarHeight).Shrink(0)
-					ui.Text(c, "再生する曲を選んでください").FontSize(13).TextColor(app.theme.TextMuted)
+					ui.Text(c, "再生する曲を選んでください").FontSize(13).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
 				}
 			})
-			ui.Spacer(c).Grow(1)
 
 			shuffle := ui.Toggle(c, &app.player.Shuffle, "").Label("シャッフル").Tooltip("シャッフル").Children(func() {
 				ui.Icon(c, iconShuffle).FontSize(18)
@@ -689,9 +740,11 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			if shuffle.Changed() {
 				app.sendPlayer(PlayerCommand{Action: "shuffle", Enabled: app.player.Shuffle})
 			}
+			// The player restarts the track first while it is past its
+			// opening, so the button carries no CanPrev here.
 			previous := ui.Button(c, "").Label("前へ").Tooltip("前へ").Children(func() {
 				ui.Icon(c, iconSkipBack).FontSize(18)
-			}).Disabled(!app.player.CanPrev)
+			}).Disabled(app.player.WatchID == "")
 			if previous.Clicked() {
 				app.sendPlayer(PlayerCommand{Action: "previous"})
 			}
@@ -724,25 +777,27 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				app.sendPlayer(PlayerCommand{Action: "repeat", Enabled: app.player.Repeat})
 			}
 
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconVolume).FontSize(16).TextColor(app.theme.TextMuted)
-				ui.Text(c, "音量").FontSize(11).TextColor(app.theme.TextMuted)
+			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, iconVolume).FontSize(16).TextColor(app.theme.TextMuted)
+					ui.Text(c, "音量").FontSize(11).TextColor(app.theme.TextMuted)
+				})
+				volume := app.player.Volume
+				if math.IsNaN(volume) || math.IsInf(volume, 0) {
+					volume = 1
+				}
+				if volume < 0 {
+					volume = 0
+				}
+				if volume > 1 {
+					volume = 1
+				}
+				app.player.Volume = volume
+				volumeSlider := ui.Slider(c, &app.player.Volume, 0, 1).Label("音量").Width(110).Disabled(!app.player.Ready)
+				if volumeSlider.Changed() {
+					app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.player.Volume})
+				}
 			})
-			volume := app.player.Volume
-			if math.IsNaN(volume) || math.IsInf(volume, 0) {
-				volume = 1
-			}
-			if volume < 0 {
-				volume = 0
-			}
-			if volume > 1 {
-				volume = 1
-			}
-			app.player.Volume = volume
-			volumeSlider := ui.Slider(c, &app.player.Volume, 0, 1).Label("音量").Width(110).Disabled(!app.player.Ready)
-			if volumeSlider.Changed() {
-				app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.player.Volume})
-			}
 		})
 		if app.playerError != "" {
 			ui.Text(c, app.playerError).FontSize(12).TextColor(app.theme.Danger)
@@ -774,10 +829,24 @@ func (app *nativeApp) currentTrack() *MylistItem {
 	return nil
 }
 
-func (app *nativeApp) openSaved(id string) {
-	if id == "" {
+// openList shows the list id names: the one loaded, the saved copy, else
+// the API's first page.
+func (app *nativeApp) openList(id string) {
+	if id == "" || app.page != nil && app.page.ID == id {
 		return
 	}
+	if app.loading && app.loadingID == id {
+		return
+	}
+	if app.openSaved(id) {
+		return
+	}
+	app.fetchList(id)
+}
+
+// openSaved shows the saved snapshot of the mylist id names, reporting
+// whether there is one; the route is already the page shown.
+func (app *nativeApp) openSaved(id string) bool {
 	for _, entry := range app.saved {
 		if entry.ID != id {
 			continue
@@ -785,8 +854,6 @@ func (app *nativeApp) openSaved(id string) {
 		app.loadToken++
 		app.loading = false
 		app.pendingAdvance = false
-		app.atHome = false
-		app.selectedSavedID = entry.ID
 		total := entry.TotalItemCount
 		if total == 0 {
 			total = len(entry.Items)
@@ -807,24 +874,21 @@ func (app *nativeApp) openSaved(id string) {
 		app.setStatus("保存内容から表示中（更新するまで通信しません）")
 		app.resetPlayerState()
 		app.sendPlayer(PlayerCommand{Action: "setItems", Items: page.Items})
-		return
+		return true
 	}
+	return false
 }
 
-func (app *nativeApp) lookup() {
-	if app.loading || strings.TrimSpace(app.input) == "" {
-		if strings.TrimSpace(app.input) == "" {
-			app.setStatus("マイリストのURLまたはIDを入力してください。")
-			app.statusError = true
-		}
+// fetchList loads page 1 of the list the input names, an ID or a URL, into
+// the player and the view; the route follows the ID the API reports.
+func (app *nativeApp) fetchList(input string) {
+	if strings.TrimSpace(input) == "" {
 		return
 	}
-	input := strings.TrimSpace(app.input)
 	app.loadToken++
 	token := app.loadToken
 	app.loading = true
-	app.atHome = false
-	app.selectedSavedID = ""
+	app.loadingID = input
 	app.pendingAdvance = false
 	app.page = nil
 	app.hasMore = false
@@ -848,6 +912,7 @@ func (app *nativeApp) lookup() {
 			app.resetThumbFailures()
 			app.queueThumbnailFill(page.Items)
 			app.setStatus("")
+			app.router.Push(listPath(page.ID))
 			app.sendPlayer(PlayerCommand{Action: "setItems", Items: page.Items})
 		})
 	}()
@@ -898,13 +963,14 @@ func (app *nativeApp) advance(autoplay bool) {
 	}
 }
 
+// selectTrack plays a track the row was clicked on, from its start.
 func (app *nativeApp) selectTrack(item MylistItem) {
 	if !isPlayable(item) {
 		return
 	}
 	app.pendingAdvance = false
 	app.playerError = ""
-	app.sendPlayer(PlayerCommand{Action: "select", WatchID: item.WatchID})
+	app.sendPlayer(PlayerCommand{Action: "select", WatchID: item.WatchID, Autoplay: true})
 }
 
 func (app *nativeApp) resetPlayerState() {
@@ -944,7 +1010,6 @@ func (app *nativeApp) saveEntry(id, name string) {
 			app.saved = saved
 			for _, entry := range saved {
 				if entry.ID == id && app.page != nil && app.page.ID == id {
-					app.selectedSavedID = id
 					page := MylistPage{
 						ID:             entry.ID,
 						Name:           entry.Name,
@@ -973,7 +1038,6 @@ func (app *nativeApp) removeSaved(entry SavedMylist) {
 		return
 	}
 	app.saved = saved
-	app.selectedSavedID = ""
 	app.setStatus("保存した参照を削除しました。")
 }
 

@@ -7,6 +7,8 @@ import {
   pauseCommand,
   playCommand,
   playerStatusToPlaying,
+  previousRestartMs,
+  previousRestarts,
   seekCommand,
   shouldFireEnded,
   volumeCommand,
@@ -108,6 +110,14 @@ describe("shouldFireEnded", () => {
     expect(shouldFireEnded(null, 4)).toBe(true);
     expect(shouldFireEnded(null, 2)).toBe(false);
     expect(shouldFireEnded(4, 2)).toBe(false);
+  });
+});
+
+describe("previousRestarts", () => {
+  test("restarts a track that is past its opening, else goes back", () => {
+    expect(previousRestarts(0)).toBe(false);
+    expect(previousRestarts(previousRestartMs)).toBe(false);
+    expect(previousRestarts(previousRestartMs + 1)).toBe(true);
   });
 });
 
