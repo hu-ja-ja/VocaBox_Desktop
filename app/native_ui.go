@@ -50,21 +50,26 @@ type nativeApp struct {
 	saved           []SavedMylist
 	selectedSavedID string
 	sidebarOpen     bool
-	input           string
-	page            *MylistPage
-	nextPage        int
-	hasMore         bool
-	loading         bool
-	saving          bool
-	loadToken       uint64
-	status          string
-	statusError     bool
-	playerError     string
-	trackList       ui.ListState
-	player          PlayerReport
-	playerSession   string
-	playerSequence  uint64
-	pendingAdvance  bool
+	// atHome shows the home view while the opened list stays in place, so
+	// playback and the player bar survive going home.
+	atHome bool
+	// importing shows the dialog the home's import card opens.
+	importing      bool
+	input          string
+	page           *MylistPage
+	nextPage       int
+	hasMore        bool
+	loading        bool
+	saving         bool
+	loadToken      uint64
+	status         string
+	statusError    bool
+	playerError    string
+	trackList      ui.ListState
+	player         PlayerReport
+	playerSession  string
+	playerSequence uint64
+	pendingAdvance bool
 
 	thumbs    map[string]*ui.Bitmap
 	thumbBusy map[string]bool
@@ -92,13 +97,14 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	t.Radius = 8
 	t.Spacing = 4
 	return &nativeApp{
-		mylist:      mylist,
-		theme:       t,
-		sidebarOpen: true,
-		player:      PlayerReport{Volume: 1},
-		thumbs:      map[string]*ui.Bitmap{},
-		thumbBusy:   map[string]bool{},
-		thumbFail:   map[string]bool{},
+		mylist:          mylist,
+		theme:           t,
+		sidebarOpen:     true,
+		selectedSavedID: homeItemID,
+		player:          PlayerReport{Volume: 1},
+		thumbs:          map[string]*ui.Bitmap{},
+		thumbBusy:       map[string]bool{},
+		thumbFail:       map[string]bool{},
 	}
 }
 
@@ -120,6 +126,7 @@ func (app *nativeApp) view(c *ui.Context) {
 			ui.WebView(c, app.playerView).Absolute().Left(0).Top(0).Size(1, 1).Opacity(0).PassThrough()
 		}
 	})
+	ui.Modal(c, &app.importing, func() { app.importDialog(c) })
 }
 
 func (app *nativeApp) sidebar(c *ui.Context) {
@@ -138,24 +145,20 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 			})
 
 			ui.Divider(c)
-			ui.Text(c, "公開マイリスト").FontSize(12).FontWeight(700).TextColor(app.theme.TextMuted)
-			input := ui.TextInput(c, &app.input).Placeholder("URL または ID").Label("公開マイリストのURLまたはID").FillWidth()
-			if input.Submitted() {
-				app.lookup()
-			}
-			if ui.PrimaryButton(c, "開く").FillWidth().Clicked() {
-				app.lookup()
-			}
-
-			ui.Divider(c)
-			ui.Text(c, "ライブラリ").FontSize(12).FontWeight(700).TextColor(app.theme.TextMuted)
 			sidebar := ui.Sidebar(c, &app.selectedSavedID, func() {
-				for _, entry := range app.saved {
-					ui.SidebarItem(c, entry.ID, nil, entry.Name)
-				}
+				ui.SidebarItem(c, homeItemID, nil, "ホーム")
+				ui.SidebarSection(c, "ライブラリ", nil, func() {
+					for _, entry := range app.saved {
+						ui.SidebarItem(c, entry.ID, nil, entry.Name)
+					}
+				})
 			}).Grow(1)
 			if sidebar.Changed() {
-				app.openSaved(app.selectedSavedID)
+				if app.selectedSavedID == homeItemID {
+					app.showHome()
+				} else {
+					app.openSaved(app.selectedSavedID)
+				}
 			}
 			if len(app.saved) == 0 {
 				ui.Text(c, "保存したリストはありません").FontSize(12).TextColor(app.theme.TextMuted)
@@ -202,20 +205,184 @@ func (app *nativeApp) sidebarToggle(c *ui.Context, opening bool) {
 	}
 }
 
+// homeItemID selects the home view in the sidebar; saved mylist IDs are
+// digits, so it cannot clash with one.
+const homeItemID = "home"
+
+// playlistCardWidth is the width of one playlist card: two 16:9 tiles wide
+// plus its own padding. Two cards fit even at the narrowest window with the
+// sidebar open.
+const playlistCardWidth = 200
+
+// showHome returns to the home view, leaving the opened list and its
+// playback in place.
+func (app *nativeApp) showHome() {
+	app.atHome = true
+	app.selectedSavedID = homeItemID
+}
+
+// homeView shows the import card and the saved playlists as cards, each
+// carrying the pictures of its first four tracks; clicking a playlist card
+// opens it.
+func (app *nativeApp) homeView(c *ui.Context) {
+	ui.Column(c).Grow(1).FillHeight().Gap(16).Children(func() {
+		ui.Column(c).Gap(5).Children(func() {
+			ui.Text(c, "ホーム").FontSize(27).Bold()
+			sub := "保存したプレイリストから選んで再生"
+			if len(app.saved) == 0 {
+				sub = "公開マイリストは「+」から読み込めます"
+			}
+			ui.Text(c, sub).FontSize(13).TextColor(app.theme.TextMuted)
+		})
+		ui.Scroll(c).Grow(1).Children(func() {
+			ui.Row(c).Wrap().Gap(16).FillWidth().Children(func() {
+				for i := range app.saved {
+					app.playlistCard(c, app.saved[i])
+				}
+				app.importCard(c)
+			})
+		})
+		app.statusLine(c)
+	})
+}
+
+// importCard shows the last card of the home: one big tile with a plus,
+// opening the dialog that reads a public mylist in.
+func (app *nativeApp) importCard(c *ui.Context) {
+	card := ui.Button(c, "").Label("マイリストを読み込む").Width(playlistCardWidth).
+		Padding(12).Radius(12).Justify(ui.Start).AlignItems(ui.Start)
+	if card.Hovered() {
+		card.Background(app.theme.SurfaceHover)
+	} else {
+		card.Background(app.theme.Surface)
+	}
+	card.Children(func() {
+		ui.Column(c).FillWidth().Gap(10).Children(func() {
+			ui.Box(c).FillWidth().AspectRatio(1).Radius(6).Center().
+				Background(app.theme.SurfaceHover).Border(1, app.theme.Border).Children(func() {
+				ui.Icon(c, iconPlus).FontSize(32).TextColor(app.theme.TextMuted)
+			})
+			ui.Text(c, "マイリストを読み込む").FontSize(14).Bold().SingleLine().Ellipsis("…")
+			ui.Text(c, "URLまたはIDから").FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
+		})
+	})
+	if card.Clicked() {
+		app.importing = true
+	}
+}
+
+// importDialog builds the dialog reading a public mylist in: a field for
+// its URL or ID, and the buttons opening or dismissing it.
+func (app *nativeApp) importDialog(c *ui.Context) {
+	ui.Column(c).Width(380).Gap(14).Children(func() {
+		ui.Text(c, "公開マイリストを読み込む").FontSize(20).Bold()
+		ui.Text(c, "ニコニコ動画の公開マイリストのURLまたはIDを入力してください。").FontSize(12).TextColor(app.theme.TextMuted)
+		field := ui.TextInput(c, &app.input).Placeholder("URL または ID").AutoFocus().
+			Label("公開マイリストのURLまたはID").FillWidth()
+		if field.Submitted() && strings.TrimSpace(app.input) != "" {
+			app.importInput()
+		}
+		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
+			if button := ui.Button(c, "キャンセル"); button.Clicked() {
+				app.importing = false
+			}
+			if button := ui.PrimaryButton(c, "開く").Disabled(strings.TrimSpace(app.input) == ""); button.Clicked() {
+				app.importInput()
+			}
+		})
+	})
+}
+
+// importInput opens the typed mylist and leaves the dialog; a load already
+// running keeps the dialog open.
+func (app *nativeApp) importInput() {
+	if app.loading {
+		return
+	}
+	app.importing = false
+	app.lookup()
+}
+
+// statusLine shows the app's status, silent when it has none. List pages
+// show it in their footer instead.
+func (app *nativeApp) statusLine(c *ui.Context) {
+	if app.status == "" {
+		return
+	}
+	color := app.theme.TextMuted
+	if app.statusError {
+		color = app.theme.Danger
+	}
+	ui.Text(c, app.status).FontSize(12).TextColor(color)
+}
+
+// playlistCard shows one saved playlist: its first four track pictures in
+// a 2×2 tile, its name and its size. Clicking the card opens the playlist.
+func (app *nativeApp) playlistCard(c *ui.Context, entry SavedMylist) {
+	card := ui.Button(c, "").Label(entry.Name).Width(playlistCardWidth).
+		Padding(12).Radius(12).Justify(ui.Start).AlignItems(ui.Start)
+	if card.Hovered() {
+		card.Background(app.theme.SurfaceHover)
+	} else {
+		card.Background(app.theme.Surface)
+	}
+	card.Children(func() {
+		ui.Column(c).FillWidth().Gap(10).Children(func() {
+			app.cardTiles(c, entry.Items)
+			ui.Text(c, entry.Name).FontSize(14).Bold().SingleLine().Ellipsis("…")
+			ui.Text(c, savedMeta(entry)).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
+		})
+	})
+	if card.Clicked() {
+		app.openSaved(entry.ID)
+	}
+}
+
+// cardTiles lays a playlist's first four track pictures out as a 2×2 tile,
+// keeping the corners filled with placeholders where a track or its
+// picture is missing.
+func (app *nativeApp) cardTiles(c *ui.Context, items []MylistItem) {
+	ui.Grid(c).Columns(2).Gap(4).Children(func() {
+		for i := 0; i < 4; i++ {
+			if i < len(items) {
+				app.cardTile(c, items[i])
+			} else {
+				ui.Box(c).AspectRatio(1).Radius(6).Background(app.theme.SurfaceHover)
+			}
+		}
+	})
+}
+
+// cardTile shows one track's picture as a square tile, a placeholder while
+// it loads or where the track has none.
+func (app *nativeApp) cardTile(c *ui.Context, item MylistItem) {
+	bitmap := app.thumbs[item.WatchID]
+	if bitmap == nil && item.Available {
+		app.requestThumbnail(item)
+	}
+	if bitmap != nil {
+		ui.Image(c, bitmap).AspectRatio(1).Fit(ui.Cover).Radius(6)
+		return
+	}
+	ui.Box(c).AspectRatio(1).Radius(6).Background(app.theme.SurfaceHover)
+}
+
+// savedMeta labels a playlist card: its owner when known, and its size.
+func savedMeta(entry SavedMylist) string {
+	total := entry.TotalItemCount
+	if total == 0 {
+		total = len(entry.Items)
+	}
+	if entry.Owner != "" {
+		return fmt.Sprintf("%s  ·  全%d曲", entry.Owner, total)
+	}
+	return fmt.Sprintf("全%d曲", total)
+}
+
 func (app *nativeApp) content(c *ui.Context) {
 	ui.Column(c).Grow(1).FillHeight().Padding(28, 30, 18).Gap(18).Children(func() {
-		if app.page == nil {
-			ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
-				ui.Text(c, "ライブラリから再生").FontSize(29).Bold()
-				ui.Text(c, "保存したマイリストを選ぶか、公開リストのURL・IDを開いてください。").TextColor(app.theme.TextMuted)
-				if app.status != "" {
-					color := app.theme.TextMuted
-					if app.statusError {
-						color = app.theme.Danger
-					}
-					ui.Text(c, app.status).TextColor(color)
-				}
-			})
+		if app.page == nil || app.atHome {
+			app.homeView(c)
 			return
 		}
 
@@ -618,8 +785,8 @@ func (app *nativeApp) openSaved(id string) {
 		app.loadToken++
 		app.loading = false
 		app.pendingAdvance = false
+		app.atHome = false
 		app.selectedSavedID = entry.ID
-		app.input = entry.ID
 		total := entry.TotalItemCount
 		if total == 0 {
 			total = len(entry.Items)
@@ -656,6 +823,7 @@ func (app *nativeApp) lookup() {
 	app.loadToken++
 	token := app.loadToken
 	app.loading = true
+	app.atHome = false
 	app.selectedSavedID = ""
 	app.pendingAdvance = false
 	app.page = nil

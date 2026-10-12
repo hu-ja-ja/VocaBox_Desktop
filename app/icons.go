@@ -33,6 +33,9 @@ var volumeSVG []byte
 //go:embed icons/menu.svg
 var menuSVG []byte
 
+//go:embed icons/plus.svg
+var plusSVG []byte
+
 var (
 	iconPlay        = ui.MustParseSVG(playSVG)
 	iconPause       = ui.MustParseSVG(pauseSVG)
@@ -42,4 +45,5 @@ var (
 	iconShuffle     = ui.MustParseSVG(shuffleSVG)
 	iconVolume      = ui.MustParseSVG(volumeSVG)
 	iconMenu        = ui.MustParseSVG(menuSVG)
+	iconPlus        = ui.MustParseSVG(plusSVG)
 )

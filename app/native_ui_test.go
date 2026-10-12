@@ -11,7 +11,7 @@ import (
 func TestNativeUITogglesSidebar(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	tester := ui.NewTester(app.view, 1120, 760)
-	if !tester.HasText("VocaBox") || !tester.HasText("公開マイリスト") {
+	if !tester.HasText("VocaBox") || !tester.HasText("ライブラリ") {
 		t.Fatalf("sidebar is not shown initially: %q", tester.Texts())
 	}
 	wordmark, hasWordmark := tester.Find("VocaBox")
@@ -26,7 +26,7 @@ func TestNativeUITogglesSidebar(t *testing.T) {
 	if err := tester.Click("サイドバーを閉じる"); err != nil {
 		t.Fatal(err)
 	}
-	if _, hasLogo := tester.Find("V"); app.sidebarOpen || !hasLogo || tester.HasText("公開マイリスト") {
+	if _, hasLogo := tester.Find("V"); app.sidebarOpen || !hasLogo || tester.HasText("ライブラリ") {
 		t.Fatalf("sidebar did not close cleanly: open=%v texts=%q", app.sidebarOpen, tester.Texts())
 	}
 	openButton, ok := tester.Find("サイドバーを開く")
@@ -82,6 +82,44 @@ func TestNativeUIOpensSavedSnapshot(t *testing.T) {
 	}
 }
 
+func TestNativeUIHomeImportsFromCard(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	// An empty library still offers the import card.
+	if !tester.HasText("マイリストを読み込む") {
+		t.Fatalf("import card is missing: %q", tester.Texts())
+	}
+	if tester.HasText("公開マイリストのURLまたはID") {
+		t.Fatalf("the sidebar still carries the import field: %q", tester.Texts())
+	}
+	if err := tester.Click("マイリストを読み込む"); err != nil {
+		t.Fatal(err)
+	}
+	if !app.importing {
+		t.Fatal("import card did not open the dialog")
+	}
+	if !tester.HasText("公開マイリストを読み込む") {
+		t.Fatalf("dialog is not shown: %q", tester.Texts())
+	}
+	if !tester.Focused("公開マイリストのURLまたはID") {
+		t.Fatal("the dialog did not focus its field")
+	}
+	tester.Type("27411728")
+	if app.input != "27411728" {
+		t.Fatalf("typing did not reach the field: %q", app.input)
+	}
+	if err := tester.Click("キャンセル"); err != nil {
+		t.Fatal(err)
+	}
+	if app.importing {
+		t.Fatal("cancel did not close the dialog")
+	}
+	if app.page != nil || len(app.pending) != 0 {
+		t.Fatalf("cancel must not open anything: pending=%d page=%#v", len(app.pending), app.page)
+	}
+}
+
 func hasCommand(commands []PlayerCommand, action string) bool {
 	for _, command := range commands {
 		if command.Action == action {
@@ -89,6 +127,54 @@ func hasCommand(commands []PlayerCommand, action string) bool {
 		}
 	}
 	return false
+}
+
+func TestNativeUIHomeOpensPlaylistCards(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	// With the sidebar closed the card is the only element named after the
+	// playlist, so a click targets the card.
+	app.sidebarOpen = false
+	app.saved = []SavedMylist{{
+		ID:             "123",
+		Name:           "作業用ホーム",
+		TotalItemCount: 6,
+		Items: []MylistItem{
+			{WatchID: "sm1", Title: "一曲目", Available: true},
+			{WatchID: "sm2", Title: "二曲目", Available: true},
+			{WatchID: "sm3", Title: "三曲目", Available: true},
+			{WatchID: "sm4", Title: "四曲目", Available: true},
+			{WatchID: "sm5", Title: "五曲目", Available: true},
+		},
+	}}
+
+	tester := ui.NewTester(app.view, 1120, 760)
+	if !tester.HasText("ホーム") || !tester.HasText("作業用ホーム") || !tester.HasText("全6曲") {
+		t.Fatalf("home does not show the playlist card: %q", tester.Texts())
+	}
+	if err := tester.Click("作業用ホーム"); err != nil {
+		t.Fatal(err)
+	}
+	if app.atHome || app.page == nil || app.page.ID != "123" {
+		t.Fatalf("card did not open the playlist: home=%v page=%#v", app.atHome, app.page)
+	}
+	if !tester.HasText("一曲目") {
+		t.Fatalf("opened list is not shown: %q", tester.Texts())
+	}
+
+	app.sidebarOpen = true
+	tester.Frame()
+	if err := tester.Click("ホーム"); err != nil {
+		t.Fatal(err)
+	}
+	if !app.atHome || app.selectedSavedID != homeItemID {
+		t.Fatalf("sidebar home item did not return home: home=%v selected=%q", app.atHome, app.selectedSavedID)
+	}
+	if !tester.HasText("保存したプレイリストから選んで再生") {
+		t.Fatalf("home view is not shown: %q", tester.Texts())
+	}
+	if app.page == nil || app.page.ID != "123" {
+		t.Fatalf("the opened list was dropped: %#v", app.page)
+	}
 }
 
 func TestThumbWidthKeepsAspect(t *testing.T) {
