@@ -15,7 +15,24 @@ func main() {
 	} else {
 		app.saved = saved
 	}
+	if settings, err := mylist.LoadSettings(); err != nil {
+		log.Printf("settings: %v", err)
+	} else {
+		app.player.Volume = settings.Volume
+		app.player.Shuffle = settings.Shuffle
+		app.player.Repeat = settings.Repeat
+	}
 	mygo.Bind(mylist, &PlayerBridge{app: app})
+
+	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		if err := mylist.SaveSettings(Settings{
+			Volume:  app.player.Volume,
+			Shuffle: app.player.Shuffle,
+			Repeat:  app.player.Repeat,
+		}); err != nil {
+			log.Printf("settings: %v", err)
+		}
+	})
 
 	mygo.App.WhenReady(func() {
 		app.window = mygo.NewWindow(mygo.WindowOptions{

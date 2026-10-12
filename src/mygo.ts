@@ -95,6 +95,17 @@ export interface SavedMylist {
   items?: MylistItem[];
 }
 
+/**
+ * Settings holds the preferences kept across runs: the player's volume,
+ * shuffle and repeat. A missing file, or a field a file does not carry,
+ * leaves the default.
+ */
+export interface Settings {
+  volume: number;
+  shuffle: boolean;
+  repeat: boolean;
+}
+
 // ---- Services ----
 
 /**
@@ -126,6 +137,14 @@ export const Mylist = {
     return call("Mylist.ListSaved");
   },
   /**
+   * LoadSettings returns the stored preferences, or the defaults when none are
+   * saved yet. Unmarshalling onto the defaults keeps fields an older file does
+   * not carry.
+   */
+  loadSettings(): Promise<Settings> {
+    return call("Mylist.LoadSettings");
+  },
+  /**
    * RemoveSaved drops the local snapshot of the mylist identified by input.
    * Server data is never touched.
    */
@@ -140,6 +159,13 @@ export const Mylist = {
    */
   saveMylist(input: string, name: string): Promise<SavedMylist[]> {
     return call("Mylist.SaveMylist", input, name);
+  },
+  /**
+   * SaveSettings writes the preferences, creating the config directory as
+   * needed.
+   */
+  saveSettings(settings: Settings): Promise<void> {
+    return call("Mylist.SaveSettings", settings);
   },
   /**
    * Thumbnail returns the picture of the video at watchID: the disk cache

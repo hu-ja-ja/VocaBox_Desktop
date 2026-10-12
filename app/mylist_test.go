@@ -901,3 +901,35 @@ func TestFetchAllSpacesPages(t *testing.T) {
 		t.Errorf("pages fetched %v apart; want the page interval to space them", gap)
 	}
 }
+
+func TestSettingsRoundTrip(t *testing.T) {
+	m := &Mylist{configDir: t.TempDir()}
+	// A missing file yields the defaults.
+	got, err := m.LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings() = %v", err)
+	}
+	if got != defaultSettings() {
+		t.Fatalf("defaults = %#v; want %#v", got, defaultSettings())
+	}
+
+	want := Settings{Volume: 0.35, Shuffle: true, Repeat: true}
+	if err := m.SaveSettings(want); err != nil {
+		t.Fatalf("SaveSettings() = %v", err)
+	}
+	if got, err = m.LoadSettings(); err != nil || got != want {
+		t.Fatalf("round trip = %#v, %v; want %#v", got, err, want)
+	}
+
+	// A file an older version wrote, missing a field, keeps that default.
+	path, err := m.settingsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"repeat":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = m.LoadSettings(); err != nil || got.Volume != 1 || got.Shuffle || !got.Repeat {
+		t.Fatalf("partial file = %#v, %v; want volume 1, shuffle off, repeat on", got, err)
+	}
+}

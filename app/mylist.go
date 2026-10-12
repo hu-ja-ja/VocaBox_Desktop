@@ -144,6 +144,72 @@ type SavedMylist struct {
 // maxSavedBody bounds the saved-list file.
 const maxSavedBody = 1 << 20
 
+// maxSettingsBody bounds the settings file.
+const maxSettingsBody = 64 << 10
+
+// Settings holds the preferences kept across runs: the player's volume,
+// shuffle and repeat. A missing file, or a field a file does not carry,
+// leaves the default.
+type Settings struct {
+	Volume  float64 `json:"volume"`
+	Shuffle bool    `json:"shuffle"`
+	Repeat  bool    `json:"repeat"`
+}
+
+// defaultSettings is what a missing or reset settings file yields.
+func defaultSettings() Settings { return Settings{Volume: 1} }
+
+func (m *Mylist) settingsPath() (string, error) {
+	return m.configPath("settings.json")
+}
+
+// LoadSettings returns the stored preferences, or the defaults when none are
+// saved yet. Unmarshalling onto the defaults keeps fields an older file does
+// not carry.
+func (m *Mylist) LoadSettings() (Settings, error) {
+	path, err := m.settingsPath()
+	if err != nil {
+		return Settings{}, err
+	}
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return defaultSettings(), nil
+	}
+	if err != nil {
+		return Settings{}, errors.New("設定を読み込めませんでした")
+	}
+	defer f.Close()
+	body, err := io.ReadAll(io.LimitReader(f, maxSettingsBody+1))
+	if err != nil || len(body) > maxSettingsBody {
+		return Settings{}, errors.New("設定を読み込めませんでした")
+	}
+	settings := defaultSettings()
+	if err := json.Unmarshal(body, &settings); err != nil {
+		return Settings{}, errors.New("設定の記録が壊れています")
+	}
+	return settings, nil
+}
+
+// SaveSettings writes the preferences, creating the config directory as
+// needed.
+func (m *Mylist) SaveSettings(settings Settings) error {
+	path, err := m.settingsPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return errors.New("保存先フォルダーを作成できませんでした")
+	}
+	body, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return errors.New("設定を書き込めませんでした")
+	}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		return errors.New("設定を書き込めませんでした")
+	}
+	return nil
+}
+
 // ListSaved returns saved public-mylist snapshots, oldest first. A missing
 // file means none saved yet.
 func (m *Mylist) ListSaved() ([]SavedMylist, error) {

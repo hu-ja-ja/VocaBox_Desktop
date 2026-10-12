@@ -789,11 +789,8 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				app.sendPlayer(PlayerCommand{Action: "repeat", Enabled: app.player.Repeat})
 			}
 
-			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Justify(ui.End).AlignItems(ui.Center).Children(func() {
-				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, iconVolume).FontSize(16).TextColor(app.theme.TextMuted)
-					ui.Text(c, "音量").FontSize(11).TextColor(app.theme.TextMuted)
-				})
+			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Gap(8).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, iconVolume).FontSize(16).TextColor(app.theme.TextMuted)
 				volume := app.player.Volume
 				if math.IsNaN(volume) || math.IsInf(volume, 0) {
 					volume = 1
@@ -805,7 +802,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 					volume = 1
 				}
 				app.player.Volume = volume
-				volumeSlider := ui.Slider(c, &app.player.Volume, 0, 1).Label("音量").Width(110).Disabled(!app.player.Ready)
+				volumeSlider := ui.Slider(c, &app.player.Volume, 0, 1).Label("音量").Width(110)
 				if volumeSlider.Changed() {
 					app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.player.Volume})
 				}
@@ -1123,6 +1120,14 @@ func (b *PlayerBridge) Report(report PlayerReport) {
 				if currentID != "" {
 					app.pending = append(app.pending, PlayerCommand{Action: "select", WatchID: currentID, Autoplay: wasPlaying})
 				}
+			} else {
+				// First load: the page starts on its own defaults, so the
+				// saved preferences are handed over before anything plays.
+				app.pending = append(app.pending,
+					PlayerCommand{Action: "volume", Volume: volume},
+					PlayerCommand{Action: "shuffle", Enabled: shuffle},
+					PlayerCommand{Action: "repeat", Enabled: repeat},
+				)
 			}
 			app.flushPlayerCommands()
 			return
