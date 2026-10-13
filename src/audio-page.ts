@@ -1,6 +1,7 @@
 import { events, PlayerBridge, type MylistItem, type PlayerCommand, type PlayerReport } from "./mygo";
 import { EmbedPlayer, findTrack, previousRestarts } from "./player";
 import { PlayQueue } from "./queue";
+import { createReportQueue } from "./report";
 
 const slot = document.querySelector<HTMLElement>("#player-slot")!;
 const queue = new PlayQueue<MylistItem>();
@@ -24,10 +25,25 @@ let volume = 1;
 let error = "";
 const session = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 let sequence = 0;
+// seekResume counts the times the page asks the embed to play on after a
+// seek: the embed stops the track as it seeks (nicovideo does), so the page
+// keeps the button playing and the track going rather than flickering it
+// stopped. It is reset once the embed plays again, or the user takes over.
+const seekResumeTries = 3;
+let seekResume = 0;
 
 function playable(item: MylistItem): boolean {
   return item.available && !!item.title;
 }
+
+// sendReport hands the state to the app through a coalescing queue: the
+// embed answers a change with a burst of events, and every report costs the
+// app a rebuild, so state goes at most once per reportIntervalMs, the
+// latest winning. Ready, ended, and needsNext, which the app acts on, cross
+// at once.
+const sendReport = createReportQueue<PlayerReport>((payload) => {
+  void PlayerBridge.report(payload).catch((cause: unknown) => console.error("player bridge:", cause));
+});
 
 function report(type = "state"): void {
   const track = current;
@@ -59,7 +75,7 @@ function report(type = "state"): void {
     queuePos: track === null ? -1 : queue.currentIndex(),
     items: panel,
   };
-  void PlayerBridge.report(payload).catch((cause: unknown) => console.error("player bridge:", cause));
+  sendReport(payload, type !== "state");
 }
 
 // adoptQueue makes the shown list the playback queue, keeping shuffle,
@@ -92,6 +108,7 @@ function play(item: MylistItem, autoplay: boolean): void {
   positionMs = 0;
   durationMs = NaN;
   error = "";
+  seekResume = 0;
   let autoStarted = false;
   const next = new EmbedPlayer(slot, item.videoId ?? item.watchId, item.title ?? item.watchId, {
     onReady: () => {
@@ -104,6 +121,14 @@ function play(item: MylistItem, autoplay: boolean): void {
       report();
     },
     onPlayingChange: (value) => {
+      if (value) seekResume = 0;
+      if (!value && seekResume > 0) {
+        // The embed dropped to a stop as it sought: play on rather than
+        // showing the button stopped, and give up after a few tries.
+        seekResume -= 1;
+        next.play();
+        return;
+      }
       playing = value;
       report();
     },
@@ -133,6 +158,14 @@ function select(item: MylistItem, autoplay = false): void {
   if (queueId !== listId) adoptQueue();
   if (queue.select(item) === null) return;
   play(item, autoplay);
+}
+
+// seekTo moves the embed to timeMs and keeps the track playing through it:
+// the embed stops as it seeks (nicovideo does), so the page plays on when it
+// reports so, while the track was playing.
+function seekTo(timeMs: number): void {
+  seekResume = playing ? seekResumeTries : 0;
+  player?.seek(timeMs);
 }
 
 function handle(command: PlayerCommand): void {
@@ -169,7 +202,7 @@ function handle(command: PlayerCommand): void {
       // Past the opening of the track, the button restarts it; pressing it
       // again from the start then goes to the one before.
       if (previousRestarts(positionMs)) {
-        player?.seek(0);
+        seekTo(0);
         positionMs = 0;
         report();
         break;
@@ -180,13 +213,15 @@ function handle(command: PlayerCommand): void {
       break;
     }
     case "play":
+      seekResume = 0;
       player?.play();
       break;
     case "pause":
+      seekResume = 0;
       player?.pause();
       break;
     case "seek":
-      player?.seek(command.positionMs ?? 0);
+      seekTo(command.positionMs ?? 0);
       break;
     case "volume":
       volume = command.volume ?? 1;

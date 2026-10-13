@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -121,6 +122,23 @@ type nativeApp struct {
 	playerSession  string
 	playerSequence uint64
 	pendingAdvance bool
+	// seekValue is the position the bar shows: the player's while it plays,
+	// and the user's while they scrub the bar, so the reports of the track
+	// playing never tug the thumb back from under the pointer. seekHeld
+	// says the pointer is on the bar; seekSettling that a seek was sent and
+	// the player has yet to report it landing.
+	seekValue    float64
+	seekHeld     bool
+	seekSettling bool
+	// volumeValue is the level the volume bar shows: the player's, and the
+	// user's while they drag it, so the reports of the track playing never
+	// tug the thumb from under the pointer. volumeHeld says the pointer is
+	// on the bar; volumeSent is the level the player was last told, and
+	// volumeSentAt when it was told it.
+	volumeValue  float64
+	volumeHeld   bool
+	volumeSent   float64
+	volumeSentAt time.Time
 
 	thumbs    map[string]*ui.Bitmap
 	thumbBusy map[string]bool
@@ -956,6 +974,21 @@ func (app *nativeApp) resetThumbFailures() {
 	app.thumbFail = map[string]bool{}
 }
 
+// seekSettleMS is how near the player's reported position must come to the
+// seek's before the bar follows the player again, rather than holding the
+// position the user let go at.
+const seekSettleMS = 1000
+
+// volumeSendStep is how far the level must leave the last level the player
+// was told before a drag tells it again: a command per pointer frame floods
+// the page with commands and the window with the reports they bring.
+const volumeSendStep = 0.05
+
+// volumeSendInterval bounds how fast a drag tells the player: a fast drag
+// crosses a step on every pointer frame, and the player page and the window
+// behind it feel every command.
+const volumeSendInterval = 100 * time.Millisecond
+
 func (app *nativeApp) playerBar(c *ui.Context) {
 	ui.Column(c).Padding(12, 20, 14).Gap(8).Background(app.theme.Surface).
 		Border(1, app.theme.Border).Radius(12).Children(func() {
@@ -964,11 +997,28 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			max = 1
 		}
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, formatMillis(app.player.PositionMS)).Width(42).FontSize(11).TextColor(app.theme.TextMuted)
-			seek := ui.Slider(c, &app.player.PositionMS, 0, max).Label("再生位置").Grow(1).Disabled(!app.player.Ready)
-			if seek.Changed() {
-				app.sendPlayer(PlayerCommand{Action: "seek", PositionMS: app.player.PositionMS})
+			// The bar shows the player's position, except while the user
+			// scrubs it and until the player reports the seek landing: then
+			// it keeps its own position, so the reports of the track playing
+			// never tug the thumb back from under the pointer.
+			if app.seekSettling && math.Abs(app.player.PositionMS-app.seekValue) < seekSettleMS {
+				app.seekSettling = false
 			}
+			if !app.seekHeld && !app.seekSettling {
+				app.seekValue = app.player.PositionMS
+			}
+			ui.Text(c, formatMillis(app.seekValue)).Width(42).FontSize(11).TextColor(app.theme.TextMuted)
+			seek := ui.Slider(c, &app.seekValue, 0, max).Label("再生位置").Grow(1).Disabled(!app.player.Ready)
+			// The bar seeks once, when the pointer lets go or the keys move
+			// it: seeking on every frame of the drag stutters the player and
+			// leaves playback to be restarted. Dragged keeps the hold past
+			// the bar's thin strip, so a drag that leaves it still commits.
+			_, _, held := seek.Dragged()
+			if !held && (app.seekHeld || seek.Changed()) {
+				app.sendPlayer(PlayerCommand{Action: "seek", PositionMS: app.seekValue})
+				app.seekSettling = true
+			}
+			app.seekHeld = held
 			ui.Text(c, formatMillis(app.player.DurationMS)).Width(42).FontSize(11).TextAlign(ui.End).TextColor(app.theme.TextMuted)
 		})
 		controls := ui.Row(c).Gap(16).AlignItems(ui.Center)
@@ -1047,10 +1097,34 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 					volume = 1
 				}
 				app.player.Volume = volume
-				volumeSlider := ui.Slider(c, &app.player.Volume, 0, 1).Label("音量").Width(110)
-				if volumeSlider.Changed() {
-					app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.player.Volume})
+				// The bar shows the player's level, except while the user
+				// drags it: then it keeps its own level, so the reports of
+				// the track playing never tug the thumb from under the
+				// pointer.
+				if !app.volumeHeld {
+					app.volumeValue, app.volumeSent = app.player.Volume, app.player.Volume
 				}
+				volumeSlider := ui.Slider(c, &app.volumeValue, 0, 1).Label("音量").Width(110)
+				// A drag tells the player in volumeSendStep steps rather than
+				// on every pointer frame, which floods the page with commands
+				// and the window with the reports they bring; letting go sends
+				// the exact level. Dragged keeps the hold past the bar's thin
+				// strip, so a drag that leaves it still commits.
+				_, _, held := volumeSlider.Dragged()
+				switch {
+				case held:
+					if math.Abs(app.volumeValue-app.volumeSent) >= volumeSendStep &&
+						time.Since(app.volumeSentAt) >= volumeSendInterval {
+						app.volumeSent, app.volumeSentAt = app.volumeValue, time.Now()
+						app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.volumeValue})
+					}
+				case app.volumeHeld || volumeSlider.Changed():
+					if app.volumeValue != app.volumeSent {
+						app.volumeSent, app.volumeSentAt = app.volumeValue, time.Now()
+						app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.volumeValue})
+					}
+				}
+				app.volumeHeld = held
 			})
 
 			queue := ui.Button(c, "").Label("再生キュー").Tooltip("再生キュー").Padding(6, 9).BorderWidth(0)

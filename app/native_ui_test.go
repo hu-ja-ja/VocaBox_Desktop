@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -777,5 +778,149 @@ func TestNeedsThumbnail(t *testing.T) {
 	}
 	if app.needsThumbnail(MylistItem{Available: true}) {
 		t.Error("an entry without a watch ID cannot be fetched")
+	}
+}
+
+// TestNativeUISeekBarScrubsWithoutFightingReports checks that dragging the
+// seek bar holds the user's position while the track keeps reporting, sends
+// one seek when the pointer lets go, and leaves playback alone meanwhile.
+func TestNativeUISeekBarScrubsWithoutFightingReports(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.playerLoaded = true
+	app.player = PlayerReport{
+		WatchID: "sm1", Title: "Aの曲", Ready: true, Playing: true,
+		PositionMS: 30_000, DurationMS: 120_000, Volume: 1,
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	app.pending = nil
+
+	bar, ok := tester.Find("再生位置")
+	if !ok {
+		t.Fatal("the seek bar is missing")
+	}
+	x, y := bar.X+bar.W/2, bar.Y+bar.H/2
+	tester.Move(x, y)
+	tester.Press(x, y)
+	if !app.seekHeld || app.seekValue <= 0 || app.seekValue >= app.player.DurationMS {
+		t.Fatalf("pressing the bar did not take the position: held=%v value=%v", app.seekHeld, app.seekValue)
+	}
+	dragged := app.seekValue
+
+	// The track reports as it plays on: the thumb must not fall back, and
+	// scrubbing must not stop or pause the track.
+	app.player.PositionMS = 31_000
+	tester.Frame()
+	if app.seekValue != dragged {
+		t.Fatalf("a report tugged the thumb from %v to %v", dragged, app.seekValue)
+	}
+	if len(app.pending) != 0 {
+		t.Fatalf("scrubbing sent commands before the pointer let go: %#v", app.pending)
+	}
+
+	// Letting go, even away from the bar's thin strip, seeks once, to the
+	// position the user chose.
+	tester.Release(x, bar.Y-30)
+	seek, ok := lastCommand(app.pending, "seek")
+	if !ok || seek.PositionMS != dragged {
+		t.Fatalf("releasing did not seek to the dragged position: %#v", app.pending)
+	}
+	if !app.seekSettling {
+		t.Fatal("the bar did not wait for the player to report the seek")
+	}
+
+	// Until the player reports the seek landing, the thumb holds the
+	// position rather than snapping back to a stale report.
+	app.pending = nil
+	tester.Frame()
+	if app.seekValue != dragged {
+		t.Fatalf("the thumb snapped back to %v before the seek landed", app.seekValue)
+	}
+	app.player.PositionMS = dragged
+	tester.Frame()
+	if app.seekSettling || app.seekValue != dragged {
+		t.Fatalf("the bar did not follow the player after the seek: settling=%v value=%v", app.seekSettling, app.seekValue)
+	}
+}
+
+// TestNativeUIVolumeBarStepsWhileDragging checks that dragging the volume
+// bar tells the player in steps rather than on every pointer frame, sends
+// the level the pointer chose when it lets go, and never lets the reports
+// of the track playing tug the thumb from under the pointer.
+func TestNativeUIVolumeBarStepsWhileDragging(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.playerLoaded = true
+	app.player = PlayerReport{
+		WatchID: "sm1", Title: "Aの曲", Ready: true, Playing: true,
+		PositionMS: 30_000, DurationMS: 120_000, Volume: 0.5,
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	app.pending = nil
+
+	bar, ok := tester.Find("音量")
+	if !ok {
+		t.Fatal("the volume bar is missing")
+	}
+	x, y := bar.X+bar.W/2, bar.Y+bar.H/2
+	tester.Move(x, y)
+	tester.Press(x, y)
+	if !app.volumeHeld {
+		t.Fatal("pressing the bar did not take the hold")
+	}
+	if len(app.pending) != 0 {
+		t.Fatalf("pressing sent a command: %#v", app.pending)
+	}
+
+	// A move inside the step keeps the player's level where it is.
+	tester.Move(x+2, y)
+	if len(app.pending) != 0 {
+		t.Fatalf("a move inside the step sent a command: %#v", app.pending)
+	}
+
+	// A step-sized move tells the player once.
+	tester.Move(x+12, y)
+	stepped := app.volumeValue
+	volume, ok := lastCommand(app.pending, "volume")
+	if !ok || volume.Volume != stepped || len(app.pending) != 1 {
+		t.Fatalf("a step-sized move did not send the level once: %#v value=%v", app.pending, stepped)
+	}
+
+	// A fast drag outruns the interval: the next step waits its turn rather
+	// than sending another command in the same instant.
+	tester.Move(x+30, y)
+	if len(app.pending) != 1 {
+		t.Fatalf("a drag inside the interval sent again: %#v", app.pending)
+	}
+	time.Sleep(volumeSendInterval + 20*time.Millisecond)
+	before := app.volumeValue
+	tester.Move(x+45, y)
+	volume, ok = lastCommand(app.pending, "volume")
+	if !ok || len(app.pending) != 2 || volume.Volume != before {
+		t.Fatalf("a drag past the interval did not send: %#v value=%v", app.pending, before)
+	}
+
+	// The track reports as it plays on: the thumb must not fall back.
+	held := app.volumeValue
+	app.player.Volume = 0.9
+	tester.Frame()
+	if app.volumeValue != held || len(app.pending) != 2 {
+		t.Fatalf("a report tugged the thumb from %v to %v: %#v", held, app.volumeValue, app.pending)
+	}
+
+	// Letting go sends the level the pointer chose, and the bar settles: no
+	// command per frame, and none after.
+	tester.Move(x+14, y)
+	chosen := app.volumeValue
+	tester.Release(x+14, y)
+	tester.Frame()
+	tester.Frame()
+	volume, ok = lastCommand(app.pending, "volume")
+	if !ok || volume.Volume != chosen {
+		t.Fatalf("releasing did not send the chosen level: %#v want %v", app.pending, chosen)
+	}
+	after := len(app.pending)
+	tester.Frame()
+	tester.Frame()
+	if len(app.pending) != after {
+		t.Fatalf("the bar kept sending after the release: %#v", app.pending)
 	}
 }
