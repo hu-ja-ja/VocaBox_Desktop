@@ -43,12 +43,20 @@ export interface PlayerCommand {
    * the list the playing track came from, so it has to tell the lists apart.
    */
   id?: string;
+  /** Name is the list's display name, which the playlist view shows. */
+  name?: string;
   items?: MylistItem[];
   watchId?: string;
   autoplay?: boolean;
   positionMs?: number;
   volume: number;
   enabled?: boolean;
+  /**
+   * Rows are the rows of the playlist a drag moves, and To the row they
+   * go before.
+   */
+  rows?: number[];
+  to?: number;
 }
 
 export interface PlayerReport {
@@ -61,6 +69,11 @@ export interface PlayerReport {
    * from the list shown while its track keeps playing.
    */
   listId: string;
+  /**
+   * Name is the display name of the list playing; the playlist view shows
+   * it even where the list is not the one shown.
+   */
+  name: string;
   /**
    * Title, Uploader and ThumbURL describe the playing track, so the bar
    * shows it even where the loaded list does not hold it.
@@ -78,6 +91,19 @@ export interface PlayerReport {
   durationMs: number;
   volume: number;
   error: string;
+  /**
+   * Order is the queue as it plays: the watch ID of each track in playlist
+   * order, the track playing first under shuffle. Items carries the tracks
+   * themselves, so the playlist view shows them without the loaded list.
+   */
+  order: string[];
+  items: MylistItem[];
+  /**
+   * QueueIndex is the row of the track playing in Order, and QueuePos is
+   * where that track sits in the queue, both -1 for none.
+   */
+  queueIndex: number;
+  queuePos: number;
 }
 
 /**
@@ -193,6 +219,9 @@ export const PlayerBridge = {
 
 /** Events sent by the Go side. Subscribe with `events.name.on(listener)`. */
 export const events = {
-  /** PlayerCommandEvent sends controls and queue changes to the player-only page. */
+  /**
+   * PlayerCommandEvent sends controls and queue changes to the audio page,
+   * the out-of-view page carrying the official embed that plays the audio.
+   */
   playerCommand: event<PlayerCommand>("playerCommand"),
 } as const;

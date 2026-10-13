@@ -3,8 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>VocaBox player</title>
+    <title>VocaBox audio</title>
     <style>
+      /* The app keeps this page out of view: it only carries the official
+         embed, which is what plays the audio and answers the controls. No
+         video is ever shown. */
       html,
       body,
       #player-slot {
@@ -18,6 +21,6 @@
   </head>
   <body>
     <div id="player-slot"></div>
-    <script type="module" src="./src/player-page.ts"></script>
+    <script type="module" src="./src/audio-page.ts"></script>
   </body>
 </html>

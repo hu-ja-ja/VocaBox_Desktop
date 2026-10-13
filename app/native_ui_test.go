@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -199,6 +200,238 @@ func TestNativeUICanLoadNextOnlyForPlayingList(t *testing.T) {
 	}
 }
 
+// TestNativeUIQueuePanelShowsPlaylist checks the playing screen the bar
+// opens: the queue in playing order, under the name of the list playing,
+// with a row click selecting the track and home leaving the screen.
+func TestNativeUIQueuePanelShowsPlaylist(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.playerLoaded = true
+	items := []MylistItem{
+		{WatchID: "sm1", Title: "一曲目", Available: true},
+		{WatchID: "sm2", Title: "二曲目", Available: true},
+		{WatchID: "sm3", Title: "三曲目", Available: true},
+	}
+	app.saved = []SavedMylist{{ID: "123", Name: "作業用キュー", Items: items}}
+	app.player = PlayerReport{
+		WatchID: "sm2", ListID: "123", Name: "作業用キュー", Title: "二曲目",
+		Ready: true, Playing: true, Volume: 1,
+		Order: []string{"sm2", "sm3", "sm1"}, Items: items, QueueIndex: 0, QueuePos: 0,
+	}
+
+	tester := ui.NewTester(app.view, 1120, 760)
+	// The bar's queue button opens the playing screen.
+	if err := tester.Click("再生中のプレイリスト"); err != nil {
+		t.Fatal(err)
+	}
+	if !app.queueOpen {
+		t.Fatal("the playing screen did not open")
+	}
+	if !tester.HasText("作業用キュー") || !tester.HasText("3曲") {
+		t.Fatalf("the playing list is not shown: %q", tester.Texts())
+	}
+	// A row is chosen by the list itself, which is what a drag needs too.
+	two, ok := tester.Find("二曲目")
+	if !ok {
+		t.Fatalf("the playlist is missing tracks: %q", tester.Texts())
+	}
+	tester.ClickAt(two.X+10, two.Y+two.H/2)
+	if !hasCommand(app.pending, "select") {
+		// The label of a virtual list settles a frame late; aim again.
+		tester.Frame()
+		two, _ = tester.Find("二曲目")
+		tester.ClickAt(two.X+10, two.Y+two.H/2)
+	}
+	selected, ok := lastCommand(app.pending, "select")
+	if !ok || selected.WatchID != "sm2" || !selected.Autoplay {
+		t.Fatalf("a playlist row did not play its track: %#v", app.pending)
+	}
+
+	// The queue keeps the track playing on top as it moves on.
+	first, _ := app.queueList.Visible()
+	if app.player.QueueIndex != 0 || first != 0 {
+		t.Fatalf("the playlist does not start at the track playing: first=%d", first)
+	}
+
+	if err := tester.Click("ホーム"); err != nil {
+		t.Fatal(err)
+	}
+	if app.queueOpen {
+		t.Fatal("home left the playing screen open")
+	}
+}
+
+// TestNativeUIQueueDragReorders checks the playlist rows move by dragging
+// them, the way the list pages' rows do not.
+func TestNativeUIQueueDragReorders(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.queueOpen = true
+	app.playerLoaded = true
+	app.player = PlayerReport{
+		Name:  "作業用ドラッグ",
+		Order: []string{"sm1", "sm2", "sm3"},
+		Items: []MylistItem{
+			{WatchID: "sm1", Title: "一曲目", Available: true},
+			{WatchID: "sm2", Title: "二曲目", Available: true},
+			{WatchID: "sm3", Title: "三曲目", Available: true},
+		},
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	first, ok := tester.Find("一曲目")
+	if !ok {
+		t.Fatalf("the playlist is not shown: %q", tester.Texts())
+	}
+	last, ok := tester.Find("三曲目")
+	if !ok {
+		t.Fatalf("the playlist is not shown: %q", tester.Texts())
+	}
+	tester.Press(first.X+20, first.Y+first.H/2)
+	for k := 1; k <= 4; k++ {
+		f := float32(k) / 4
+		tester.Move(first.X+20, first.Y+first.H/2+(last.Y+last.H-first.Y)*f)
+	}
+	tester.Release(first.X+20, last.Y+last.H)
+	moved, ok := lastCommand(app.pending, "move")
+	if !ok || len(moved.Rows) != 1 || moved.Rows[0] != 0 {
+		t.Fatalf("dragging a row did not move it: %#v", app.pending)
+	}
+}
+
+// TestNativeUIQueueCanScrollAfterFollowingThePlayingTrack makes sure the
+// automatic scroll to the playing track is a one-time follow, not a lock on
+// the queue's position.
+func TestNativeUIQueueCanScrollAfterFollowingThePlayingTrack(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.queueOpen = true
+	items := make([]MylistItem, 300)
+	order := make([]string, 300)
+	for i := range items {
+		id := fmt.Sprintf("sm%d", i+1)
+		items[i] = MylistItem{WatchID: id, Title: id, Available: true}
+		order[i] = id
+	}
+	app.player = PlayerReport{
+		Name: "作業用スクロール", WatchID: "sm200", Order: order, Items: items,
+		QueueIndex: 199, QueuePos: 199,
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	first, last := app.queueList.Visible()
+	if first != 199 || last <= first {
+		t.Fatalf("queue did not start at the playing track: visible rows %d..%d", first, last)
+	}
+	tester.Scroll(700, 500, 0, 120)
+	after, _ := app.queueList.Visible()
+	if after == first {
+		t.Fatalf("queue did not scroll from row %d", first)
+	}
+}
+
+func TestNativeUIQueueMenuTogglesOnSecondClick(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.queueOpen = true
+	app.player = PlayerReport{
+		Name:  "作業用メニュー",
+		Order: []string{"sm1", "sm2"},
+		Items: []MylistItem{
+			{WatchID: "sm1", Title: "一曲目", Available: true},
+			{WatchID: "sm2", Title: "二曲目", Available: true},
+		},
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	row, ok := tester.Find("一曲目")
+	if !ok {
+		t.Fatalf("the queue row is missing: %q", tester.Texts())
+	}
+	tester.Move(row.X+row.W-30, row.Y+row.H/2)
+	if err := tester.Click("曲のメニュー"); err != nil {
+		t.Fatal(err)
+	}
+	if !app.queueMenuOpen || !tester.HasText("キューから削除") {
+		t.Fatal("the queue row menu did not open")
+	}
+	if err := tester.Click("曲のメニュー"); err != nil {
+		t.Fatal(err)
+	}
+	if app.queueMenuOpen || tester.HasText("キューから削除") {
+		t.Fatal("the second click did not close the queue row menu")
+	}
+}
+
+func TestNativeUIPlayerBarBlankAreaTogglesQueue(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	tester := ui.NewTester(app.view, 1120, 760)
+	volume, ok := tester.Find("音量")
+	if !ok {
+		t.Fatal("volume control is missing")
+	}
+	queue, ok := tester.Find("再生中のプレイリスト")
+	if !ok {
+		t.Fatal("queue button is missing")
+	}
+	x := volume.X + volume.W + (queue.X-volume.X-volume.W)/2
+	y := queue.Y + queue.H/2
+	tester.ClickAt(x, y)
+	if !app.queueOpen {
+		t.Fatal("clicking empty player-bar space did not open the queue")
+	}
+	tester.ClickAt(x, y)
+	if app.queueOpen {
+		t.Fatal("clicking empty player-bar space did not close the queue")
+	}
+}
+
+// TestNativeUIQueueCommands checks the playlist rows drive the player:
+// removing a track and reordering rows.
+func TestNativeUIQueueCommands(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.queueOpen = true
+	app.playerLoaded = true
+	app.player = PlayerReport{
+		Name:  "作業用コマンド",
+		Order: []string{"sm1", "sm2"},
+		Items: []MylistItem{
+			{WatchID: "sm1", Title: "一曲目", Available: true},
+			{WatchID: "sm2", Title: "二曲目", Available: true},
+		},
+	}
+
+	app.removeFromQueue(MylistItem{WatchID: "sm2"})
+	removed, ok := lastCommand(app.pending, "remove")
+	if !ok || removed.WatchID != "sm2" {
+		t.Fatalf("removing did not reach the player: %#v", app.pending)
+	}
+
+	app.moveQueueRows([]int{0}, 2)
+	moved, ok := lastCommand(app.pending, "move")
+	if !ok || len(moved.Rows) != 1 || moved.Rows[0] != 0 || moved.To != 2 {
+		t.Fatalf("reordering did not reach the player: %#v", app.pending)
+	}
+}
+
+// TestQueueItemsFollowOrder checks the playlist view follows the player's
+// order, holding a track the loaded list does not.
+func TestQueueItemsFollowOrder(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.page = &MylistPage{ID: "9", Items: []MylistItem{
+		{WatchID: "sm1", Title: "一曲目", Available: true},
+		{WatchID: "sm2", Title: "二曲目", Available: true},
+	}}
+	app.player = PlayerReport{
+		Order: []string{"sm2", "sm9", "sm1"},
+		Items: []MylistItem{{WatchID: "sm9", Title: "別リストの曲", Available: true}},
+	}
+	got := app.queueItems()
+	ids := make([]string, 0, len(got))
+	for _, item := range got {
+		ids = append(ids, item.WatchID)
+	}
+	if len(ids) != 3 || ids[0] != "sm2" || ids[1] != "sm9" || ids[2] != "sm1" {
+		t.Fatalf("playlist order = %#v; want sm2, sm9, sm1", ids)
+	}
+	if got[1].Title != "別リストの曲" {
+		t.Fatalf("an entry the list does not hold lost its track: %#v", got[1])
+	}
+}
+
 func TestNativeUITrackClickPlaysIt(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.playerLoaded = true
@@ -242,13 +475,27 @@ func TestNativeUIPlayerBarCentersTransport(t *testing.T) {
 	if !ok {
 		t.Fatalf("play is missing: %q", tester.Texts())
 	}
-	// The window is 1120 wide, so the middle of the bar is at 560.
+	// The window is 1120 wide, so the middle of the bar is at 560; the
+	// queue button on one side is allowed a little asymmetry.
+	tolerance := float32(40)
 	middle := (shuffle.X + loop.X + loop.W) / 2
-	if delta := middle - 560; delta < -0.5 || delta > 0.5 {
+	if delta := middle - 560; delta < -tolerance || delta > tolerance {
 		t.Fatalf("transport is centered at %v; want 560", middle)
 	}
-	if delta := play.X + play.W/2 - 560; delta < -0.5 || delta > 0.5 {
-		t.Fatalf("the play button is centered at %v; want 560", play.X+play.W/2)
+	centered := play.X + play.W/2
+
+	// A long track playing leaves the transport where it is.
+	app.player = PlayerReport{
+		WatchID: "sm9", Title: "とても長い曲名がここに来ても再生ボタンは動かないでほしい",
+		Uploader: "投稿者", Ready: true, Volume: 1,
+	}
+	tester.Frame()
+	again, ok := tester.Find("再生")
+	if !ok {
+		t.Fatalf("play is missing after the track changed: %q", tester.Texts())
+	}
+	if delta := again.X + again.W/2 - centered; delta < -0.5 || delta > 0.5 {
+		t.Fatalf("the transport followed the track shown: was %v, now %v", centered, again.X+again.W/2)
 	}
 }
 

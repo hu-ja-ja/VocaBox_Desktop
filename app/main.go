@@ -44,7 +44,7 @@ func main() {
 			BackgroundColor: "#121217",
 			Content:         ui.View(app.view),
 		})
-		player, err := app.window.NewWebView(mygo.WebViewOptions{URL: "/player.html", BackgroundColor: "#121217"})
+		player, err := app.window.NewWebView(mygo.WebViewOptions{URL: "/audio.html", BackgroundColor: "#121217"})
 		if err != nil {
 			log.Printf("player webview: %v", err)
 			app.playerError = "プレイヤーを初期化できませんでした。"

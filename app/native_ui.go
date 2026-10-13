@@ -9,20 +9,27 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// PlayerCommandEvent sends controls and queue changes to the player-only page.
+// PlayerCommandEvent sends controls and queue changes to the audio page,
+// the out-of-view page carrying the official embed that plays the audio.
 var PlayerCommandEvent = mygo.NewEvent[PlayerCommand]("playerCommand")
 
 type PlayerCommand struct {
 	Action string `json:"action"`
 	// ID names the list the items belong to: the player keeps the queue of
 	// the list the playing track came from, so it has to tell the lists apart.
-	ID         string       `json:"id,omitempty"`
+	ID string `json:"id,omitempty"`
+	// Name is the list's display name, which the playlist view shows.
+	Name       string       `json:"name,omitempty"`
 	Items      []MylistItem `json:"items,omitempty"`
 	WatchID    string       `json:"watchId,omitempty"`
 	Autoplay   bool         `json:"autoplay,omitempty"`
 	PositionMS float64      `json:"positionMs,omitempty"`
 	Volume     float64      `json:"volume"`
 	Enabled    bool         `json:"enabled,omitempty"`
+	// Rows are the rows of the playlist a drag moves, and To the row they
+	// go before.
+	Rows []int `json:"rows,omitempty"`
+	To   int   `json:"to,omitempty"`
 }
 
 type PlayerReport struct {
@@ -33,6 +40,9 @@ type PlayerReport struct {
 	// ListID names the list the playback queue was built from; it can differ
 	// from the list shown while its track keeps playing.
 	ListID string `json:"listId"`
+	// Name is the display name of the list playing; the playlist view shows
+	// it even where the list is not the one shown.
+	Name string `json:"name"`
 	// Title, Uploader and ThumbURL describe the playing track, so the bar
 	// shows it even where the loaded list does not hold it.
 	Title      string  `json:"title"`
@@ -48,6 +58,15 @@ type PlayerReport struct {
 	DurationMS float64 `json:"durationMs"`
 	Volume     float64 `json:"volume"`
 	Error      string  `json:"error"`
+	// Order is the queue as it plays: the watch ID of each track in playlist
+	// order, the track playing first under shuffle. Items carries the tracks
+	// themselves, so the playlist view shows them without the loaded list.
+	Order []string     `json:"order"`
+	Items []MylistItem `json:"items"`
+	// QueueIndex is the row of the track playing in Order, and QueuePos is
+	// where that track sits in the queue, both -1 for none.
+	QueueIndex int `json:"queueIndex"`
+	QueuePos   int `json:"queuePos"`
 }
 
 type nativeApp struct {
@@ -64,6 +83,19 @@ type nativeApp struct {
 
 	saved       []SavedMylist
 	sidebarOpen bool
+	// queueOpen shows the queue in place of the home and list pages.
+	queueOpen bool
+	// queueMenuRow is the playlist row whose menu is open, -1 for none, and
+	// queueMenuOpen drives the popover until it is dismissed.
+	queueMenuRow  int
+	queueMenuOpen bool
+	// queueChoice is the playlist row the list last chose, -1 for none: a
+	// choice plays the track before the next frame.
+	queueChoice int
+	// queueFollow remembers the row of the track playing the playlist was
+	// scrolled to, so it follows the player onto the next one; -2 with
+	// nothing followed yet.
+	queueFollow int
 	// importing shows the dialog the home's import card opens.
 	importing bool
 	input     string
@@ -73,13 +105,15 @@ type nativeApp struct {
 	loading   bool
 	// loadingID names the list a load is fetching, so a page waiting for it
 	// asks once rather than every frame.
-	loadingID      string
-	saving         bool
-	loadToken      uint64
-	status         string
-	statusError    bool
-	playerError    string
-	trackList      ui.ListState
+	loadingID   string
+	saving      bool
+	loadToken   uint64
+	status      string
+	statusError bool
+	playerError string
+	trackList   ui.ListState
+	// queueList scrolls the playlist view of the playing screen.
+	queueList      ui.ListState
 	player         PlayerReport
 	playerSession  string
 	playerSequence uint64
@@ -117,14 +151,17 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	// Pages show at once: the list a page waits for does not load twice.
 	router.Transition = ui.TransitionNone
 	return &nativeApp{
-		mylist:      mylist,
-		router:      router,
-		theme:       t,
-		sidebarOpen: true,
-		player:      PlayerReport{Volume: 1},
-		thumbs:      map[string]*ui.Bitmap{},
-		thumbBusy:   map[string]bool{},
-		thumbFail:   map[string]bool{},
+		mylist:       mylist,
+		router:       router,
+		theme:        t,
+		sidebarOpen:  true,
+		player:       PlayerReport{Volume: 1},
+		thumbs:       map[string]*ui.Bitmap{},
+		thumbBusy:    map[string]bool{},
+		thumbFail:    map[string]bool{},
+		queueMenuRow: -1,
+		queueFollow:  -2,
+		queueChoice:  -1,
 	}
 }
 
@@ -137,12 +174,17 @@ func (app *nativeApp) view(c *ui.Context) {
 			} else {
 				app.sidebarRail(c)
 			}
-			app.content(c)
+			if app.queueOpen {
+				app.queueView(c)
+			} else {
+				app.content(c)
+			}
 		})
 		app.playerBar(c)
 		if app.playerView != nil {
-			// ponytail: 1×1 transparent player keeps the official video out of the audio UI;
-			// confirm MyGo WebView2 continues playback at this size before depending on it.
+			// ponytail: 1×1 transparent web view keeps the official video out of the
+			// audio UI; confirm MyGo WebView2 continues playback at this size before
+			// depending on it.
 			ui.WebView(c, app.playerView).Absolute().Left(0).Top(0).Size(1, 1).Opacity(0).PassThrough()
 		}
 	})
@@ -166,14 +208,21 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 
 			ui.Divider(c)
 			page := app.router.Path()
+			// Choosing a destination leaves the playing screen; a list also
+			// leaves it through openList.
+			homeClicked := false
 			sidebar := ui.Sidebar(c, &page, func() {
-				ui.SidebarItem(c, homePath, nil, "ホーム")
+				item := ui.SidebarItem(c, homePath, nil, "ホーム")
+				homeClicked = item.Clicked()
 				ui.SidebarSection(c, "ライブラリ", nil, func() {
 					for _, entry := range app.saved {
 						ui.SidebarItem(c, listPath(entry.ID), nil, entry.Name)
 					}
 				})
 			}).Grow(1)
+			if homeClicked {
+				app.queueOpen = false
+			}
 			if sidebar.Changed() {
 				app.router.Push(page)
 			}
@@ -232,6 +281,191 @@ func listPath(id string) string { return "/list/" + id }
 // plus its own padding. Two cards fit even at the narrowest window with the
 // sidebar open.
 const playlistCardWidth = 200
+
+// queueView is the screen the player bar opens: the playlist as it plays,
+// under the name of the list playing. The embed keeps playing out of view,
+// with no video shown and no player of its own.
+func (app *nativeApp) queueView(c *ui.Context) {
+	ui.Row(c).Grow(1).FillHeight().AlignItems(ui.Stretch).Children(func() {
+		app.queuePanel(c)
+	})
+}
+
+// queuePanel lists the tracks in the order they play, the track playing
+// first under shuffle, under the name of the list playing.
+func (app *nativeApp) queuePanel(c *ui.Context) {
+	ui.Column(c).Grow(1).FillHeight().Gap(4).Padding(18, 26, 12).Children(func() {
+		ui.Column(c).Gap(3).Children(func() {
+			ui.Text(c, app.player.Name).FontSize(21).Bold().SingleLine().Ellipsis("…")
+			ui.Text(c, app.queueMeta()).FontSize(12).TextColor(app.theme.TextMuted)
+		})
+		app.queueRows(c)
+	})
+}
+
+// queueMeta labels the playlist: its size, and the shuffle.
+func (app *nativeApp) queueMeta() string {
+	size := fmt.Sprintf("%d曲", len(app.player.Order))
+	if app.player.Shuffle {
+		return size + "  ·  シャッフル"
+	}
+	return size
+}
+
+// queueRows lists the tracks of the report's order, which is the queue as
+// it plays, and scrolls the track playing to the top of the list as it
+// moves on, so the queue reads in the order it plays.
+func (app *nativeApp) queueRows(c *ui.Context) {
+	rows := app.queueItems()
+	if len(rows) == 0 {
+		ui.Column(c).Grow(1).Center().Children(func() {
+			ui.Text(c, "キューは空です").FontSize(13).TextColor(app.theme.TextMuted)
+		})
+		return
+	}
+	app.followQueue(len(rows))
+	// The list chooses a clicked row into queueChoice, which plays it
+	// before the next frame: a list whose rows are not chosen at all does
+	// not take the pointer, and a reorder's drag needs that.
+	app.queueList.Selected = &app.queueChoice
+	app.queueList.Key = func(row int) any { return rows[row].WatchID }
+	app.queueList.Label = func(row int) string { return app.queueLabel(rows[row]) }
+	app.queueList.Reorder = app.moveQueueRows
+	ui.List(c, &app.queueList, len(rows), func(i int) {
+		app.queueRow(c, rows[i], i)
+	}).Grow(1)
+	if app.queueChoice >= 0 && app.queueChoice < len(rows) {
+		item := rows[app.queueChoice]
+		app.queueChoice = -1
+		app.selectTrack(item)
+	}
+}
+
+// queueRow builds one track of the playlist: its number, picture, title
+// and uploader, the menu on hover, and the track playing in the pressed
+// surface. Rows take the pointer so a click chooses one and a drag reaches
+// the list's reordering.
+func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
+	playable := isPlayable(item)
+	playing := item.WatchID != "" && item.WatchID == app.player.WatchID
+	row := ui.Box(c).FillWidth().Padding(8, 12).Justify(ui.Start).AlignItems(ui.Center)
+	hovered := row.Hovered()
+	switch {
+	case playing:
+		row.Background(app.theme.SurfacePressed)
+	case hovered:
+		row.Background(app.theme.SurfaceHover)
+	}
+	row.Children(func() {
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Justify(ui.Start).FillWidth().Children(func() {
+			ui.Text(c, fmt.Sprintf("%02d", i+1)).Width(22).FontSize(12).TextColor(app.theme.TextMuted)
+			app.thumbnail(c, item, thumbRowHeight)
+			ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(3).Children(func() {
+				ui.Text(c, app.queueLabel(item)).FontSize(13).Bold().SingleLine().Ellipsis("…")
+				if playable && item.Uploader != "" {
+					ui.Text(c, item.Uploader).FontSize(12).TextColor(app.theme.TextMuted).SingleLine().Ellipsis("…")
+				}
+			})
+			ui.Spacer(c).Grow(1)
+			if item.Duration > 0 {
+				ui.Text(c, formatDuration(item.Duration)).Width(46).FontSize(12).TextAlign(ui.End).TextColor(app.theme.TextMuted)
+			}
+			app.queueMenu(c, item, i, hovered)
+		})
+	})
+}
+
+// followQueue scrolls the track playing to the top of the playlist as the
+// player moves on.
+func (app *nativeApp) followQueue(n int) {
+	if app.player.QueueIndex < 0 || app.player.QueuePos == app.queueFollow {
+		return
+	}
+	if app.player.QueueIndex >= n {
+		return
+	}
+	app.queueFollow = app.player.QueuePos
+	app.queueList.ScrollTo(app.player.QueueIndex, ui.Start)
+}
+
+// queueMenu shows the menu button of a row with the menu it opens: only on
+// the row the pointer is over, as the three dots a playlist row carries.
+func (app *nativeApp) queueMenu(c *ui.Context, item MylistItem, i int, hovered bool) {
+	button := ui.Button(c, "").Label("曲のメニュー").Tooltip("曲のメニュー").Padding(4, 7).Radius(6)
+	if !hovered {
+		button.Invisible()
+	}
+	if button.Clicked() {
+		if app.queueMenuOpen && app.queueMenuRow == i {
+			app.queueMenuOpen = false
+		} else {
+			app.queueMenuRow = i
+			app.queueMenuOpen = true
+		}
+	}
+	button.Children(func() {
+		ui.Icon(c, iconMore).FontSize(16)
+	})
+	if app.queueMenuRow != i {
+		return
+	}
+	ui.Popover(c, button, &app.queueMenuOpen, func() {
+		if menuItem := ui.Button(c, "キューから削除").FillWidth(); menuItem.Clicked() {
+			app.removeFromQueue(item)
+		}
+	})
+}
+
+// removeFromQueue takes the track out of the playing queue.
+func (app *nativeApp) removeFromQueue(item MylistItem) {
+	app.queueMenuRow = -1
+	app.sendPlayer(PlayerCommand{Action: "remove", WatchID: item.WatchID})
+}
+
+// moveQueueRows places the rows a drag moved before row to, in the playing
+// order the playlist shows.
+func (app *nativeApp) moveQueueRows(rows []int, to int) {
+	app.sendPlayer(PlayerCommand{Action: "move", Rows: rows, To: to})
+}
+
+// queueLabel names a track of the playlist, or says what its ID tells.
+func (app *nativeApp) queueLabel(item MylistItem) string {
+	if item.Title != "" {
+		return item.Title
+	}
+	return "取得できません（" + item.WatchID + "）"
+}
+
+// queueItems returns the playlist's entries in the order it plays: the
+// player's items matched to the report's order, or the loaded list while
+// the player has not reported its queue yet.
+func (app *nativeApp) queueItems() []MylistItem {
+	order := app.player.Order
+	rows := make([]MylistItem, 0, len(order))
+	for _, watchID := range order {
+		rows = append(rows, app.listItem(watchID))
+	}
+	return rows
+}
+
+// listItem returns the entry of watchID: the player's item when its report
+// carries one, else the loaded list's, or one carrying what the ID alone
+// tells, which is enough for a row.
+func (app *nativeApp) listItem(watchID string) MylistItem {
+	for i := range app.player.Items {
+		if app.player.Items[i].WatchID == watchID {
+			return app.player.Items[i]
+		}
+	}
+	if app.page != nil {
+		for i := range app.page.Items {
+			if app.page.Items[i].WatchID == watchID {
+				return app.page.Items[i]
+			}
+		}
+	}
+	return MylistItem{WatchID: watchID}
+}
 
 // homeView shows the import card and the saved playlists as cards, each
 // carrying the pictures of its first four tracks; clicking a playlist card
@@ -312,6 +546,7 @@ func (app *nativeApp) importInput() {
 		return
 	}
 	app.importing = false
+	app.queueOpen = false
 	app.fetchList(strings.TrimSpace(app.input))
 }
 
@@ -346,6 +581,7 @@ func (app *nativeApp) playlistCard(c *ui.Context, entry SavedMylist) {
 		})
 	})
 	if card.Clicked() {
+		app.queueOpen = false
 		app.router.Push(listPath(entry.ID))
 	}
 }
@@ -730,12 +966,13 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			}
 			ui.Text(c, formatMillis(app.player.DurationMS)).Width(42).FontSize(11).TextAlign(ui.End).TextColor(app.theme.TextMuted)
 		})
-		ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
+		controls := ui.Row(c).Gap(16).AlignItems(ui.Center)
+		controls.Children(func() {
 			// The track playing and the volume grow by the same amount,
 			// which keeps the transport buttons in the middle of the bar.
 			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Gap(10).AlignItems(ui.Center).Children(func() {
 				if app.player.WatchID != "" {
-					app.thumbnail(c, app.nowPlaying(), thumbBarHeight)
+					app.thumbnail(c, app.playingTrack(), thumbBarHeight)
 					ui.Column(c).Grow(1).Gap(3).Children(func() {
 						ui.Text(c, app.player.Title).FontSize(14).Bold().SingleLine().Ellipsis("…")
 						ui.Text(c, app.player.Uploader).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
@@ -807,7 +1044,21 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 					app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.player.Volume})
 				}
 			})
+
+			queue := ui.Button(c, "").Label("再生中のプレイリスト").Tooltip("再生中のプレイリスト").Padding(6, 9).BorderWidth(0)
+			if app.queueOpen {
+				queue.Background(app.theme.SurfacePressed)
+			}
+			queue.Children(func() {
+				ui.Icon(c, iconQueue).FontSize(18)
+			})
+			if queue.Clicked() {
+				app.queueOpen = !app.queueOpen
+			}
 		})
+		if controls.Clicked() {
+			app.queueOpen = !app.queueOpen
+		}
 		if app.playerError != "" {
 			ui.Text(c, app.playerError).FontSize(12).TextColor(app.theme.Danger)
 		}
@@ -826,9 +1077,9 @@ func (app *nativeApp) currentSaved() *SavedMylist {
 	return nil
 }
 
-// nowPlaying is the track the report names, built without looking at the
+// playingTrack is the track the report names, built without looking at the
 // loaded list: the playing list is not always the one on screen.
-func (app *nativeApp) nowPlaying() MylistItem {
+func (app *nativeApp) playingTrack() MylistItem {
 	return MylistItem{
 		WatchID:   app.player.WatchID,
 		Available: true,
@@ -847,6 +1098,8 @@ func (app *nativeApp) openList(id string) {
 	if app.loading && app.loadingID == id {
 		return
 	}
+	// Opening a list leaves the playing screen for it, as home does.
+	app.queueOpen = false
 	if app.openSaved(id) {
 		return
 	}
@@ -884,7 +1137,7 @@ func (app *nativeApp) openSaved(id string) bool {
 		app.playerError = ""
 		// The player keeps the queue and the track it is playing; only a
 		// track of this list played from here moves the queue to it.
-		app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Items: page.Items})
+		app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
 		return true
 	}
 	return false
@@ -924,7 +1177,7 @@ func (app *nativeApp) fetchList(input string) {
 			app.queueThumbnailFill(page.Items)
 			app.setStatus("")
 			app.router.Push(listPath(page.ID))
-			app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Items: page.Items})
+			app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
 		})
 	}()
 }
@@ -1033,7 +1286,7 @@ func (app *nativeApp) saveEntry(id, name string) {
 					app.hasMore = false
 					app.resetThumbFailures()
 					app.queueThumbnailFill(page.Items)
-					app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Items: page.Items})
+					app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
 				}
 			}
 			app.setStatus("保存しました。")
@@ -1106,10 +1359,11 @@ func (b *PlayerBridge) Report(report PlayerReport) {
 				app.player = PlayerReport{Shuffle: shuffle, Repeat: repeat, Volume: volume}
 				items := []MylistItem(nil)
 				id := ""
+				name := ""
 				if app.page != nil {
-					id, items = app.page.ID, app.page.Items
+					id, name, items = app.page.ID, app.page.Name, app.page.Items
 				}
-				app.pending = append(app.pending, PlayerCommand{Action: "setItems", ID: id, Items: items})
+				app.pending = append(app.pending, PlayerCommand{Action: "setItems", ID: id, Name: name, Items: items})
 				if shuffle {
 					app.pending = append(app.pending, PlayerCommand{Action: "shuffle", Enabled: true})
 				}

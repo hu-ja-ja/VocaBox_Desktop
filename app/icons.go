@@ -36,6 +36,12 @@ var menuSVG []byte
 //go:embed icons/plus.svg
 var plusSVG []byte
 
+//go:embed icons/queue.svg
+var queueSVG []byte
+
+//go:embed icons/ellipsis-vertical.svg
+var ellipsisSVG []byte
+
 var (
 	iconPlay        = ui.MustParseSVG(playSVG)
 	iconPause       = ui.MustParseSVG(pauseSVG)
@@ -46,4 +52,6 @@ var (
 	iconVolume      = ui.MustParseSVG(volumeSVG)
 	iconMenu        = ui.MustParseSVG(menuSVG)
 	iconPlus        = ui.MustParseSVG(plusSVG)
+	iconQueue       = ui.MustParseSVG(queueSVG)
+	iconMore        = ui.MustParseSVG(ellipsisSVG)
 )
