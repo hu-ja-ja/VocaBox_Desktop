@@ -1,7 +1,7 @@
 // Playable-entry queue for one imported mylist. Callers keep unavailable
 // entries out; navigation here is pure. Repeat wraps the whole list; shuffle
 // permutes every entry with the track playing first, so the order it reports
-// is the order the playlist view shows.
+// is the order the queue screen shows.
 export class PlayQueue<T extends { watchId: string }> {
   private items: T[] = [];
   private order: number[] = [];
@@ -28,8 +28,16 @@ export class PlayQueue<T extends { watchId: string }> {
     return this.order.map((i) => this.items[i]?.watchId ?? "");
   }
 
+  // orderedItems is the queue in playing order, the order the queue screen
+  // shows.
+  orderedItems(): T[] {
+    return this.order
+      .map((i) => this.items[i])
+      .filter((item): item is T => item !== undefined);
+  }
+
   // currentIndex is where the track playing sits in the playing order, for
-  // the playlist view to keep it in sight, or -1 with nothing playing.
+  // the queue screen to keep it in sight, or -1 with nothing playing.
   currentIndex(): number {
     return this.pos;
   }
@@ -100,12 +108,18 @@ export class PlayQueue<T extends { watchId: string }> {
     return this.at(this.pos);
   }
 
+  // select puts the queue on item: under shuffle it starts at the front of
+  // a fresh shuffle, as turning shuffle on would lay the queue out, rather
+  // than sitting where the shuffle happened to put it.
   select(item: T): T | null {
     const p = this.items.indexOf(item);
     if (p < 0) return null;
     const at = this.order.indexOf(p);
-    if (at !== this.pos) this.sequence++;
-    this.pos = at;
+    if (at !== this.pos) {
+      this.sequence++;
+      this.pos = at;
+      if (this.shuffled) this.shuffleRange();
+    }
     return this.current();
   }
 

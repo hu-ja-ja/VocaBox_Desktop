@@ -18,7 +18,8 @@ type PlayerCommand struct {
 	// ID names the list the items belong to: the player keeps the queue of
 	// the list the playing track came from, so it has to tell the lists apart.
 	ID string `json:"id,omitempty"`
-	// Name is the list's display name, which the playlist view shows.
+	// Name is the list's display name, which the queue screen labels the
+	// queue with.
 	Name       string       `json:"name,omitempty"`
 	Items      []MylistItem `json:"items,omitempty"`
 	WatchID    string       `json:"watchId,omitempty"`
@@ -40,8 +41,8 @@ type PlayerReport struct {
 	// ListID names the list the playback queue was built from; it can differ
 	// from the list shown while its track keeps playing.
 	ListID string `json:"listId"`
-	// Name is the display name of the list playing; the playlist view shows
-	// it even where the list is not the one shown.
+	// Name is the display name of the list playing; the queue screen labels
+	// the queue with it.
 	Name string `json:"name"`
 	// Title, Uploader and ThumbURL describe the playing track, so the bar
 	// shows it even where the loaded list does not hold it.
@@ -60,7 +61,8 @@ type PlayerReport struct {
 	Error      string  `json:"error"`
 	// Order is the queue as it plays: the watch ID of each track in playlist
 	// order, the track playing first under shuffle. Items carries the tracks
-	// themselves, so the playlist view shows them without the loaded list.
+	// themselves, so the queue screen shows the queue without the loaded
+	// list.
 	Order []string     `json:"order"`
 	Items []MylistItem `json:"items"`
 	// QueueIndex is the row of the track playing in Order, and QueuePos is
@@ -92,10 +94,11 @@ type nativeApp struct {
 	// queueChoice is the playlist row the list last chose, -1 for none: a
 	// choice plays the track before the next frame.
 	queueChoice int
-	// queueFollow remembers the row of the track playing the playlist was
-	// scrolled to, so it follows the player onto the next one; -2 with
-	// nothing followed yet.
-	queueFollow int
+	// queueFollow and queueFollowTrack remember the track playing the queue
+	// screen was scrolled to, so it follows the player onto the next one;
+	// -2 and "" with nothing followed yet.
+	queueFollow      int
+	queueFollowTrack string
 	// importing shows the dialog the home's import card opens.
 	importing bool
 	input     string
@@ -118,9 +121,6 @@ type nativeApp struct {
 	playerSession  string
 	playerSequence uint64
 	pendingAdvance bool
-	// followedTrack is the track the list was last scrolled to, so it
-	// follows the player onto the next one.
-	followedTrack string
 
 	thumbs    map[string]*ui.Bitmap
 	thumbBusy map[string]bool
@@ -212,19 +212,21 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 
 			ui.Divider(c)
 			page := app.router.Path()
-			// Choosing a destination leaves the playing screen; a list also
-			// leaves it through openList.
-			homeClicked := false
+			// Choosing a destination leaves the queue screen for it, even the
+			// list already showing, whose click changes no route of its own.
+			homeClicked, listClicked := false, false
 			sidebar := ui.Sidebar(c, &page, func() {
 				item := ui.SidebarItem(c, homePath, nil, "ホーム")
 				homeClicked = item.Clicked()
 				ui.SidebarSection(c, "ライブラリ", nil, func() {
 					for _, entry := range app.saved {
-						ui.SidebarItem(c, listPath(entry.ID), nil, entry.Name)
+						if ui.SidebarItem(c, listPath(entry.ID), nil, entry.Name).Clicked() {
+							listClicked = true
+						}
 					}
 				})
 			}).Grow(1)
-			if homeClicked {
+			if homeClicked || listClicked {
 				app.queueOpen = false
 			}
 			if sidebar.Changed() {
@@ -286,8 +288,8 @@ func listPath(id string) string { return "/list/" + id }
 // sidebar open.
 const playlistCardWidth = 200
 
-// queueView is the screen the player bar opens: the playlist as it plays,
-// under the name of the list playing. The embed keeps playing out of view,
+// queueView is the screen the player bar opens: the queue as it plays, with
+// the track playing kept in sight. The embed keeps playing out of view,
 // with no video shown and no player of its own.
 func (app *nativeApp) queueView(c *ui.Context) {
 	ui.Row(c).Grow(1).FillHeight().AlignItems(ui.Stretch).Children(func() {
@@ -296,24 +298,30 @@ func (app *nativeApp) queueView(c *ui.Context) {
 }
 
 // queuePanel lists the tracks in the order they play, the track playing
-// first under shuffle, under the name of the list playing.
+// first under shuffle, labelled with the list the queue came from and its
+// size.
 func (app *nativeApp) queuePanel(c *ui.Context) {
 	ui.Column(c).Grow(1).FillHeight().Gap(4).Padding(18, 26, 12).Children(func() {
 		ui.Column(c).Gap(3).Children(func() {
-			ui.Text(c, app.player.Name).FontSize(21).Bold().SingleLine().Ellipsis("…")
+			ui.Text(c, "再生キュー").FontSize(21).Bold().SingleLine().Ellipsis("…")
 			ui.Text(c, app.queueMeta()).FontSize(12).TextColor(app.theme.TextMuted)
 		})
 		app.queueRows(c)
 	})
 }
 
-// queueMeta labels the playlist: its size, and the shuffle.
+// queueMeta labels the queue: the list it came from, its size, and the
+// shuffle.
 func (app *nativeApp) queueMeta() string {
-	size := fmt.Sprintf("%d曲", len(app.player.Order))
-	if app.player.Shuffle {
-		return size + "  ·  シャッフル"
+	parts := make([]string, 0, 3)
+	if app.player.Name != "" {
+		parts = append(parts, app.player.Name)
 	}
-	return size
+	parts = append(parts, fmt.Sprintf("%d曲", len(app.player.Order)))
+	if app.player.Shuffle {
+		parts = append(parts, "シャッフル")
+	}
+	return strings.Join(parts, "  ·  ")
 }
 
 // queueRows lists the tracks of the report's order, which is the queue as
@@ -345,10 +353,11 @@ func (app *nativeApp) queueRows(c *ui.Context) {
 	}
 }
 
-// queueRow builds one track of the playlist: its number, picture, title
-// and uploader, the menu on hover, and the track playing in the pressed
-// surface. Rows take the pointer so a click chooses one and a drag reaches
-// the list's reordering.
+// queueRow builds one track of the queue: its number, picture, title and
+// uploader, the menu on hover, and the track playing in the pressed
+// surface, with its number replaced by the play mark in the accent. Rows
+// take the pointer so a click chooses one and a drag reaches the list's
+// reordering.
 func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 	playable := isPlayable(item)
 	playing := item.WatchID != "" && item.WatchID == app.player.WatchID
@@ -363,10 +372,21 @@ func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 	}
 	row.Children(func() {
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Justify(ui.Start).FillWidth().Children(func() {
-			ui.Text(c, fmt.Sprintf("%02d", i+1)).Width(22).FontSize(12).TextColor(app.theme.TextMuted)
+			// The track playing shows the play mark in place of its number,
+			// in the accent kept for playback.
+			if playing {
+				ui.Box(c).Width(22).Center().Children(func() {
+					ui.Icon(c, iconPlay).FontSize(12).TextColor(app.theme.Accent)
+				})
+			} else {
+				ui.Text(c, fmt.Sprintf("%02d", i+1)).Width(22).FontSize(12).TextColor(app.theme.TextMuted)
+			}
 			app.thumbnail(c, item, thumbRowHeight)
 			ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(3).Children(func() {
-				ui.Text(c, app.queueLabel(item)).FontSize(13).Bold().SingleLine().Ellipsis("…")
+				title := ui.Text(c, app.queueLabel(item)).FontSize(13).Bold().SingleLine().Ellipsis("…")
+				if playing {
+					title.TextColor(app.theme.Accent)
+				}
 				if playable && item.Uploader != "" {
 					ui.Text(c, item.Uploader).FontSize(12).TextColor(app.theme.TextMuted).SingleLine().Ellipsis("…")
 				}
@@ -380,16 +400,19 @@ func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 	})
 }
 
-// followQueue scrolls the track playing to the top of the playlist as the
-// player moves on.
+// followQueue scrolls the track playing to the top of the queue as the
+// player moves on, one follow per track or row: a queue the user is reading
+// stays where they left it.
 func (app *nativeApp) followQueue(n int) {
-	if app.player.QueueIndex < 0 || app.player.QueuePos == app.queueFollow {
+	if app.player.QueueIndex < 0 ||
+		app.player.QueuePos == app.queueFollow && app.player.WatchID == app.queueFollowTrack {
 		return
 	}
 	if app.player.QueueIndex >= n {
 		return
 	}
 	app.queueFollow = app.player.QueuePos
+	app.queueFollowTrack = app.player.WatchID
 	app.queueList.ScrollTo(app.player.QueueIndex, ui.Start)
 }
 
@@ -428,12 +451,12 @@ func (app *nativeApp) removeFromQueue(item MylistItem) {
 }
 
 // moveQueueRows places the rows a drag moved before row to, in the playing
-// order the playlist shows.
+// order the queue screen shows.
 func (app *nativeApp) moveQueueRows(rows []int, to int) {
 	app.sendPlayer(PlayerCommand{Action: "move", Rows: rows, To: to})
 }
 
-// queueLabel names a track of the playlist, or says what its ID tells.
+// queueLabel names a track of the queue, or says what its ID tells.
 func (app *nativeApp) queueLabel(item MylistItem) string {
 	if item.Title != "" {
 		return item.Title
@@ -441,9 +464,8 @@ func (app *nativeApp) queueLabel(item MylistItem) string {
 	return "取得できません（" + item.WatchID + "）"
 }
 
-// queueItems returns the playlist's entries in the order it plays: the
-// player's items matched to the report's order, or the loaded list while
-// the player has not reported its queue yet.
+// queueItems returns the queue's entries in the order it plays: the player's
+// reported items matched to its reported order.
 func (app *nativeApp) queueItems() []MylistItem {
 	order := app.player.Order
 	rows := make([]MylistItem, 0, len(order))
@@ -453,20 +475,12 @@ func (app *nativeApp) queueItems() []MylistItem {
 	return rows
 }
 
-// listItem returns the entry of watchID: the player's item when its report
-// carries one, else the loaded list's, or one carrying what the ID alone
-// tells, which is enough for a row.
+// listItem returns the entry of watchID the player's report carries, or one
+// carrying what the ID alone tells, which is enough for a row.
 func (app *nativeApp) listItem(watchID string) MylistItem {
 	for i := range app.player.Items {
 		if app.player.Items[i].WatchID == watchID {
 			return app.player.Items[i]
-		}
-	}
-	if app.page != nil {
-		for i := range app.page.Items {
-			if app.page.Items[i].WatchID == watchID {
-				return app.page.Items[i]
-			}
 		}
 	}
 	return MylistItem{WatchID: watchID}
@@ -730,7 +744,6 @@ func (app *nativeApp) listHeader(c *ui.Context) {
 }
 
 func (app *nativeApp) trackRows(c *ui.Context) {
-	app.followTrack()
 	app.trackList.Key = func(row int) any { return app.page.Items[row].WatchID }
 	app.trackList.Label = func(row int) string {
 		item := app.page.Items[row]
@@ -746,14 +759,13 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		if !playable {
 			label = "取得できません（" + item.WatchID + "）"
 		}
+		// The list carries no playback state: the player's own screens show
+		// what plays, and a row here only reacts to the pointer.
 		row := ui.Button(c, "").Label(label).FillWidth().Padding(8, 12).Radius(8).
 			BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
-		switch {
-		case item.WatchID == app.player.WatchID:
-			row.Background(app.theme.SurfacePressed)
-		case row.Hovered():
+		if row.Hovered() {
 			row.Background(app.theme.SurfaceHover)
-		default:
+		} else {
 			row.Background(app.theme.Surface)
 		}
 		row.Disabled(!playable)
@@ -775,29 +787,15 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		})
 		if row.Clicked() {
 			app.selectTrack(item)
+			// Playing from the list hands the view to the queue screen,
+			// which follows the track as it plays.
+			app.queueOpen = true
 		}
 	}).Grow(1)
 	if len(app.page.Items) == 0 {
 		list.Children(func() {
 			ui.Text(c, "このマイリストに曲はありません").Padding(20).TextColor(app.theme.TextMuted)
 		})
-	}
-}
-
-// followTrack scrolls the list to the track the player moved to, so one
-// played out of order, as under shuffle, shows where it is; a track already
-// in view stays where the user left the list, and one the list does not hold
-// is remembered only once the list showing it opens.
-func (app *nativeApp) followTrack() {
-	if app.page == nil || app.player.WatchID == "" || app.player.WatchID == app.followedTrack {
-		return
-	}
-	for i := range app.page.Items {
-		if app.page.Items[i].WatchID == app.player.WatchID {
-			app.followedTrack = app.player.WatchID
-			app.trackList.ScrollIntoView(i)
-			return
-		}
 	}
 }
 
@@ -995,6 +993,9 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			})
 			if shuffle.Changed() {
 				app.sendPlayer(PlayerCommand{Action: "shuffle", Enabled: app.player.Shuffle})
+				// A shuffle lays the queue out anew: the next report brings
+				// the queue back to the track playing.
+				app.queueFollowTrack = ""
 			}
 			// The player restarts the track first while it is past its
 			// opening, so the button carries no CanPrev here.
@@ -1052,7 +1053,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				}
 			})
 
-			queue := ui.Button(c, "").Label("再生中のプレイリスト").Tooltip("再生中のプレイリスト").Padding(6, 9).BorderWidth(0)
+			queue := ui.Button(c, "").Label("再生キュー").Tooltip("再生キュー").Padding(6, 9).BorderWidth(0)
 			if app.queueOpen {
 				queue.Background(app.theme.SurfacePressed)
 			}

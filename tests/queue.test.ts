@@ -19,6 +19,7 @@ test("queue boundaries, shuffle, append, repeat, reset", () => {
   expect(q.select(b)?.watchId).toBe("b");
   expect(q.hasLoadedNext()).toBe(true);
   expect(q.orderIds()).toEqual(["a", "b", "c", "d"]);
+  expect(q.orderedItems().map((t) => t.watchId)).toEqual(["a", "b", "c", "d"]);
 
   // Shuffle lays the whole list out again: the track playing first, every
   // other entry once in a fresh random order.
@@ -84,6 +85,24 @@ test("queue boundaries, shuffle, append, repeat, reset", () => {
   expect(q.moveNext()).toBeNull();
 });
 
+// Selecting an entry under shuffle starts the queue at it: the entry plays
+// first, as turning shuffle on would lay the queue out, rather than sitting
+// where the shuffle happened to put it.
+test("select under shuffle pins the entry to the front", () => {
+  const q = new PlayQueue<Track>();
+  const items = ["a", "b", "c", "d", "e", "f"].map(track);
+  q.reset(items);
+  q.setShuffle(true);
+  const c = items[2]!;
+  q.move([q.orderIds().indexOf("c")], items.length); // c is last for certain
+  expect(q.orderIds()[items.length - 1]).toBe("c");
+  q.select(c);
+  expect(q.orderIds()[0]).toBe("c");
+  expect(q.orderIds().toSorted()).toEqual(["a", "b", "c", "d", "e", "f"]);
+  expect(q.current()?.watchId).toBe("c");
+  expect(q.hasPrev()).toBe(false);
+});
+
 // seq counts the changes to what plays and in which order, so the app can
 // tell when a playlist view has to be laid out again.
 test("seq counts playlist changes", () => {
@@ -137,6 +156,7 @@ test("move reorders rows", () => {
   q.select(abcd[0]!);
   q.move([2], 0);
   expect(q.orderIds()).toEqual(["c", "a", "b", "d"]);
+  expect(q.orderedItems().map((t) => t.watchId)).toEqual(["c", "a", "b", "d"]);
   expect(q.current()?.watchId).toBe("a");
 
   q.move([0], 2);

@@ -43,7 +43,10 @@ export interface PlayerCommand {
    * the list the playing track came from, so it has to tell the lists apart.
    */
   id?: string;
-  /** Name is the list's display name, which the playlist view shows. */
+  /**
+   * Name is the list's display name, which the queue screen labels the
+   * queue with.
+   */
   name?: string;
   items?: MylistItem[];
   watchId?: string;
@@ -70,8 +73,8 @@ export interface PlayerReport {
    */
   listId: string;
   /**
-   * Name is the display name of the list playing; the playlist view shows
-   * it even where the list is not the one shown.
+   * Name is the display name of the list playing; the queue screen labels
+   * the queue with it.
    */
   name: string;
   /**
@@ -94,7 +97,8 @@ export interface PlayerReport {
   /**
    * Order is the queue as it plays: the watch ID of each track in playlist
    * order, the track playing first under shuffle. Items carries the tracks
-   * themselves, so the playlist view shows them without the loaded list.
+   * themselves, so the queue screen shows the queue without the loaded
+   * list.
    */
   order: string[];
   items: MylistItem[];
