@@ -9,6 +9,9 @@ import (
 
 func main() {
 	mylist := NewMylist()
+	// Keep the window's state in VocaBox's own config directory, beside
+	// settings.json, rather than mygo's default store.
+	mygo.App.SetWindowStateStore(windowStateStore{mylist: mylist})
 	app := newNativeApp(mylist)
 	if saved, err := mylist.ListSaved(); err != nil {
 		app.setError(err)
@@ -37,6 +40,7 @@ func main() {
 	mygo.App.WhenReady(func() {
 		app.window = mygo.NewWindow(mygo.WindowOptions{
 			Title:           "VocaBox",
+			StateKey:        "main",
 			Width:           1120,
 			Height:          760,
 			MinWidth:        760,
