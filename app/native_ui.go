@@ -137,7 +137,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	t.Surface = ui.Hex("#1b1b23")
 	t.SurfaceHover = ui.Hex("#25252f")
 	t.SurfacePressed = ui.Hex("#31212d")
-	t.Border = ui.Hex("#30303a")
+	t.Border = ui.Hex("#383842")
 	t.Text = ui.Hex("#f4f0f5")
 	t.TextMuted = ui.Hex("#a6a0ad")
 	t.Accent = ui.Hex("#e45b9b")
@@ -167,18 +167,22 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 
 func (app *nativeApp) view(c *ui.Context) {
 	c.SetTheme(app.theme)
-	ui.Column(c).Fill().Background(app.theme.Background).Children(func() {
-		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
+	ui.Column(c).Fill().Background(app.theme.Background).Padding(12).Gap(12).Children(func() {
+		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Gap(12).Children(func() {
 			if app.sidebarOpen {
 				app.sidebar(c)
 			} else {
 				app.sidebarRail(c)
 			}
-			if app.queueOpen {
-				app.queueView(c)
-			} else {
-				app.content(c)
-			}
+			panel := ui.Column(c).Grow(1).FillHeight().MinWidth(0).Radius(12).
+				Background(app.theme.Surface).Border(1, app.theme.Border)
+			panel.Children(func() {
+				if app.queueOpen {
+					app.queueView(c)
+				} else {
+					app.content(c)
+				}
+			})
 		})
 		app.playerBar(c)
 		if app.playerView != nil {
@@ -193,7 +197,7 @@ func (app *nativeApp) view(c *ui.Context) {
 
 func (app *nativeApp) sidebar(c *ui.Context) {
 	ui.Column(c).Width(250).FillHeight().Padding(12, 20, 20, 12).Gap(16).
-		Background(app.theme.Surface).BorderWidth(0, 1, 0, 0).BorderColor(app.theme.Border).
+		Background(app.theme.Surface).Border(1, app.theme.Border).Radius(12).
 		Children(func() {
 			ui.Row(c).FillWidth().Height(48).AlignItems(ui.Center).Gap(12).Children(func() {
 				app.sidebarToggle(c, false)
@@ -234,7 +238,7 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 
 func (app *nativeApp) sidebarRail(c *ui.Context) {
 	ui.Column(c).Width(64).FillHeight().PaddingY(12).Gap(12).
-		Background(app.theme.Surface).BorderWidth(0, 1, 0, 0).BorderColor(app.theme.Border).
+		Background(app.theme.Surface).Border(1, app.theme.Border).Radius(12).
 		Children(func() {
 			ui.Row(c).FillWidth().Height(48).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
 				ui.Box(c).Width(12).Shrink(0)
@@ -348,7 +352,8 @@ func (app *nativeApp) queueRows(c *ui.Context) {
 func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 	playable := isPlayable(item)
 	playing := item.WatchID != "" && item.WatchID == app.player.WatchID
-	row := ui.Box(c).FillWidth().Padding(8, 12).Justify(ui.Start).AlignItems(ui.Center)
+	row := ui.Box(c).FillWidth().Padding(8, 12).Justify(ui.Start).AlignItems(ui.Center).
+		BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border)
 	hovered := row.Hovered()
 	switch {
 	case playing:
@@ -471,7 +476,7 @@ func (app *nativeApp) listItem(watchID string) MylistItem {
 // carrying the pictures of its first four tracks; clicking a playlist card
 // opens it.
 func (app *nativeApp) homeView(c *ui.Context) {
-	ui.Column(c).Grow(1).FillHeight().Padding(28, 30, 18).Gap(16).Children(func() {
+	ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Gap(18).Children(func() {
 		ui.Column(c).Gap(5).Children(func() {
 			ui.Text(c, "ホーム").FontSize(27).Bold()
 			sub := "保存したプレイリストから選んで再生"
@@ -496,11 +501,11 @@ func (app *nativeApp) homeView(c *ui.Context) {
 // opening the dialog that reads a public mylist in.
 func (app *nativeApp) importCard(c *ui.Context) {
 	card := ui.Button(c, "").Label("マイリストを読み込む").Width(playlistCardWidth).
-		Padding(12).Radius(12).Justify(ui.Start).AlignItems(ui.Start)
+		Padding(12).Radius(12).Border(1, app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 	if card.Hovered() {
 		card.Background(app.theme.SurfaceHover)
 	} else {
-		card.Background(app.theme.Surface)
+		card.Background(app.theme.Background)
 	}
 	card.Children(func() {
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
@@ -567,11 +572,11 @@ func (app *nativeApp) statusLine(c *ui.Context) {
 // a 2×2 tile, its name and its size. Clicking the card opens the playlist.
 func (app *nativeApp) playlistCard(c *ui.Context, entry SavedMylist) {
 	card := ui.Button(c, "").Label(entry.Name).Width(playlistCardWidth).
-		Padding(12).Radius(12).Justify(ui.Start).AlignItems(ui.Start)
+		Padding(12).Radius(12).Border(1, app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 	if card.Hovered() {
 		card.Background(app.theme.SurfaceHover)
 	} else {
-		card.Background(app.theme.Surface)
+		card.Background(app.theme.Background)
 	}
 	card.Children(func() {
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
@@ -650,7 +655,7 @@ func (app *nativeApp) listView(c *ui.Context, r *ui.Route) {
 	app.openList(id)
 	if app.page == nil || app.page.ID != id {
 		r.Title("読み込み中")
-		ui.Column(c).Grow(1).FillHeight().Padding(28, 30, 18).Children(func() {
+		ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Children(func() {
 			if app.status == "" {
 				ui.Text(c, "リストを読み込んでいます…").FontSize(13).TextColor(app.theme.TextMuted)
 			} else {
@@ -665,10 +670,11 @@ func (app *nativeApp) listView(c *ui.Context, r *ui.Route) {
 
 // listPage fills the content area with the loaded list.
 func (app *nativeApp) listPage(c *ui.Context) {
-	ui.Column(c).Grow(1).FillHeight().Padding(28, 30, 18).Gap(18).Children(func() {
+	ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Gap(14).Children(func() {
 		app.pumpThumbnailFill()
 		app.listHeader(c)
-		ui.Row(c).Gap(14).Justify(ui.Start).Padding(10, 12).Children(func() {
+		ui.Row(c).Gap(14).Justify(ui.Start).Padding(10, 12).
+			BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border).Children(func() {
 			ui.Text(c, "#").Width(28).FontSize(12).TextColor(app.theme.TextMuted)
 			ui.Box(c).Width(thumbSlotWidth(thumbRowHeight, 0)).Shrink(0)
 			ui.Text(c, "曲名 / 投稿者").FontSize(12).TextColor(app.theme.TextMuted)
@@ -740,7 +746,8 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		if !playable {
 			label = "取得できません（" + item.WatchID + "）"
 		}
-		row := ui.Button(c, "").Label(label).FillWidth().Padding(8, 12).Radius(8).Justify(ui.Start).AlignItems(ui.Start)
+		row := ui.Button(c, "").Label(label).FillWidth().Padding(8, 12).Radius(8).
+			BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 		switch {
 		case item.WatchID == app.player.WatchID:
 			row.Background(app.theme.SurfacePressed)
@@ -769,7 +776,7 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		if row.Clicked() {
 			app.selectTrack(item)
 		}
-	}).Grow(1).Gap(4)
+	}).Grow(1)
 	if len(app.page.Items) == 0 {
 		list.Children(func() {
 			ui.Text(c, "このマイリストに曲はありません").Padding(20).TextColor(app.theme.TextMuted)
@@ -952,8 +959,8 @@ func (app *nativeApp) resetThumbFailures() {
 }
 
 func (app *nativeApp) playerBar(c *ui.Context) {
-	ui.Column(c).Padding(14, 22, 16).Gap(8).Background(app.theme.Surface).
-		BorderWidth(1, 0, 0, 0).BorderColor(app.theme.Border).Children(func() {
+	ui.Column(c).Padding(12, 20, 14).Gap(8).Background(app.theme.Surface).
+		Border(1, app.theme.Border).Radius(12).Children(func() {
 		max := app.player.DurationMS
 		if max <= 0 || math.IsNaN(max) || math.IsInf(max, 0) {
 			max = 1

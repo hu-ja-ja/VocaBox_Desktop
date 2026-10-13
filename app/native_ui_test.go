@@ -499,6 +499,21 @@ func TestNativeUIPlayerBarCentersTransport(t *testing.T) {
 	}
 }
 
+func TestNativeUIPlayerBarFitsMinimumWidth(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.player = PlayerReport{
+		WatchID: "sm9", Title: "ウィンドウ幅が狭いときも表示が崩れない長い曲名",
+		Uploader: "投稿者", Ready: true, Volume: 1,
+	}
+	tester := ui.NewTester(app.view, 760, 560)
+	for _, label := range []string{"前へ", "再生", "次へ", "音量", "再生中のプレイリスト"} {
+		bounds, ok := tester.Find(label)
+		if !ok || bounds.X < 0 || bounds.X+bounds.W > 760 {
+			t.Fatalf("%q is missing or outside the minimum-width window: bounds=%v", label, bounds)
+		}
+	}
+}
+
 func TestNativeUIHomeOpensPlaylistCards(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	// With the sidebar closed the card is the only element named after the
