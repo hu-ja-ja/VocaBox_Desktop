@@ -617,6 +617,37 @@ func TestNativeUIMylistMenuPlays(t *testing.T) {
 	if !app.queueOpen {
 		t.Fatal("シャッフル再生 did not open the queue screen")
 	}
+
+	// Starting an unpinned mylist from the sidebar while another mylist is
+	// shown keeps the route on the new mylist, so the next frame does not
+	// cancel the load.
+	hold := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-hold
+		_, _ = w.Write([]byte(savedFixture))
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(hold) })
+	app = newNativeApp(&Mylist{client: srv.Client(), baseURL: srv.URL, configDir: t.TempDir()})
+	app.player.Playing = true
+	app.saved = []SavedMylist{{ID: "111", Name: "表示中のマイリスト", Items: []MylistItem{{WatchID: "sm9", Title: "表示曲", Available: true}}}}
+	app.ownMylists = []OwnMylist{{ID: "27411728", Name: "未ピンのマイリスト", ItemCount: 2, IsPublic: true}}
+	tester = ui.NewTester(app.view, 1120, 760)
+	if err := tester.Click("表示中のマイリスト"); err != nil {
+		t.Fatal(err)
+	}
+	item, ok := tester.Find("未ピンのマイリスト")
+	if !ok {
+		t.Fatal("the unpinned mylist is missing from the sidebar")
+	}
+	tester.RightClickAt(item.X+item.W/2, item.Y+item.H/2)
+	if err := tester.Click("再生"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if app.playOnLoadID != "27411728" || app.router.Path() != "/mylist/27411728" {
+		t.Fatalf("the next frame cancelled the pending play: playOnLoadID=%q path=%q", app.playOnLoadID, app.router.Path())
+	}
 }
 
 func hasCommand(commands []PlayerCommand, action string) bool {
@@ -668,6 +699,7 @@ func TestNativeUIKeepsPlayingTrackAcrossMylists(t *testing.T) {
 		t.Fatalf("the player bar lost the playing track: %q", tester.Texts())
 	}
 }
+
 // TestNativeUICanLoadNextOnlyForPlayingMylist checks that only the queue built
 // from the shown mylist takes its next page: a mylist merely shown must not feed
 // the queue of the mylist playing.
@@ -709,7 +741,7 @@ func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 	app.player = playerState{
 		WatchID: "sm2", MylistID: "123", Name: "作業用キュー", Title: "二曲目",
 		Ready: true, Playing: true, Volume: 1,
-		Order: []string{"sm2", "sm3", "sm1"}, Items: items, QueueIndex: 0, QueuePos: 0,
+		Order: []string{"sm2", "sm3", "sm1"}, Items: items, QueueIndex: 0,
 	}
 
 	tester := ui.NewTester(app.view, 1120, 760)
@@ -804,7 +836,7 @@ func TestNativeUIQueueCanScrollAfterFollowingThePlayingTrack(t *testing.T) {
 	}
 	app.player = playerState{
 		Name: "作業用スクロール", WatchID: "sm200", Order: order, Items: items,
-		QueueIndex: 199, QueuePos: 199,
+		QueueIndex: 199,
 	}
 	tester := ui.NewTester(app.view, 1120, 760)
 	first, last := app.queueList.Visible()
@@ -1000,7 +1032,7 @@ func TestNativeUIQueueFollowsTheTrackPlaying(t *testing.T) {
 	}
 	app.player = playerState{
 		Name: "作業用追従", WatchID: "sm1", Order: order, Items: items,
-		QueueIndex: 0, QueuePos: 0,
+		QueueIndex: 0,
 	}
 	tester := ui.NewTester(app.view, 1120, 760)
 	tester.Scroll(700, 500, 0, 240)
@@ -1210,16 +1242,27 @@ func TestThumbSlotHoldsTitlesInLine(t *testing.T) {
 
 func TestNativeUIThumbnailPlaceholderNeedsWindow(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.saved = []SavedMylist{{
-		ID:   "123",
-		Name: "作業用サムネ",
-		Items: []MylistItem{{
-			WatchID:   "sm27718606",
-			Title:     "サンプル曲",
-			Available: true,
-			ThumbURL:  "https://nicovideo.cdn.nimg.jp/thumbnails/27718606/27718606",
-		}},
-	}}
+	app.saved = []SavedMylist{
+		{
+			ID:   "123",
+			Name: "作業用サムネ",
+			Items: []MylistItem{{
+				WatchID:   "sm27718606",
+				Title:     "サンプル曲",
+				Available: true,
+				ThumbURL:  "https://nicovideo.cdn.nimg.jp/thumbnails/27718606/27718606",
+			}},
+		},
+		{
+			ID:   "456",
+			Name: "別のサムネ",
+			Items: []MylistItem{{
+				WatchID:   "sm9",
+				Title:     "別の曲",
+				Available: true,
+			}},
+		},
+	}
 
 	tester := ui.NewTester(app.view, 1120, 760)
 	if err := tester.Click("作業用サムネ"); err != nil {
@@ -1234,8 +1277,14 @@ func TestNativeUIThumbnailPlaceholderNeedsWindow(t *testing.T) {
 	if len(app.thumbBusy) != 0 || len(app.thumbs) != 0 {
 		t.Fatalf("unexpected thumbnail load: busy=%v thumbs=%d", app.thumbBusy, len(app.thumbs))
 	}
-	if len(app.fillQueue) != 1 {
-		t.Fatalf("fill queue = %d; want the mylist's entry queued", len(app.fillQueue))
+	if len(app.fillQueue) != 1 || app.fillQueue[0].WatchID != "sm27718606" {
+		t.Fatalf("fill queue = %+v; want the mylist's entry queued", app.fillQueue)
+	}
+	if err := tester.Click("別のサムネ"); err != nil {
+		t.Fatal(err)
+	}
+	if len(app.fillQueue) != 1 || app.fillQueue[0].WatchID != "sm9" {
+		t.Fatalf("fill queue = %+v; want the new mylist's entry replacing the old", app.fillQueue)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -35,6 +36,10 @@ type playback struct {
 	mylistName string
 	queueID    string
 	queueName  string
+	// queueFed counts how many entries of queueID's items have already been
+	// handed to the queue, so deletions from the queue never shift where
+	// the next page appends.
+	queueFed int
 
 	// track is what plays, apart from the queue: it keeps playing, and its
 	// metadata keeps being reported, while the shown mylist changes.
@@ -82,6 +87,7 @@ type playback struct {
 	post func(fn func())
 
 	pollOnce sync.Once
+	polling  atomic.Bool
 }
 
 // helperConn is the engine's view of the running helper: the JSON-line link
@@ -153,14 +159,22 @@ func (p *playback) handle(command PlayerCommand) {
 	}
 }
 
-// setItems adopts a mylist as the shown mylist; when nothing plays yet or the
-// queue came from the same mylist, the mylist becomes the queue too, keeping
-// shuffle, repeat, and the track playing when the mylist still holds it.
+// setItems adopts a mylist as the shown mylist; when nothing plays yet, the
+// mylist becomes the queue too, keeping shuffle and repeat. While a track is
+// already playing, the existing queue keeps its order and loaded pages, and
+// any newly fetched tail entries of the playing mylist (as when pinning or
+// refreshing it) are appended.
 func (p *playback) setItems(id, name string, items []MylistItem) {
 	p.mylistID, p.mylistName = id, name
 	p.items = playableItems(items)
-	if p.track.WatchID == "" || p.queueID == p.mylistID {
+	if p.track.WatchID == "" {
 		p.adoptQueue()
+	} else if p.queueID == p.mylistID {
+		p.queueName = p.mylistName
+		if len(p.items) > p.queueFed {
+			p.queue.append(p.items[p.queueFed:])
+			p.queueFed = len(p.items)
+		}
 	}
 	// A next that was waiting for a page clears here: the queue it waited
 	// for either has one now or never will.
@@ -179,8 +193,9 @@ func (p *playback) setItems(id, name string, items []MylistItem) {
 func (p *playback) appendItems(items []MylistItem) {
 	more := playableItems(items)
 	p.items = append(p.items, more...)
-	if p.queueID == p.mylistID {
-		p.queue.append(more)
+	if p.queueID == p.mylistID && len(p.items) > p.queueFed {
+		p.queue.append(p.items[p.queueFed:])
+		p.queueFed = len(p.items)
 	}
 	// The app asked for the next track while the page loaded: with the page
 	// in the queue it can move on now.
@@ -198,6 +213,7 @@ func (p *playback) adoptQueue() {
 	shuffle := p.queue.isShuffle()
 	repeat := p.queue.repeat
 	p.queue.reset(p.items)
+	p.queueFed = len(p.items)
 	if shuffle {
 		p.queue.setShuffle(true)
 	}
@@ -211,10 +227,16 @@ func (p *playback) adoptQueue() {
 	}
 }
 
-// selectTrack plays a track of the shown mylist from its start; a queue owned
-// by another mylist moves to the shown one first, so the track's neighbours
-// come from there.
+// selectTrack plays a track from its start: directly from the queue when chosen
+// on the queue screen, or from the shown mylist otherwise, adopting the shown
+// mylist's queue when it differs from the one playing.
 func (p *playback) selectTrack(watchID string) {
+	if p.app.queueOpen {
+		if item, ok := p.queue.selectTrack(MylistItem{WatchID: watchID}); ok {
+			p.play(item)
+			return
+		}
+	}
 	item, ok := findItem(p.items, watchID)
 	if !ok {
 		return
@@ -223,7 +245,10 @@ func (p *playback) selectTrack(watchID string) {
 		p.adoptQueue()
 	}
 	if _, ok := p.queue.selectTrack(item); !ok {
-		return
+		p.adoptQueue()
+		if _, ok := p.queue.selectTrack(item); !ok {
+			return
+		}
 	}
 	p.play(item)
 }
@@ -353,12 +378,15 @@ func helperExecutable() (string, error) {
 	return path, nil
 }
 
-// pollPosition pulls the helper's position while a track is ready: the app
+// pollPosition pulls the helper's position while a track is playing: the app
 // asks, the helper answers with a position event.
 func (p *playback) pollPosition() {
 	for range time.Tick(positionPollInterval) {
+		if !p.polling.Load() {
+			continue
+		}
 		p.post(func() {
-			if p.closing || p.proc == nil || !p.app.player.Ready {
+			if p.closing || p.proc == nil || !p.app.player.Ready || !p.app.player.Playing {
 				return
 			}
 			_ = p.proc.send(helperCommand{Cmd: "position"})
@@ -457,6 +485,7 @@ func (p *playback) helperExited(error) {
 		}
 		log.Printf("AmsHelper died; restarting (track=%q retry=%v)", p.track.WatchID, !p.restarted)
 		p.proc = nil
+		p.polling.Store(false)
 		if p.track.WatchID == "" {
 			return
 		}
@@ -522,10 +551,7 @@ func (p *playback) sendSeek(positionMS float64) {
 }
 
 func (p *playback) setVolume(volume float64) {
-	if math.IsNaN(volume) || math.IsInf(volume, 0) {
-		volume = 1
-	}
-	volume = math.Max(0, math.Min(1, volume))
+	volume = clampVolume(volume)
 	p.app.player.Volume = volume
 	if p.proc != nil {
 		_ = p.proc.send(helperCommand{Cmd: "volume", Value: volume})
@@ -623,20 +649,15 @@ func (p *playback) publish() {
 	st.CanNext = p.queue.hasLoadedNext()
 	st.Order = p.queue.orderIDs()
 	st.Items = p.queue.orderedItems()
-	st.QueuePos = p.queue.currentIndex()
-	st.QueueIndex = -1
+	st.QueueIndex = p.queue.currentIndex()
 	st.Quality = qualityLabel(p.bitrates, p.variant)
-	for i, id := range st.Order {
-		if id == st.WatchID && st.WatchID != "" {
-			st.QueueIndex = i
-			break
-		}
-	}
+	p.polling.Store(!p.closing && p.proc != nil && st.Ready && st.Playing)
 }
 
 // shutdown ends the helper for good, as the app quits.
 func (p *playback) shutdown() {
 	p.closing = true
+	p.polling.Store(false)
 	if p.proc != nil {
 		p.proc.shutdown()
 	}

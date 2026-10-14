@@ -346,7 +346,7 @@ func (n *Nico) fetchWatch(videoID string, noSideEffect bool) (nicoWatch, error) 
 	if resp.Meta.Status != http.StatusOK {
 		// A session niconico no longer accepts is what asks for a new
 		// login; any other failure is an ordinary API error.
-		if n.loggedIn && resp.Meta.ErrorCode == "UNAUTHORIZED" {
+		if loggedIn && resp.Meta.ErrorCode == "UNAUTHORIZED" {
 			return nicoWatch{}, errSessionExpired
 		}
 		return nicoWatch{}, fmt.Errorf("動画の情報を取得できませんでした（status %d %s）", resp.Meta.Status, resp.Meta.ErrorCode)
@@ -363,11 +363,9 @@ func (n *Nico) fetchWatch(videoID string, noSideEffect bool) (nicoWatch, error) 
 // The key is a short-lived JWT (about 10 minutes) bound to this watch
 // session, so it is fetched per play.
 func (n *Nico) contentURL(videoID string, watch nicoWatch, videos []string, audios []nicoAudio) (string, error) {
-	var outputs [][2]string
-	for _, video := range videos {
-		for _, audio := range audios {
-			outputs = append(outputs, [2]string{video, audio.ID})
-		}
+	outputs := make([][2]string, 0, len(audios))
+	for _, audio := range audios {
+		outputs = append(outputs, [2]string{videos[0], audio.ID})
 	}
 	body, err := json.Marshal(map[string][][2]string{"outputs": outputs})
 	if err != nil {
@@ -474,13 +472,25 @@ func (n *Nico) doJSON(req *http.Request, out any) error {
 	if err != nil || len(body) > maxNicoBody {
 		return errors.New("ニコニコの応答を読み取れませんでした")
 	}
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("ニコニコのAPIが失敗しました（HTTP %d）", resp.StatusCode)
-	}
 	if err := json.Unmarshal(body, out); err != nil {
+		if resp.StatusCode/100 != 2 {
+			return fmt.Errorf("ニコニコのAPIが失敗しました（HTTP %d）", resp.StatusCode)
+		}
 		return errors.New("ニコニコの応答を読み取れませんでした")
 	}
+	if resp.StatusCode/100 != 2 && !hasMetaStatus(body) {
+		return fmt.Errorf("ニコニコのAPIが失敗しました（HTTP %d）", resp.StatusCode)
+	}
 	return nil
+}
+
+func hasMetaStatus(body []byte) bool {
+	var env struct {
+		Meta struct {
+			Status int `json:"status"`
+		} `json:"meta"`
+	}
+	return json.Unmarshal(body, &env) == nil && env.Meta.Status > 0
 }
 
 // get fetches a playlist with the frontend headers and cookies.

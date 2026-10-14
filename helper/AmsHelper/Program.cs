@@ -33,11 +33,12 @@ internal static class Program
         new() { CookieUsageBehavior = HttpCookieUsageBehavior.NoCookies };
     private static readonly HttpClient Http = new(Filter);
 
-    // current is the adaptive source feeding the player; generation marks the
-    // newest play, so a slow manifest download cannot install a stale source
-    // over a newer one.
+    // stateLock guards the player and the current adaptive source across the
+    // stdin command loop and the async manifest continuation.
+    private static readonly object stateLock = new();
     private static AdaptiveMediaSource? _current;
-    private static volatile int _generation;
+    private static int _generation;
+    private static bool _wantPlay;
     // gen is the app's name of the track load the current source belongs to,
     // echoed on every event so the app can drop the events of a replaced
     // track.
@@ -87,7 +88,11 @@ internal static class Program
             }
             Handle(command);
         }
-        Player.Dispose();
+        lock (stateLock)
+        {
+            Stop();
+            Player.Dispose();
+        }
         return 0;
     }
 
@@ -99,29 +104,53 @@ internal static class Program
                 Play(command);
                 break;
             case "pause":
-                Player.Pause();
+                lock (stateLock)
+                {
+                    _wantPlay = false;
+                    Player.Pause();
+                }
                 break;
             case "resume":
-                Player.Play();
+                lock (stateLock)
+                {
+                    _wantPlay = true;
+                    Player.Play();
+                }
                 break;
             case "seek":
-                if (_current is not null)
+                lock (stateLock)
                 {
-                    Player.PlaybackSession.Position = TimeSpan.FromMilliseconds(Math.Max(0, command.Ms));
+                    if (_current is not null)
+                    {
+                        Player.PlaybackSession.Position = TimeSpan.FromMilliseconds(Math.Max(0, command.Ms));
+                    }
                 }
                 break;
             case "volume":
-                Player.Volume = Math.Clamp(command.Value, 0, 1);
+                lock (stateLock)
+                {
+                    Player.Volume = Math.Clamp(command.Value, 0, 1);
+                }
                 break;
             case "stop":
-                Stop();
+                lock (stateLock)
+                {
+                    Stop();
+                }
                 break;
             case "position":
+                double ms;
+                int gen;
+                lock (stateLock)
+                {
+                    ms = _current is null ? 0 : Player.PlaybackSession.Position.TotalMilliseconds;
+                    gen = _gen;
+                }
                 Emit(new HelperEvent
                 {
                     Ev = "position",
-                    Ms = _current is null ? 0 : Player.PlaybackSession.Position.TotalMilliseconds,
-                    Gen = _gen,
+                    Ms = ms,
+                    Gen = gen,
                 });
                 break;
         }
@@ -138,13 +167,18 @@ internal static class Program
         {
             return;
         }
-        var generation = ++_generation;
-        _gen = command.Gen;
-        ApplyCookies(command.Cookie);
-        if (command.Ua is { Length: > 0 } ua && Http.DefaultRequestHeaders.UserAgent.ToString() != ua)
+        int generation;
+        lock (stateLock)
         {
-            Http.DefaultRequestHeaders.UserAgent.Clear();
-            Http.DefaultRequestHeaders.UserAgent.TryParseAdd(ua);
+            Stop();
+            generation = ++_generation;
+            _wantPlay = command.Play;
+            ApplyCookies(command.Cookie);
+            if (command.Ua is { Length: > 0 } ua && Http.DefaultRequestHeaders.UserAgent.ToString() != ua)
+            {
+                Http.DefaultRequestHeaders.UserAgent.Clear();
+                Http.DefaultRequestHeaders.UserAgent.TryParseAdd(ua);
+            }
         }
         AdaptiveMediaSourceCreationResult result;
         try
@@ -153,36 +187,40 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Fail(generation, "Exception", ex.HResult, ex.Message);
+            Fail(generation, command.Gen, "Exception", ex.HResult, ex.Message);
             return;
         }
-        if (generation != _generation)
+        lock (stateLock)
         {
-            result.MediaSource?.Dispose();
-            return;
-        }
-        if (result.Status != AdaptiveMediaSourceCreationStatus.Success)
-        {
-            Fail(generation, result.Status.ToString(), result.ExtendedError?.HResult ?? 0,
-                result.ExtendedError?.Message ?? "");
-            return;
-        }
-        var previous = _current;
-        _current = result.MediaSource;
-        Player.Source = null;
-        previous?.Dispose();
-        Player.Source = MediaSource.CreateFromAdaptiveMediaSource(_current);
-        // A track installed for a pause stays paused: the UI's play state and
-        // the app's wantPlaying must agree.
-        if (command.Play)
-        {
-            Player.Play();
+            if (generation != _generation)
+            {
+                result.MediaSource?.Dispose();
+                return;
+            }
+            if (result.Status != AdaptiveMediaSourceCreationStatus.Success)
+            {
+                Fail(generation, command.Gen, result.Status.ToString(), result.ExtendedError?.HResult ?? 0,
+                    result.ExtendedError?.Message ?? "");
+                return;
+            }
+            _gen = command.Gen;
+            _current = result.MediaSource;
+            Player.Source = MediaSource.CreateFromAdaptiveMediaSource(_current);
+            // A track installed for a pause, or paused while its manifest
+            // downloaded, stays paused: the UI's play state and the app's
+            // wantPlaying must agree.
+            if (_wantPlay)
+            {
+                Player.Play();
+            }
         }
     }
 
     private static void Stop()
     {
         _generation++;
+        _gen = 0;
+        _wantPlay = false;
         Player.Source = null;
         _current?.Dispose();
         _current = null;
@@ -216,13 +254,16 @@ internal static class Program
         }
     }
 
-    private static void Fail(int generation, string code, int ext, string msg)
+    private static void Fail(int generation, int gen, string code, int ext, string msg)
     {
-        if (generation != _generation)
+        lock (stateLock)
         {
-            return;
+            if (generation != _generation)
+            {
+                return;
+            }
+            Emit(new HelperEvent { Ev = "failed", Code = code, Ext = ext, Msg = msg, Gen = gen });
         }
-        Emit(new HelperEvent { Ev = "failed", Code = code, Ext = ext, Msg = msg, Gen = _gen });
     }
 
     private static void Emit(HelperEvent ev)

@@ -308,6 +308,7 @@ func TestNicoExpiredSession(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	mux.HandleFunc("/api/watch/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"meta":{"status":400,"errorCode":"UNAUTHORIZED"},"data":null}`))
 	})
 

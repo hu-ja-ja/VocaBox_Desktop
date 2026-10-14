@@ -107,6 +107,12 @@ func (app *nativeApp) watchLogin(window *mygo.Window) {
 // it, and closes the window. The browser session the window kept is
 // cleared, so the cookies live on only in the app's DPAPI file.
 func (app *nativeApp) completeLogin(window *mygo.Window, header string) {
+	// The cookies are in memory now: forget the browser session the sign-in
+	// window kept at once, so a refused or unsaved session never stays in
+	// the web view store to trip the next sign-in attempt.
+	if err := mygo.App.ClearBrowsingData(); err != nil {
+		log.Printf("login: clearing the web view data: %v", err)
+	}
 	verifyErr := error(nil)
 	if app.playback != nil {
 		if err := app.playback.nico.SetSession(header); err != nil {
@@ -129,11 +135,6 @@ func (app *nativeApp) completeLogin(window *mygo.Window, header string) {
 	if err := app.session.Save(header); err != nil {
 		app.finishLogin(window, err.Error(), true)
 		return
-	}
-	// The cookies are the app's now: forget the browser session the sign-in
-	// window kept.
-	if err := mygo.App.ClearBrowsingData(); err != nil {
-		log.Printf("login: clearing the web view data: %v", err)
 	}
 	app.finishLogin(window, "ログインしました。", false)
 	app.loadAccount()

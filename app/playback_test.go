@@ -144,8 +144,8 @@ func TestPlaybackSelectAcquiresAndPlaysTopBand(t *testing.T) {
 	if got := p.app.player.Order; len(got) != 2 || got[0] != "sm1" {
 		t.Fatalf("order = %v", got)
 	}
-	if p.app.player.QueueIndex != 0 || p.app.player.QueuePos != 0 {
-		t.Fatalf("queue position = %d/%d", p.app.player.QueueIndex, p.app.player.QueuePos)
+	if p.app.player.QueueIndex != 0 {
+		t.Fatalf("queue position = %d", p.app.player.QueueIndex)
 	}
 }
 
@@ -246,12 +246,17 @@ func TestPlaybackForgetsExpiredSession(t *testing.T) {
 	if err := p.nico.SetSession("user_session=abc"); err != nil {
 		t.Fatal(err)
 	}
+	done := make(chan struct{})
+	p.post = func(fn func()) {
+		fn()
+		close(done)
+	}
 	p.acquire = func(MylistItem) (playbackSources, error) {
 		return playbackSources{}, errSessionExpired
 	}
 	p.setItems("111", "マイリストA", testQueueItems())
 	p.selectTrack("sm1")
-	waitFor(t, "the session to be forgotten", func() bool { return !p.app.loggedIn })
+	<-done
 
 	if got, err := p.app.session.Load(); err != nil || got != "" {
 		t.Fatalf("the stored session was kept: %q, %v", got, err)
@@ -470,9 +475,15 @@ func TestPlaybackSetItemsKeepsShuffleAndTrack(t *testing.T) {
 		t.Fatalf("shuffle did not pin the track playing: %v", got)
 	}
 
-	// Refreshing the same mylist keeps shuffle and the track playing.
+	// Revisiting or refreshing the same mylist keeps shuffle, the queue order,
+	// and the track playing.
+	p.handle(PlayerCommand{Action: "move", Rows: []int{1}, To: 0})
+	wantOrder := p.app.player.Order
 	p.setItems("111", "マイリストA", testQueueItems())
-	if !p.app.player.Shuffle || p.app.player.WatchID != "sm1" || p.app.player.QueueIndex != 0 {
+	if !p.app.player.Shuffle || p.app.player.WatchID != "sm1" {
 		t.Fatalf("player = %#v", p.app.player)
+	}
+	if got := p.app.player.Order; len(got) != len(wantOrder) || got[0] != wantOrder[0] || got[1] != wantOrder[1] {
+		t.Fatalf("revisiting the playing mylist reset the queue order: got=%v want=%v", got, wantOrder)
 	}
 }

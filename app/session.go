@@ -2,9 +2,7 @@ package main
 
 import (
 	"errors"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -40,18 +38,7 @@ func (s sessionStore) Save(cookies string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return errors.New("保存先フォルダーを作成できませんでした")
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
-		return errors.New("ログイン情報を保存できませんでした")
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return errors.New("ログイン情報を保存できませんでした")
-	}
-	return nil
+	return writeFileAtomic(path, blob, 0o600, "ログイン情報を保存できませんでした")
 }
 
 // Load returns the stored Cookie header, "" when none is saved.
@@ -60,16 +47,11 @@ func (s sessionStore) Load() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	f, err := os.Open(path)
+	blob, err := readBoundedFile(path, maxSessionBody)
 	if os.IsNotExist(err) {
 		return "", nil
 	}
-	if err != nil {
-		return "", errors.New("ログイン情報を読み込めませんでした")
-	}
-	defer f.Close()
-	blob, err := io.ReadAll(io.LimitReader(f, maxSessionBody+1))
-	if err != nil || len(blob) == 0 || len(blob) > maxSessionBody {
+	if err != nil || len(blob) == 0 {
 		return "", errors.New("ログイン情報を読み込めませんでした")
 	}
 	body, err := dpapiUnprotect(blob)
