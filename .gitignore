@@ -39,4 +39,8 @@ node_modules/
 /.mygo/
 mygo_windows_*.syso
 
+# AmsHelper build output (bun run helper)
+/helper/*/bin/
+/helper/*/obj/
+
 要件/
