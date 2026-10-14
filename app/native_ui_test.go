@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -98,7 +101,49 @@ func TestNativeUISignInRow(t *testing.T) {
 	if !tester.HasText("ログイン中") || tester.HasText("ニコニコにログイン") {
 		t.Fatalf("a signed-in app shows %q", tester.Texts())
 	}
+
+	// The fetched account replaces the signed-in label with its name, and
+	// its picture lands in the avatar beside it.
+	var icon bytes.Buffer
+	red := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	for i := 0; i < len(red.Pix); i += 4 {
+		red.Pix[i], red.Pix[i+1], red.Pix[i+2], red.Pix[i+3] = 255, 0, 0, 255
+	}
+	if err := png.Encode(&icon, red); err != nil {
+		t.Fatal(err)
+	}
+	bitmap, err := ui.DecodeBitmap(icon.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.accountName, app.accountIcon = "テストユーザー", bitmap
+	tester.Frame()
+	if !tester.HasText("テストユーザーでログイン中") {
+		t.Fatalf("a fetched account shows %q", tester.Texts())
+	}
+	avatar, ok := tester.Find("テストユーザー")
+	if !ok || avatar.W != avatar.H || avatar.W < 20 {
+		t.Fatalf("the fetched picture did not land in the avatar: %v", avatar)
+	}
+
+	// The way out asks first: cancelling keeps the session, confirming
+	// forgets it.
 	if err := tester.Click("ログアウト"); err != nil {
+		t.Fatal(err)
+	}
+	if !app.confirmLogout || !tester.HasText("ログアウトしますか？") {
+		t.Fatalf("the way out did not ask first: %q", tester.Texts())
+	}
+	if err := tester.Click("キャンセル"); err != nil {
+		t.Fatal(err)
+	}
+	if app.confirmLogout || !app.loggedIn {
+		t.Fatal("cancelling the dialog signed the app out")
+	}
+	if err := tester.Click("ログアウト"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.Click("ログアウトする"); err != nil {
 		t.Fatal(err)
 	}
 	if app.loggedIn {

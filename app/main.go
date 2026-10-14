@@ -23,6 +23,7 @@ func main() {
 			log.Printf("session: %v", err)
 		} else {
 			app.loggedIn = true
+			app.loadAccount()
 		}
 	}
 	if saved, err := mylist.ListSaved(); err != nil {

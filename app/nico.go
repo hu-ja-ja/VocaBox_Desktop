@@ -152,6 +152,51 @@ func (n *Nico) VerifySession() error {
 	return err
 }
 
+// nicoUser is the signed-in account as far as the sidebar shows it: the
+// display name and the URL of the account's picture.
+type nicoUser struct {
+	Nickname string
+	IconURL  string
+}
+
+// User fetches the signed-in account's name and picture URL from the
+// users/me API. A session niconico no longer accepts is an ordinary error
+// here: only the avatar would show, and playback reports the expiry.
+func (n *Nico) User() (nicoUser, error) {
+	if !n.LoggedIn() {
+		return nicoUser{}, errors.New("ログインしていません")
+	}
+	req, err := n.request(http.MethodGet, n.apiBase+"/v1/users/me", nil)
+	if err != nil {
+		return nicoUser{}, errors.New("アカウント情報を取得できませんでした")
+	}
+	var resp struct {
+		Meta struct {
+			Status int `json:"status"`
+		} `json:"meta"`
+		Data struct {
+			User struct {
+				Nickname string `json:"nickname"`
+				Icons    struct {
+					Small string `json:"small"`
+					Large string `json:"large"`
+				} `json:"icons"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	if err := n.doJSON(req, &resp); err != nil {
+		return nicoUser{}, err
+	}
+	if resp.Meta.Status != http.StatusOK {
+		return nicoUser{}, fmt.Errorf("アカウント情報を取得できませんでした（status %d）", resp.Meta.Status)
+	}
+	icon := resp.Data.User.Icons.Large
+	if icon == "" {
+		icon = resp.Data.User.Icons.Small
+	}
+	return nicoUser{Nickname: resp.Data.User.Nickname, IconURL: icon}, nil
+}
+
 // playbackSources is everything the helper needs for one track: the audio
 // media playlist URLs, the highest band first (the Go side falls back to the
 // next one when playback of a band fails), and the Cookie and User-Agent the

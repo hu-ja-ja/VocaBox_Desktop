@@ -82,6 +82,10 @@ type nativeApp struct {
 	session     sessionStore
 	loggedIn    bool
 	loginWindow *mygo.Window
+	// accountName and accountIcon are the signed-in account's display name
+	// and picture, fetched once after sign-in; empty until they arrive.
+	accountName string
+	accountIcon *ui.Bitmap
 	// sent records the commands the UI sent, for tests; the app itself
 	// hands them to playback.
 	sent  []PlayerCommand
@@ -110,6 +114,9 @@ type nativeApp struct {
 	// importing shows the dialog the home's import card opens.
 	importing bool
 	input     string
+	// confirmLogout shows the dialog the sidebar's way out opens, asking
+	// before the session is forgotten.
+	confirmLogout bool
 	page      *MylistPage
 	nextPage  int
 	hasMore   bool
@@ -211,6 +218,7 @@ func (app *nativeApp) view(c *ui.Context) {
 		app.playerBar(c)
 	})
 	ui.Modal(c, &app.importing, func() { app.importDialog(c) })
+	ui.Modal(c, &app.confirmLogout, func() { app.logoutDialog(c) })
 }
 
 func (app *nativeApp) sidebar(c *ui.Context) {
@@ -258,15 +266,21 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 }
 
 // accountRow shows the sign-in state at the foot of the sidebar: the way
-// in while signed out, and the way out while signed in.
+// in while signed out, and the way out while signed in, with the account's
+// picture and name once they are fetched.
 func (app *nativeApp) accountRow(c *ui.Context) {
 	ui.Divider(c)
 	if app.loggedIn {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "ログイン中").FontSize(12).TextColor(app.theme.TextMuted)
-			ui.Spacer(c).Grow(1)
+			app.accountAvatar(c)
+			label := "ログイン中"
+			if app.accountName != "" {
+				label = app.accountName + "でログイン中"
+			}
+			ui.Text(c, label).FontSize(12).TextColor(app.theme.TextMuted).
+				SingleLine().Ellipsis("…").Grow(1).Basis(0).MinWidth(0)
 			if button := ui.Button(c, "ログアウト").Padding(6, 9); button.Clicked() {
-				app.logout()
+				app.confirmLogout = true
 			}
 		})
 		return
@@ -278,6 +292,35 @@ func (app *nativeApp) accountRow(c *ui.Context) {
 	if button := ui.Button(c, label).FillWidth().Disabled(app.loginWindow != nil); button.Clicked() {
 		app.openLogin()
 	}
+}
+
+// logoutDialog asks before the session is forgotten, so one click on the
+// sidebar's way out does not sign the user out.
+func (app *nativeApp) logoutDialog(c *ui.Context) {
+	ui.Column(c).Width(320).Gap(14).Children(func() {
+		ui.Text(c, "ログアウトしますか？").FontSize(20).Bold()
+		ui.Text(c, "保存したログイン情報を削除します。").FontSize(12).TextColor(app.theme.TextMuted)
+		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
+			if button := ui.Button(c, "キャンセル"); button.Clicked() {
+				app.confirmLogout = false
+			}
+			if button := ui.PrimaryButton(c, "ログアウトする"); button.Clicked() {
+				app.confirmLogout = false
+				app.logout()
+			}
+		})
+	})
+}
+
+// accountAvatar shows the signed-in account's picture: an empty circle of
+// the same size until it arrives, so the row does not shift when it does.
+func (app *nativeApp) accountAvatar(c *ui.Context) {
+	if app.accountIcon != nil {
+		ui.Avatar(c, app.accountName, app.accountIcon)
+		return
+	}
+	size := app.theme.Rem(2.25)
+	ui.Box(c).Size(size, size).Radius(size / 2).Shrink(0).Background(app.theme.SurfaceHover)
 }
 
 func (app *nativeApp) sidebarRail(c *ui.Context) {

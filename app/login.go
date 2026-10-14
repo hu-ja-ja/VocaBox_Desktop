@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 // The sign-in flow opens niconico's own login page in a web view: the
@@ -135,6 +136,55 @@ func (app *nativeApp) completeLogin(window *mygo.Window, header string) {
 		log.Printf("login: clearing the web view data: %v", err)
 	}
 	app.finishLogin(window, "ログインしました。", false)
+	app.loadAccount()
+}
+
+// loadAccount fetches the signed-in account's name and picture in the
+// background; the sidebar shows them once they arrive. A failure leaves
+// the row as it is, so it is only worth a line on the log.
+func (app *nativeApp) loadAccount() {
+	if app.playback == nil {
+		return
+	}
+	go func() {
+		user, icon, err := app.fetchAccount()
+		if err != nil {
+			log.Printf("account: %v", err)
+			return
+		}
+		app.update(func() {
+			if !app.loggedIn {
+				return
+			}
+			app.accountName = user.Nickname
+			if icon != nil {
+				// Decoded here, where the thumbnails are.
+				if bitmap, err := ui.DecodeBitmap(icon); err == nil && thumbSizeOK(bitmap) {
+					app.accountIcon = bitmap
+				}
+			}
+		})
+	}()
+}
+
+// fetchAccount asks niconico for the signed-in account and the bytes of
+// its picture; the caller decodes the picture where bitmaps may be made.
+func (app *nativeApp) fetchAccount() (nicoUser, []byte, error) {
+	user, err := app.playback.nico.User()
+	if err != nil {
+		return nicoUser{}, nil, err
+	}
+	if user.IconURL == "" {
+		return user, nil, nil
+	}
+	// The picture rules of the thumbnails apply: the allowed host, an
+	// image response, the size bound, and the shared limiter.
+	body, err := app.mylist.fetchThumbnail(user.IconURL)
+	if err != nil {
+		log.Printf("account: %v", err)
+		return user, nil, nil
+	}
+	return user, body, nil
 }
 
 // finishLogin closes the sign-in window and reports how it went, on the
@@ -166,7 +216,7 @@ func (app *nativeApp) sessionExpired() {
 }
 
 // clearSession forgets the stored session and returns the player to guest
-// playback.
+// playback, and forgets the account the sidebar showed.
 func (app *nativeApp) clearSession() {
 	if err := app.session.Clear(); err != nil {
 		log.Printf("session: %v", err)
@@ -175,6 +225,7 @@ func (app *nativeApp) clearSession() {
 		app.playback.nico.ClearSession()
 	}
 	app.loggedIn = false
+	app.accountName, app.accountIcon = "", nil
 }
 
 // update runs fn on the UI thread; without a window, as in tests, it runs

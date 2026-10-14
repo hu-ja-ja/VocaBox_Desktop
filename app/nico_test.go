@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -157,6 +158,53 @@ func TestNicoPrepareReportsWatchFailure(t *testing.T) {
 	n.apiBase = server.URL
 	if _, err := n.Prepare("sm123"); err == nil {
 		t.Fatal("a failed watch call must be reported")
+	}
+}
+
+// TestNicoUserReadsTheAccount drives users/me: the account's name and its
+// large picture, falling back to the small one, and a call made without a
+// session.
+func TestNicoUserReadsTheAccount(t *testing.T) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	var noLarge atomic.Bool
+	mux.HandleFunc("/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Frontend-ID") != "6" || r.Header.Get("X-Frontend-Version") != "0" {
+			t.Errorf("users/me lost the frontend headers: %v", r.Header)
+		}
+		icons := map[string]any{"small": "https://example.invalid/icon-small.jpg"}
+		if !noLarge.Load() {
+			icons["large"] = "https://example.invalid/icon-large.jpg"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"meta": map[string]any{"status": 200},
+			"data": map[string]any{"user": map[string]any{
+				"nickname": "テスト",
+				"icons":    icons,
+			}},
+		})
+	})
+	n := NewNico()
+	n.apiBase = server.URL
+	if _, err := n.User(); err == nil {
+		t.Fatal("a call without a session must be reported")
+	}
+	if err := n.SetSession("user_session=abc"); err != nil {
+		t.Fatal(err)
+	}
+	user, err := n.User()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Nickname != "テスト" || user.IconURL != "https://example.invalid/icon-large.jpg" {
+		t.Fatalf("User() = %#v; want the nickname and the large picture", user)
+	}
+
+	// An account without a large picture shows its small one.
+	noLarge.Store(true)
+	if user, err = n.User(); err != nil || user.IconURL != "https://example.invalid/icon-small.jpg" {
+		t.Fatalf("User() = %#v, %v; want the small picture", user, err)
 	}
 }
 
