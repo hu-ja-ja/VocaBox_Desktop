@@ -48,6 +48,9 @@ var pinSVG []byte
 //go:embed icons/lock.svg
 var lockSVG []byte
 
+//go:embed icons/trash-2.svg
+var trashSVG []byte
+
 var (
 	iconPlay        = ui.MustParseSVG(playSVG)
 	iconPause       = ui.MustParseSVG(pauseSVG)
@@ -62,4 +65,5 @@ var (
 	iconMore        = ui.MustParseSVG(ellipsisSVG)
 	iconPin         = ui.MustParseSVG(pinSVG)
 	iconLock        = ui.MustParseSVG(lockSVG)
+	iconTrash       = ui.MustParseSVG(trashSVG)
 )

@@ -560,6 +560,65 @@ func TestNativeUIMylistMenuKeyboard(t *testing.T) {
 	}
 }
 
+// TestNativeUIMylistMenuPlays checks the card's right-click menu starts a
+// mylist: 再生 plays its first track in order, シャッフル再生 leaves shuffle on
+// and starts from a random one. A pinned snapshot loads without the API, so
+// the play begins on the click.
+func TestNativeUIMylistMenuPlays(t *testing.T) {
+	newCard := func() *nativeApp {
+		app := newNativeApp(NewMylist())
+		app.sidebarOpen = false
+		app.saved = []SavedMylist{{ID: "555", Name: "再生するマイリスト", TotalItemCount: 3,
+			Items: []MylistItem{
+				{WatchID: "sm1", Title: "一曲目", Available: true},
+				{WatchID: "sm2", Title: "二曲目", Available: true},
+				{WatchID: "sm3", Title: "三曲目", Available: true},
+			}}}
+		return app
+	}
+
+	app := newCard()
+	// The player bar's own play button reads 再生 too; mark the player as
+	// playing so the bar shows 一時停止 and the menu item is the only 再生
+	// the tester can find.
+	app.player.Playing = true
+	tester := ui.NewTester(app.view, 1120, 760)
+	if err := tester.RightClick("再生するマイリスト"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.Click("再生"); err != nil {
+		t.Fatal(err)
+	}
+	if shuffle, ok := lastCommand(app.sent, "shuffle"); !ok || shuffle.Enabled {
+		t.Fatalf("再生 did not select in order: %#v", app.sent)
+	}
+	if selected, ok := lastCommand(app.sent, "select"); !ok || selected.WatchID != "sm1" {
+		t.Fatalf("再生 did not start the first track: %#v", app.sent)
+	}
+	if !app.queueOpen {
+		t.Fatal("再生 did not open the queue screen")
+	}
+
+	app = newCard()
+	tester = ui.NewTester(app.view, 1120, 760)
+	if err := tester.RightClick("再生するマイリスト"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.Click("シャッフル再生"); err != nil {
+		t.Fatal(err)
+	}
+	if shuffle, ok := lastCommand(app.sent, "shuffle"); !ok || !shuffle.Enabled {
+		t.Fatalf("シャッフル再生 did not turn shuffle on: %#v", app.sent)
+	}
+	selected, ok := lastCommand(app.sent, "select")
+	if !ok || (selected.WatchID != "sm1" && selected.WatchID != "sm2" && selected.WatchID != "sm3") {
+		t.Fatalf("シャッフル再生 did not start a track of the mylist: %#v", app.sent)
+	}
+	if !app.queueOpen {
+		t.Fatal("シャッフル再生 did not open the queue screen")
+	}
+}
+
 func hasCommand(commands []PlayerCommand, action string) bool {
 	for _, command := range commands {
 		if command.Action == action {

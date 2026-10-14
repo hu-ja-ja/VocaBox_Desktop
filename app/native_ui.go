@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -144,6 +145,11 @@ type nativeApp struct {
 	statusError bool
 	playerError string
 	trackList   ui.ListState
+	// playOnLoadID names a mylist the right-click menu asked to start once
+	// it loads, playOnLoadShuffle whether it starts from a random track with
+	// shuffle on; "" for none.
+	playOnLoadID      string
+	playOnLoadShuffle bool
 	// queueList scrolls the queue view of the playing screen.
 	queueList      ui.ListState
 	player         playerState
@@ -532,13 +538,19 @@ func (app *nativeApp) followQueue(n int) {
 	app.queueList.ScrollTo(app.player.QueueIndex, ui.Start)
 }
 
-// menuItem is one item of an app menu: no face of its own until the pointer
-// is on it, so the panel is the only outline the menu draws.
-func (app *nativeApp) menuItem(c *ui.Context, label string) ui.Element {
-	item := ui.Button(c, label).FillWidth().BorderWidth(0).Background(app.theme.Background)
+// menuItem is one item of an app menu: a leading icon with a left-aligned
+// label, and no face of its own until the pointer is on it, so the panel is
+// the only outline the menu draws.
+func (app *nativeApp) menuItem(c *ui.Context, icon *ui.SVG, label string) ui.Element {
+	item := ui.Button(c, "").Label(label).FillWidth().BorderWidth(0).
+		Background(app.theme.Background).Justify(ui.Start).Gap(10)
 	if item.Hovered() {
 		item.Background(app.theme.SurfaceHover)
 	}
+	item.Children(func() {
+		ui.Icon(c, icon).FontSize(15).TextColor(app.theme.TextMuted)
+		ui.Text(c, label).FontSize(13)
+	})
 	return item
 }
 
@@ -564,7 +576,7 @@ func (app *nativeApp) queueMenu(c *ui.Context, item MylistItem, i int, hovered b
 		return
 	}
 	ui.Popover(c, button, &app.queueMenuOpen, func() {
-		remove := app.menuItem(c, "キューから削除")
+		remove := app.menuItem(c, iconTrash, "キューから削除")
 		if remove.Clicked() {
 			app.removeFromQueue(item)
 		}
@@ -843,7 +855,7 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 			Padding(4).Radius(app.theme.Radius + 2).Background(app.theme.Background).
 			Border(1, app.theme.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).
 			Role(ui.RoleMenu).Label("マイリストのメニュー")
-		item := app.menuItem(c, label).Role(ui.RoleMenuItemCheckBox).Checked(entry.Pinned)
+		item := app.menuItem(c, iconPin, label).Role(ui.RoleMenuItemCheckBox).Checked(entry.Pinned)
 		if item.Clicked() {
 			app.menuOpen = false
 			if entry.Pinned {
@@ -851,6 +863,14 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 			} else {
 				app.saveEntry(entry.ID, entry.Name)
 			}
+		}
+		play := app.menuItem(c, iconPlay, "再生")
+		if play.Clicked() {
+			app.playMylist(entry, false)
+		}
+		shuffle := app.menuItem(c, iconShuffle, "シャッフル再生")
+		if shuffle.Clicked() {
+			app.playMylist(entry, true)
 		}
 	})
 }
@@ -1456,6 +1476,11 @@ func (app *nativeApp) playingTrack() MylistItem {
 // openMylist shows the mylist the ID names: the one loaded, the pinned copy, else
 // the API's first page.
 func (app *nativeApp) openMylist(id string) {
+	// A play the menu asked for belongs to its own mylist only: opening
+	// another one drops it rather than starting it later.
+	if app.playOnLoadID != "" && app.playOnLoadID != id {
+		app.playOnLoadID, app.playOnLoadShuffle = "", false
+	}
 	if id == "" || app.page != nil && app.page.ID == id {
 		return
 	}
@@ -1468,6 +1493,48 @@ func (app *nativeApp) openMylist(id string) {
 		return
 	}
 	app.fetchMylist(id)
+}
+
+// playMylist starts a mylist the right-click menu chose: from its first track,
+// or from a random one with shuffle on. A card carries only a few sample
+// entries, so the mylist is loaded first and the play begins when it arrives.
+func (app *nativeApp) playMylist(entry mylistEntry, shuffle bool) {
+	app.menuOpen = false
+	if app.page != nil && app.page.ID == entry.ID {
+		app.startLoadedMylist(app.page.Items, shuffle)
+		return
+	}
+	app.playOnLoadID, app.playOnLoadShuffle = entry.ID, shuffle
+	app.openMylist(entry.ID)
+}
+
+// startLoadedMylist starts playback of a loaded mylist: its first playable
+// track in order, or a random one with shuffle left on.
+func (app *nativeApp) startLoadedMylist(items []MylistItem, shuffle bool) {
+	playable := playableItems(items)
+	if len(playable) == 0 {
+		return
+	}
+	app.sendPlayer(PlayerCommand{Action: "shuffle", Enabled: shuffle})
+	track := playable[0]
+	if shuffle {
+		track = playable[rand.Intn(len(playable))]
+	}
+	app.selectTrack(track)
+	// Playing from a mylist hands the view to the queue screen, which
+	// follows the track as it plays.
+	app.queueOpen = true
+}
+
+// startPendingMylist starts a play the menu asked for once its mylist has
+// loaded, and forgets the request.
+func (app *nativeApp) startPendingMylist(id string, items []MylistItem) {
+	if app.playOnLoadID != id {
+		return
+	}
+	shuffle := app.playOnLoadShuffle
+	app.playOnLoadID, app.playOnLoadShuffle = "", false
+	app.startLoadedMylist(items, shuffle)
 }
 
 // openSaved shows the pinned snapshot of the mylist id names, reporting
@@ -1502,6 +1569,7 @@ func (app *nativeApp) openSaved(id string) bool {
 		// The player keeps the queue and the track it is playing; only a
 		// track of this mylist played from here moves the queue to it.
 		app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
+		app.startPendingMylist(page.ID, page.Items)
 		return true
 	}
 	return false
@@ -1531,6 +1599,9 @@ func (app *nativeApp) fetchMylist(input string) {
 			}
 			app.loading = false
 			if err != nil {
+				if app.playOnLoadID == input {
+					app.playOnLoadID, app.playOnLoadShuffle = "", false
+				}
 				app.setError(err)
 				return
 			}
@@ -1542,6 +1613,7 @@ func (app *nativeApp) fetchMylist(input string) {
 			app.setStatus("")
 			app.router.Push(mylistPath(page.ID))
 			app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
+			app.startPendingMylist(page.ID, page.Items)
 		})
 	}()
 }
