@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -154,5 +157,121 @@ func TestNicoPrepareReportsWatchFailure(t *testing.T) {
 	n.apiBase = server.URL
 	if _, err := n.Prepare("sm123"); err == nil {
 		t.Fatal("a failed watch call must be reported")
+	}
+}
+
+// TestNicoSessionCookiesStayOnNiconico checks where a loaded session is
+// sent: nicovideo's own hosts carry it, any other host never.
+func TestNicoSessionCookiesStayOnNiconico(t *testing.T) {
+	n := NewNico()
+	if err := n.SetSession("user_session=abc; user_session_secure=def; nicosid=1"); err != nil {
+		t.Fatalf("SetSession: %v", err)
+	}
+	if !n.LoggedIn() {
+		t.Fatal("a loaded session does not report itself")
+	}
+	sent := func(raw string) string {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var parts []string
+		for _, c := range n.client.Jar.Cookies(u) {
+			parts = append(parts, c.Name+"="+c.Value)
+		}
+		sort.Strings(parts)
+		return strings.Join(parts, "; ")
+	}
+	want := "user_session=abc; user_session_secure=def"
+	for _, host := range []string{
+		"https://www.nicovideo.jp/watch/sm9",
+		"https://nvapi.nicovideo.jp/v1/watch/sm9/access-rights/hls",
+		"https://delivery.domand.nicovideo.jp/hlsbid/x/playlists/media/audio.m3u8",
+	} {
+		if got := sent(host); got != want {
+			t.Errorf("cookies for %s = %q; want %q", host, got, want)
+		}
+	}
+	if got := sent("https://example.com/"); got != "" {
+		t.Fatalf("the session leaks to another host: %q", got)
+	}
+	n.ClearSession()
+	if n.LoggedIn() || sent("https://www.nicovideo.jp/") != "" {
+		t.Fatal("ClearSession kept the session")
+	}
+}
+
+func TestNicoSetSessionRejectsNonSessionCookies(t *testing.T) {
+	n := NewNico()
+	for _, input := range []string{"", "   ", "nicosid=1", "user_session="} {
+		if err := n.SetSession(input); err == nil {
+			t.Errorf("SetSession(%q) was accepted", input)
+		}
+	}
+	if n.LoggedIn() {
+		t.Fatal("a rejected session was loaded")
+	}
+}
+
+// TestNicoWatchPathFollowsTheSession checks which watch API a track is
+// acquired from: the guest one, or the signed-in one that answers the
+// premium bands.
+func TestNicoWatchPathFollowsTheSession(t *testing.T) {
+	var paths []string
+	var noSideEffects []string
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	mux.HandleFunc("/api/watch/", func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		noSideEffects = append(noSideEffects, r.URL.Query().Get("noSideEffect"))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"meta": map[string]any{"status": 200},
+			"data": map[string]any{
+				"client": map[string]any{"watchTrackId": "track"},
+				"media":  map[string]any{"domand": map[string]any{"accessRightKey": "jwt"}},
+			},
+		})
+	})
+
+	n := NewNico()
+	n.baseURL = server.URL
+	if _, err := n.fetchWatch("sm9", false); err != nil {
+		t.Fatalf("guest watch: %v", err)
+	}
+	if err := n.SetSession("user_session=abc"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.fetchWatch("sm9", true); err != nil {
+		t.Fatalf("signed-in watch: %v", err)
+	}
+	if want := []string{"/api/watch/v3_guest/sm9", "/api/watch/v3/sm9"}; !slices.Equal(paths, want) {
+		t.Fatalf("paths = %v; want %v", paths, want)
+	}
+	if want := []string{"", "true"}; !slices.Equal(noSideEffects, want) {
+		t.Fatalf("noSideEffect = %v; want %v", noSideEffects, want)
+	}
+}
+
+// TestNicoExpiredSession checks that UNAUTHORIZED asks for a new login only
+// when a session was loaded.
+func TestNicoExpiredSession(t *testing.T) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	mux.HandleFunc("/api/watch/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"meta":{"status":400,"errorCode":"UNAUTHORIZED"},"data":null}`))
+	})
+
+	n := NewNico()
+	n.baseURL = server.URL
+	if _, err := n.fetchWatch("sm9", false); err == nil || errors.Is(err, errSessionExpired) {
+		t.Fatalf("guest error = %v", err)
+	}
+	if err := n.SetSession("user_session=abc"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.fetchWatch("sm9", false); !errors.Is(err, errSessionExpired) {
+		t.Fatalf("expired session error = %v", err)
 	}
 }

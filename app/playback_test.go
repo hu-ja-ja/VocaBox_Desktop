@@ -55,7 +55,11 @@ func (h *fakeHelper) last(action string) (helperCommand, bool) {
 // whose events run inline: engine tests need no process and no network.
 func newTestPlayback(t *testing.T) (*playback, *fakeHelper, *int) {
 	t.Helper()
-	app := newNativeApp(NewMylist())
+	mylist := NewMylist()
+	// The engine may forget a stored session; tests never touch the real
+	// config directory.
+	mylist.configDir = t.TempDir()
+	app := newNativeApp(mylist)
 	p := newPlayback(app)
 	app.playback = p
 	helper := &fakeHelper{}
@@ -203,6 +207,60 @@ func TestPlaybackBandFailureFallsBackThenReports(t *testing.T) {
 	play, _ = helper.last("play")
 	if play.URL != "https://x/hi.m3u8" || p.app.playerError != "" {
 		t.Fatalf("play = %#v error=%q", play, p.app.playerError)
+	}
+}
+
+// TestPlaybackReportsQuality checks the audio band the player bar shows,
+// which follows a fallback to the next band down.
+func TestPlaybackReportsQuality(t *testing.T) {
+	p, helper, _ := newTestPlayback(t)
+	p.acquire = func(MylistItem) (playbackSources, error) {
+		return playbackSources{
+			URIs:     []string{"https://x/320.m3u8", "https://x/192.m3u8"},
+			BitRates: []int{320, 192},
+		}, nil
+	}
+	p.setItems("111", "リストA", testQueueItems())
+	play := selectPlayed(t, p, helper, "sm1")
+	if quality := p.app.player.Quality; quality != "" {
+		t.Fatalf("quality before the track opens = %q", quality)
+	}
+	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: play.Gen})
+	if quality := p.app.player.Quality; quality != "320kbps" {
+		t.Fatalf("quality = %q", quality)
+	}
+	p.handleEvent(helperEvent{Event: "failed", Code: "DecodingError", Ext: -1, Msg: "no decoder", Gen: play.Gen})
+	if quality := p.app.player.Quality; quality != "192kbps" {
+		t.Fatalf("fallback quality = %q", quality)
+	}
+}
+
+// TestPlaybackForgetsExpiredSession checks that a session niconico refuses
+// is forgotten, so the next track plays as a guest.
+func TestPlaybackForgetsExpiredSession(t *testing.T) {
+	p, helper, _ := newTestPlayback(t)
+	if err := p.app.session.Save("user_session=abc"); err != nil {
+		t.Fatal(err)
+	}
+	p.app.loggedIn = true
+	if err := p.nico.SetSession("user_session=abc"); err != nil {
+		t.Fatal(err)
+	}
+	p.acquire = func(MylistItem) (playbackSources, error) {
+		return playbackSources{}, errSessionExpired
+	}
+	p.setItems("111", "リストA", testQueueItems())
+	p.selectTrack("sm1")
+	waitFor(t, "the session to be forgotten", func() bool { return !p.app.loggedIn })
+
+	if got, err := p.app.session.Load(); err != nil || got != "" {
+		t.Fatalf("the stored session was kept: %q, %v", got, err)
+	}
+	if p.nico.LoggedIn() {
+		t.Fatal("the player still carries the session")
+	}
+	if p.app.playerError == "" || helper.count("play") != 0 {
+		t.Fatalf("error=%q plays=%d", p.app.playerError, helper.count("play"))
 	}
 }
 

@@ -43,10 +43,12 @@ type playerState struct {
 	// the queue with it.
 	Name string
 	// Title, Uploader and ThumbURL describe the playing track, so the bar
-	// shows it even where the loaded list does not hold it.
+	// shows it even where the loaded list does not hold it. Quality names
+	// the audio band playing, "320kbps" with a premium session.
 	Title    string
 	Uploader string
 	ThumbURL string
+	Quality  string
 	Ready    bool
 	Playing  bool
 	CanNext  bool
@@ -74,9 +76,15 @@ type nativeApp struct {
 	// playback is the player: the queue and the AmsHelper child process.
 	// Tests leave it nil and inspect the commands the UI sent instead.
 	playback *playback
+	// session keeps the niconico session cookies across runs; loggedIn
+	// says one is loaded, and loginWindow is the sign-in window while one
+	// is open.
+	session     sessionStore
+	loggedIn    bool
+	loginWindow *mygo.Window
 	// sent records the commands the UI sent, for tests; the app itself
 	// hands them to playback.
-	sent []PlayerCommand
+	sent  []PlayerCommand
 	theme *ui.Theme
 	// router keeps the pages of the window, the home and the lists, so the
 	// side buttons of a mouse and Alt+Left/Right go back and forward
@@ -167,6 +175,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	router.Transition = ui.TransitionNone
 	return &nativeApp{
 		mylist:       mylist,
+		session:      sessionStore{mylist: mylist},
 		router:       router,
 		theme:        t,
 		sidebarOpen:  true,
@@ -244,7 +253,31 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 			if len(app.saved) == 0 {
 				ui.Text(c, "保存したリストはありません").FontSize(12).TextColor(app.theme.TextMuted)
 			}
+			app.accountRow(c)
 		})
+}
+
+// accountRow shows the sign-in state at the foot of the sidebar: the way
+// in while signed out, and the way out while signed in.
+func (app *nativeApp) accountRow(c *ui.Context) {
+	ui.Divider(c)
+	if app.loggedIn {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "ログイン中").FontSize(12).TextColor(app.theme.TextMuted)
+			ui.Spacer(c).Grow(1)
+			if button := ui.Button(c, "ログアウト").Padding(6, 9); button.Clicked() {
+				app.logout()
+			}
+		})
+		return
+	}
+	label := "ニコニコにログイン"
+	if app.loginWindow != nil {
+		label = "ログイン画面を開いています…"
+	}
+	if button := ui.Button(c, label).FillWidth().Disabled(app.loginWindow != nil); button.Clicked() {
+		app.openLogin()
+	}
 }
 
 func (app *nativeApp) sidebarRail(c *ui.Context) {
@@ -1020,7 +1053,12 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				if app.player.WatchID != "" {
 					app.thumbnail(c, app.playingTrack(), thumbBarHeight)
 					ui.Column(c).Grow(1).Gap(3).Children(func() {
-						ui.Text(c, app.player.Title).FontSize(14).Bold().SingleLine().Ellipsis("…")
+						ui.Row(c).Gap(8).AlignItems(ui.Center).MinWidth(0).Children(func() {
+							ui.Text(c, app.player.Title).FontSize(14).Bold().SingleLine().Ellipsis("…").Grow(1).Basis(0).MinWidth(0)
+							if app.player.Quality != "" {
+								ui.Text(c, app.player.Quality).FontSize(11).TextColor(app.theme.TextMuted).Shrink(0)
+							}
+						})
 						ui.Text(c, app.player.Uploader).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
 					})
 				} else {

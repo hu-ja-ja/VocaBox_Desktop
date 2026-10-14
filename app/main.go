@@ -14,6 +14,17 @@ func main() {
 	mygo.App.SetWindowStateStore(windowStateStore{mylist: mylist})
 	app := newNativeApp(mylist)
 	app.playback = newPlayback(app)
+	// A session kept from an earlier run signs the player in; an expired
+	// one is noticed and forgotten when a track plays.
+	if cookie, err := app.session.Load(); err != nil {
+		log.Printf("session: %v", err)
+	} else if cookie != "" {
+		if err := app.playback.nico.SetSession(cookie); err != nil {
+			log.Printf("session: %v", err)
+		} else {
+			app.loggedIn = true
+		}
+	}
 	if saved, err := mylist.ListSaved(); err != nil {
 		app.setError(err)
 	} else {

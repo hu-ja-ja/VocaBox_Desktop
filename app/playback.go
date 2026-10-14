@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -42,13 +43,15 @@ type playback struct {
 	// and restarts report through it rather than guessing.
 	wantPlaying bool
 
-	// uris are the playable bands of the track, highest first, and variant
-	// the one playing: a band whose playback fails falls back to the next.
-	// cookie and ua are what the helper's own requests carry.
-	uris    []string
-	variant int
-	cookie  string
-	ua      string
+	// uris are the playable bands of the track, highest first, bitrates
+	// their kbps for the quality shown, and variant the band playing: a
+	// band whose playback fails falls back to the next. cookie and ua are
+	// what the helper's own requests carry.
+	uris     []string
+	bitrates []int
+	variant  int
+	cookie   string
+	ua       string
 	// resumeMS is where a fallback replay or a restarted helper picks the
 	// track up; zero means from the start.
 	resumeMS float64
@@ -234,7 +237,7 @@ func (p *playback) play(item MylistItem) {
 	p.wantPlaying = true
 	p.resumeMS = 0
 	p.variant = 0
-	p.uris, p.cookie, p.ua = nil, "", ""
+	p.uris, p.bitrates, p.cookie, p.ua = nil, nil, "", ""
 	p.restarted = false
 	st := &p.app.player
 	st.WatchID = item.WatchID
@@ -261,7 +264,7 @@ func (p *playback) play(item MylistItem) {
 				p.fail(err)
 				return
 			}
-			p.uris, p.cookie, p.ua = sources.URIs, sources.Cookie, sources.UserAgent
+			p.uris, p.bitrates, p.cookie, p.ua = sources.URIs, sources.BitRates, sources.Cookie, sources.UserAgent
 			p.variant = 0
 			p.sendPlay()
 		})
@@ -419,6 +422,9 @@ func (p *playback) bandFailed(event helperEvent) {
 		p.variant++
 		p.resumeMS = p.app.player.PositionMS
 		p.sendPlay()
+		// The bar shows the band now playing rather than the one that just
+		// failed.
+		p.publish()
 		return
 	}
 	p.fail(playbackErrorMessage(event))
@@ -576,14 +582,31 @@ func (p *playback) remove(watchID string) {
 	p.publish()
 }
 
-// fail reports a track that cannot play.
+// fail reports a track that cannot play; a session niconico no longer
+// accepts is forgotten, so the next track plays as a guest.
 func (p *playback) fail(err error) {
+	if errors.Is(err, errSessionExpired) {
+		p.app.sessionExpired()
+	}
 	p.wantPlaying = false
 	st := &p.app.player
 	st.Ready = false
 	st.Playing = false
 	p.app.playerError = err.Error()
 	p.publish()
+}
+
+// qualityLabel names the audio band playing, "320kbps" for the 320kbps
+// rendition; "" while the band is not known.
+func qualityLabel(bitrates []int, variant int) string {
+	if variant < 0 || variant >= len(bitrates) || bitrates[variant] <= 0 {
+		return ""
+	}
+	kbps := bitrates[variant]
+	if kbps >= 1000 {
+		kbps /= 1000
+	}
+	return strconv.Itoa(kbps) + "kbps"
 }
 
 // publish refreshes the app's player state from the queue and the track; the
@@ -599,6 +622,7 @@ func (p *playback) publish() {
 	st.Items = p.queue.orderedItems()
 	st.QueuePos = p.queue.currentIndex()
 	st.QueueIndex = -1
+	st.Quality = qualityLabel(p.bitrates, p.variant)
 	for i, id := range st.Order {
 		if id == st.WatchID && st.WatchID != "" {
 			st.QueueIndex = i

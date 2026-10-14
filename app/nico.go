@@ -10,8 +10,10 @@ import (
 	"net/http/cookiejar"
 	neturl "net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -26,6 +28,13 @@ type Nico struct {
 	baseURL   string
 	apiBase   string
 	userAgent string
+	// mu guards loggedIn, which the sign-in flow sets while playback may
+	// be acquiring a track.
+	mu sync.Mutex
+	// loggedIn says a session is loaded: the watch API is asked as
+	// /api/watch/v3, which answers the signed-in audio bands (up to
+	// 320kbps with premium), instead of /api/watch/v3_guest.
+	loggedIn bool
 }
 
 const (
@@ -52,12 +61,106 @@ func NewNico() *Nico {
 	}
 }
 
+// sessionCookieNames are the cookies a session is made of: what the
+// sign-in flow keeps out of the web view's cookie store, and what
+// ClearSession expires.
+var sessionCookieNames = []string{"user_session", "user_session_secure"}
+
+// errSessionExpired reports that niconico no longer accepts the stored
+// session: the caller forgets it and asks for a new login.
+var errSessionExpired = errors.New("ログインの有効期限が切れました。もう一度ログインしてください")
+
+// sessionSeedURL is the URL the session cookies are stored for; their
+// domain is .nicovideo.jp, which covers watch, nvapi and delivery.
+var sessionSeedURL = &neturl.URL{Scheme: "https", Host: "www.nicovideo.jp", Path: "/"}
+
+// SetSession loads a session's cookies, a Cookie header like
+// "user_session=…; user_session_secure=…", into the jar: the watch,
+// access-rights and delivery requests then carry them. Only the session
+// cookies are kept, and only for nicovideo.
+func (n *Nico) SetSession(cookieHeader string) error {
+	cookies := sessionCookies(cookieHeader)
+	if len(cookies) == 0 {
+		return errors.New("ログイン情報が正しくありません")
+	}
+	n.client.Jar.SetCookies(sessionSeedURL, cookies)
+	n.mu.Lock()
+	n.loggedIn = true
+	n.mu.Unlock()
+	return nil
+}
+
+// ClearSession forgets the session cookies, returning the client to guest
+// watch calls. The jar stays, so a track already acquiring keeps the
+// delivery cookie it was given.
+func (n *Nico) ClearSession() {
+	expired := make([]*http.Cookie, 0, len(sessionCookieNames))
+	for _, name := range sessionCookieNames {
+		expired = append(expired, &http.Cookie{
+			Name: name, Value: "", Path: "/", Domain: ".nicovideo.jp",
+			MaxAge: -1, Secure: true,
+		})
+	}
+	n.mu.Lock()
+	n.loggedIn = false
+	n.mu.Unlock()
+	n.client.Jar.SetCookies(sessionSeedURL, expired)
+}
+
+// LoggedIn reports whether a session is loaded.
+func (n *Nico) LoggedIn() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.loggedIn
+}
+
+// sessionCookies picks the session cookies out of a Cookie header. Any
+// other pair is dropped, so a corrupted file cannot seed the jar with
+// cookies of its own.
+func sessionCookies(header string) []*http.Cookie {
+	var out []*http.Cookie
+	for _, part := range strings.Split(header, ";") {
+		name, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok {
+			continue
+		}
+		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
+		if !slices.Contains(sessionCookieNames, name) || value == "" {
+			continue
+		}
+		out = append(out, &http.Cookie{
+			Name: name, Value: value,
+			Path: "/", Domain: ".nicovideo.jp", Secure: true,
+		})
+	}
+	return out
+}
+
+// verifyVideoID is the video a loaded session is checked against: the
+// first niconico video, which stays public.
+const verifyVideoID = "sm9"
+
+// VerifySession checks a loaded session against the watch API, which
+// answers /api/watch/v3 with 200 for a session niconico accepts and
+// UNAUTHORIZED for one it does not. The check asks for no side effects,
+// so it writes no watch history.
+func (n *Nico) VerifySession() error {
+	if !n.LoggedIn() {
+		return errors.New("ログインしていません")
+	}
+	_, err := n.fetchWatch(verifyVideoID, true)
+	return err
+}
+
 // playbackSources is everything the helper needs for one track: the audio
 // media playlist URLs, the highest band first (the Go side falls back to the
 // next one when playback of a band fails), and the Cookie and User-Agent the
 // delivery hosts expect.
 type playbackSources struct {
-	URIs      []string
+	URIs []string
+	// BitRates is the kbps of each band of URIs, for the quality the
+	// player bar shows; 0 where the master playlist does not name one.
+	BitRates  []int
 	Cookie    string
 	UserAgent string
 }
@@ -87,7 +190,7 @@ type nicoWatch struct {
 // Prepare fetches a track's playable sources: the watch metadata, the
 // access-rights content URL, and the audio media playlists of the master.
 func (n *Nico) Prepare(videoID string) (playbackSources, error) {
-	watch, err := n.fetchWatch(videoID)
+	watch, err := n.fetchWatch(videoID, false)
 	if err != nil {
 		return playbackSources{}, err
 	}
@@ -109,11 +212,14 @@ func (n *Nico) Prepare(videoID string) (playbackSources, error) {
 		return playbackSources{}, errors.New("この動画の音源の取得先が見つかりませんでした")
 	}
 	uris := make([]string, 0, len(variants))
+	bitrates := make([]int, 0, len(variants))
 	for _, v := range variants {
 		uris = append(uris, v.URI)
+		bitrates = append(bitrates, v.BitRate)
 	}
 	return playbackSources{
 		URIs:      uris,
+		BitRates:  bitrates,
 		Cookie:    n.cookieHeader(master),
 		UserAgent: n.userAgent,
 	}, nil
@@ -148,12 +254,26 @@ func availableVideoIDs(videos []nicoVideo) []string {
 	return ids
 }
 
-// fetchWatch loads the watch metadata as a guest; public videos need no
-// cookies. The X-Frontend-ID/-Version pair and actionTrackId are required
-// headers — without them the API answers 400 INVALID_PARAMETER.
-func (n *Nico) fetchWatch(videoID string) (nicoWatch, error) {
+// fetchWatch loads the watch metadata: as a guest when no session is
+// loaded, as /api/watch/v3 once one is, which answers the signed-in audio
+// bands. noSideEffect asks the API to write no watch history, for the
+// checks that are not playback. The X-Frontend-ID/-Version pair and
+// actionTrackId are required headers — without them the API answers 400
+// INVALID_PARAMETER.
+func (n *Nico) fetchWatch(videoID string, noSideEffect bool) (nicoWatch, error) {
 	trackID := fmt.Sprintf("AAAAAAAAAA_%d", time.Now().UnixMilli())
-	req, err := n.request(http.MethodGet, n.baseURL+"/api/watch/v3_guest/"+videoID+"?actionTrackId="+trackID, nil)
+	path := "v3_guest"
+	n.mu.Lock()
+	loggedIn := n.loggedIn
+	n.mu.Unlock()
+	if loggedIn {
+		path = "v3"
+	}
+	rawURL := n.baseURL + "/api/watch/" + path + "/" + videoID + "?actionTrackId=" + trackID
+	if noSideEffect {
+		rawURL += "&noSideEffect=true"
+	}
+	req, err := n.request(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nicoWatch{}, errors.New("動画の情報を取得できませんでした")
 	}
@@ -179,6 +299,11 @@ func (n *Nico) fetchWatch(videoID string) (nicoWatch, error) {
 		return nicoWatch{}, err
 	}
 	if resp.Meta.Status != http.StatusOK {
+		// A session niconico no longer accepts is what asks for a new
+		// login; any other failure is an ordinary API error.
+		if n.loggedIn && resp.Meta.ErrorCode == "UNAUTHORIZED" {
+			return nicoWatch{}, errSessionExpired
+		}
 		return nicoWatch{}, fmt.Errorf("動画の情報を取得できませんでした（status %d %s）", resp.Meta.Status, resp.Meta.ErrorCode)
 	}
 	return nicoWatch{

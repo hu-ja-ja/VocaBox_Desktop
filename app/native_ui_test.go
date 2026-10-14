@@ -83,6 +83,45 @@ func TestNativeUIOpensSavedSnapshot(t *testing.T) {
 	}
 }
 
+// TestNativeUISignInRow checks the sidebar's account row and the way out.
+func TestNativeUISignInRow(t *testing.T) {
+	mylist := NewMylist()
+	mylist.configDir = t.TempDir()
+	app := newNativeApp(mylist)
+	tester := ui.NewTester(app.view, 1120, 760)
+	if !tester.HasText("ニコニコにログイン") {
+		t.Fatalf("the sign-in button is missing: %q", tester.Texts())
+	}
+
+	app.loggedIn = true
+	tester.Frame()
+	if !tester.HasText("ログイン中") || tester.HasText("ニコニコにログイン") {
+		t.Fatalf("a signed-in app shows %q", tester.Texts())
+	}
+	if err := tester.Click("ログアウト"); err != nil {
+		t.Fatal(err)
+	}
+	if app.loggedIn {
+		t.Fatal("logout kept the app signed in")
+	}
+	if got, err := app.session.Load(); err != nil || got != "" {
+		t.Fatalf("logout kept a stored session: %q, %v", got, err)
+	}
+}
+
+// TestNativeUIShowsQuality checks the band the player bar reports.
+func TestNativeUIShowsQuality(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.player = playerState{
+		WatchID: "sm9", Title: "一曲目", Uploader: "投稿者",
+		Ready: true, Playing: true, Quality: "320kbps", DurationMS: 100_000, Volume: 1,
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	if !tester.HasText("320kbps") {
+		t.Fatalf("the player bar does not show the quality: %q", tester.Texts())
+	}
+}
+
 func TestNativeUIHomeImportsFromCard(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	tester := ui.NewTester(app.view, 1120, 760)
