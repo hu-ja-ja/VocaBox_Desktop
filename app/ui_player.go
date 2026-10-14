@@ -124,14 +124,28 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			}
 
 			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Gap(8).Justify(ui.End).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconVolume).FontSize(16).TextColor(app.theme.TextMuted)
-				app.player.Volume = clampVolume(app.player.Volume)
 				// The bar shows the player's level, except while the user
 				// drags it: then it keeps its own level, so the reports of
 				// the track playing never tug the thumb from under the
 				// pointer.
+				app.player.Volume = clampVolume(app.player.Volume)
 				if !app.volumeHeld {
 					app.volumeValue, app.volumeSent = app.player.Volume, app.player.Volume
+				}
+				// The icon silences the player and comes back to the level
+				// the mute was taken at. It sits on the bar's left, sized a
+				// touch above the bar's own height, and shows the silence of
+				// either way: the mute it took, or a level pulled to zero.
+				muteLabel, muteIcon := "ミュート", iconVolume
+				if app.silent() {
+					muteLabel, muteIcon = "ミュート解除", iconVolumeMuted
+				}
+				mute := ui.Button(c, "").Label(muteLabel).Tooltip(muteLabel).Padding(4, 6).BorderWidth(0)
+				mute.Children(func() {
+					ui.Icon(c, muteIcon).FontSize(16).TextColor(app.theme.TextMuted)
+				})
+				if mute.Clicked() {
+					app.toggleMute()
 				}
 				volumeSlider := ui.Slider(c, &app.volumeValue, 0, 1).Label("音量").Width(110)
 				// A drag tells the player in volumeSendStep steps rather than
@@ -152,6 +166,13 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 						app.volumeSent, app.volumeSentAt = app.volumeValue, time.Now()
 						app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.volumeValue})
 					}
+				}
+				// A level the user raises by hand while muted is them wanting
+				// sound back: the icon follows rather than keeping the
+				// silence on. Only their own drag counts, so a report of the
+				// level before the mute never unmutes it.
+				if (held || volumeSlider.Changed()) && app.volumeValue > 0 {
+					app.muted = false
 				}
 				app.volumeHeld = held
 			})
@@ -186,6 +207,33 @@ func (app *nativeApp) playingTrack() MylistItem {
 		Uploader:  app.player.Uploader,
 		ThumbURL:  app.player.ThumbURL,
 	}
+}
+
+// silent reports the player at silence: muted by the icon, or a level the
+// user pulled down to zero. The icon shows the mute mark either way.
+func (app *nativeApp) silent() bool {
+	return app.muted || app.volumeValue <= 0
+}
+
+// toggleMute silences the player by the icon and comes back to the level the
+// mute was taken at; a level dragged down to zero comes back to half, since
+// no mute remembers a level for it.
+func (app *nativeApp) toggleMute() {
+	level := 0.5
+	switch {
+	case app.muted:
+		app.muted = false
+		if app.volumeBeforeMute > 0 {
+			level = app.volumeBeforeMute
+		}
+	case app.volumeValue > 0:
+		app.muted = true
+		app.volumeBeforeMute = app.volumeValue
+		level = 0
+	}
+	app.player.Volume, app.volumeValue, app.volumeSent = level, level, level
+	app.volumeSentAt = time.Now()
+	app.sendPlayer(PlayerCommand{Action: "volume", Volume: level})
 }
 
 func clampVolume(volume float64) float64 {

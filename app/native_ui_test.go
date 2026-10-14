@@ -1458,3 +1458,58 @@ func TestNativeUIVolumeBarStepsWhileDragging(t *testing.T) {
 		t.Fatalf("the bar kept sending after the release: %#v", app.sent)
 	}
 }
+
+// TestNativeUIMuteButton checks that the volume icon silences the player and
+// brings the level back: muting sends a level of zero, unmuting the level
+// the mute was taken at.
+func TestNativeUIMuteButton(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.player = playerState{
+		WatchID: "sm1", Title: "Aの曲", Ready: true, Playing: true,
+		PositionMS: 30_000, DurationMS: 120_000, Volume: 0.6,
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	app.sent = nil
+
+	if err := tester.Click("ミュート"); err != nil {
+		t.Fatal(err)
+	}
+	volume, ok := lastCommand(app.sent, "volume")
+	if !ok || !app.muted || app.player.Volume != 0 || volume.Volume != 0 {
+		t.Fatalf("muting did not silence the player: %#v muted=%v volume=%v", app.sent, app.muted, app.player.Volume)
+	}
+
+	if err := tester.Click("ミュート解除"); err != nil {
+		t.Fatal(err)
+	}
+	volume, ok = lastCommand(app.sent, "volume")
+	if app.muted || !ok || volume.Volume != 0.6 || app.player.Volume != 0.6 {
+		t.Fatalf("unmuting did not come back to the mute's level: %#v muted=%v volume=%v", app.sent, app.muted, app.player.Volume)
+	}
+}
+
+// TestNativeUIMuteMarkAtZero checks that a level dragged down to zero shows
+// the mute mark, and that the icon brings the level back to half.
+func TestNativeUIMuteMarkAtZero(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.player = playerState{
+		WatchID: "sm1", Title: "Aの曲", Ready: true, Playing: true,
+		PositionMS: 30_000, DurationMS: 120_000, Volume: 0.6,
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	app.player.Volume = 0
+	tester.Frame()
+	if _, ok := tester.Find("ミュート解除"); !ok {
+		t.Fatal("a level of zero did not show the mute mark")
+	}
+
+	app.sent = nil
+	if err := tester.Click("ミュート解除"); err != nil {
+		t.Fatal(err)
+	}
+	volume, ok := lastCommand(app.sent, "volume")
+	if !ok || app.silent() || volume.Volume != 0.5 || app.player.Volume != 0.5 {
+		t.Fatalf("the icon did not come back to half: %#v volume=%v", app.sent, app.player.Volume)
+	}
+}

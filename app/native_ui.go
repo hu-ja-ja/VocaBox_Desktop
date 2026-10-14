@@ -167,6 +167,10 @@ type nativeApp struct {
 	volumeHeld   bool
 	volumeSent   float64
 	volumeSentAt time.Time
+	// muted is the user silencing the player by the volume icon, and
+	// volumeBeforeMute the level the mute was taken at, to come back to.
+	muted            bool
+	volumeBeforeMute float64
 
 	thumbs    map[string]*ui.Bitmap
 	thumbBusy map[string]bool

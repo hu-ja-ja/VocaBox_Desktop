@@ -30,6 +30,9 @@ var shuffleSVG []byte
 //go:embed icons/volume-2.svg
 var volumeSVG []byte
 
+//go:embed icons/volume-x.svg
+var volumeMutedSVG []byte
+
 //go:embed icons/menu.svg
 var menuSVG []byte
 
@@ -59,6 +62,7 @@ var (
 	iconRepeat      = ui.MustParseSVG(repeatSVG)
 	iconShuffle     = ui.MustParseSVG(shuffleSVG)
 	iconVolume      = ui.MustParseSVG(volumeSVG)
+	iconVolumeMuted = ui.MustParseSVG(volumeMutedSVG)
 	iconMenu        = ui.MustParseSVG(menuSVG)
 	iconPlus        = ui.MustParseSVG(plusSVG)
 	iconQueue       = ui.MustParseSVG(queueSVG)
