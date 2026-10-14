@@ -36,7 +36,7 @@ func main() {
 		log.Printf("settings: %v", err)
 	} else {
 		// The engine owns the queue's modes: hand the saved preferences over
-		// before the first list arrives.
+		// before the first mylist arrives.
 		app.playback.queue.setShuffle(settings.Shuffle)
 		app.playback.queue.repeat = settings.Repeat
 		app.player.Volume = settings.Volume

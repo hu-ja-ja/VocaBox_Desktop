@@ -26,18 +26,18 @@ type playback struct {
 	nico *Nico
 
 	queue playQueue
-	// items and listID are the shown list: they answer a row click and the
-	// app's page commands. listName is the list playing, the name the queue
-	// screen labels the queue with. The queue belongs to the list playing,
-	// which another list opening does not take over.
-	items     []MylistItem
-	listID    string
-	listName  string
-	queueID   string
-	queueName string
+	// items and mylistID are the shown mylist: they answer a row click and the
+	// app's page commands. mylistName is the mylist playing, the name the queue
+	// screen labels the queue with. The queue belongs to the mylist playing,
+	// which another mylist opening does not take over.
+	items      []MylistItem
+	mylistID   string
+	mylistName string
+	queueID    string
+	queueName  string
 
 	// track is what plays, apart from the queue: it keeps playing, and its
-	// metadata keeps being reported, while the shown list changes.
+	// metadata keeps being reported, while the shown mylist changes.
 	track MylistItem
 	// wantPlaying is the play state the app last asked for: opened events
 	// and restarts report through it rather than guessing.
@@ -103,7 +103,7 @@ const previousRestartMS = 3000
 
 func newPlayback(app *nativeApp) *playback {
 	p := &playback{app: app, nico: NewNico()}
-	// The mylist lookup rides the same session: the account's own lists,
+	// The mylist lookup rides the same session: the account's own mylists,
 	// private ones included, answer only with its cookies.
 	app.mylist.session = p.nico.SessionCookie
 	p.acquire = p.prepareSources
@@ -153,13 +153,13 @@ func (p *playback) handle(command PlayerCommand) {
 	}
 }
 
-// setItems adopts a list as the shown list; when nothing plays yet or the
-// queue came from the same list, the list becomes the queue too, keeping
-// shuffle, repeat, and the track playing when the list still holds it.
+// setItems adopts a mylist as the shown mylist; when nothing plays yet or the
+// queue came from the same mylist, the mylist becomes the queue too, keeping
+// shuffle, repeat, and the track playing when the mylist still holds it.
 func (p *playback) setItems(id, name string, items []MylistItem) {
-	p.listID, p.listName = id, name
+	p.mylistID, p.mylistName = id, name
 	p.items = playableItems(items)
-	if p.track.WatchID == "" || p.queueID == p.listID {
+	if p.track.WatchID == "" || p.queueID == p.mylistID {
 		p.adoptQueue()
 	}
 	// A next that was waiting for a page clears here: the queue it waited
@@ -174,12 +174,12 @@ func (p *playback) setItems(id, name string, items []MylistItem) {
 	p.publish()
 }
 
-// appendItems adds a list's next page to the shown list, and to the queue
-// when that is the shown list's own.
+// appendItems adds a mylist's next page to the shown mylist, and to the queue
+// when that is the shown mylist's own.
 func (p *playback) appendItems(items []MylistItem) {
 	more := playableItems(items)
 	p.items = append(p.items, more...)
-	if p.queueID == p.listID {
+	if p.queueID == p.mylistID {
 		p.queue.append(more)
 	}
 	// The app asked for the next track while the page loaded: with the page
@@ -192,8 +192,8 @@ func (p *playback) appendItems(items []MylistItem) {
 	p.publish()
 }
 
-// adoptQueue makes the shown list the playback queue, keeping shuffle,
-// repeat, and the track playing when the list still holds it.
+// adoptQueue makes the shown mylist the playback queue, keeping shuffle,
+// repeat, and the track playing when the mylist still holds it.
 func (p *playback) adoptQueue() {
 	shuffle := p.queue.isShuffle()
 	repeat := p.queue.repeat
@@ -202,7 +202,7 @@ func (p *playback) adoptQueue() {
 		p.queue.setShuffle(true)
 	}
 	p.queue.repeat = repeat
-	p.queueID, p.queueName = p.listID, p.listName
+	p.queueID, p.queueName = p.mylistID, p.mylistName
 	if p.track.WatchID != "" {
 		if again, ok := findItem(p.items, p.track.WatchID); ok {
 			p.queue.selectTrack(again)
@@ -211,15 +211,15 @@ func (p *playback) adoptQueue() {
 	}
 }
 
-// selectTrack plays a track of the shown list from its start; a queue owned
-// by another list moves to the shown one first, so the track's neighbours
+// selectTrack plays a track of the shown mylist from its start; a queue owned
+// by another mylist moves to the shown one first, so the track's neighbours
 // come from there.
 func (p *playback) selectTrack(watchID string) {
 	item, ok := findItem(p.items, watchID)
 	if !ok {
 		return
 	}
-	if p.queueID != p.listID {
+	if p.queueID != p.mylistID {
 		p.adoptQueue()
 	}
 	if _, ok := p.queue.selectTrack(item); !ok {
@@ -534,7 +534,7 @@ func (p *playback) setVolume(volume float64) {
 }
 
 // next moves the queue on, and when it has no entry left asks the app for
-// the playing list's next page, which extends the queue itself.
+// the playing mylist's next page, which extends the queue itself.
 func (p *playback) next() {
 	if item, ok := p.queue.moveNext(); ok {
 		p.play(item)
@@ -616,7 +616,7 @@ func qualityLabel(bitrates []int, variant int) string {
 // UI reads it on every frame.
 func (p *playback) publish() {
 	st := &p.app.player
-	st.ListID = p.queueID
+	st.MylistID = p.queueID
 	st.Name = p.queueName
 	st.Shuffle = p.queue.isShuffle()
 	st.Repeat = p.queue.repeat
@@ -642,7 +642,7 @@ func (p *playback) shutdown() {
 	}
 }
 
-// playableItems keeps the entries that can be played: callers of the list
+// playableItems keeps the entries that can be played: callers of the mylist
 // pages hand over whole pages, including deleted videos.
 func playableItems(items []MylistItem) []MylistItem {
 	out := make([]MylistItem, 0, len(items))

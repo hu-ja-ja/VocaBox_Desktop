@@ -64,7 +64,7 @@ func TestParseMylistInput(t *testing.T) {
 }
 
 const mylistFixture = `{"meta":{"status":200},"data":{"mylist":{` +
-	`"name":"テストリスト","description":"説明文","isPublic":true,` +
+	`"name":"テストマイリスト","description":"説明文","isPublic":true,` +
 	`"owner":{"name":"投稿者"},` +
 	`"items":[` +
 	`{"watchId":"sm1","video":{"id":"sm1","title":"曲A","duration":125,"owner":{"name":"作者A"},` +
@@ -96,7 +96,7 @@ func TestGetPageMapsResponse(t *testing.T) {
 	if ua := gotReq.Header.Get("User-Agent"); ua == "" {
 		t.Error("missing identifying User-Agent")
 	}
-	if page.ID != "27411728" || page.Name != "テストリスト" || page.Description != "説明文" || page.Owner != "投稿者" {
+	if page.ID != "27411728" || page.Name != "テストマイリスト" || page.Description != "説明文" || page.Owner != "投稿者" {
 		t.Errorf("wrong mylist header: %+v", page)
 	}
 	if page.TotalItemCount != 3 || !page.HasNext {
@@ -188,7 +188,7 @@ func TestGetPageErrors(t *testing.T) {
 }
 
 // TestGetPagePrivateFallsBackToOwn checks the private path: the public
-// endpoint refuses the list, and a signed-in request retries the account's
+// endpoint refuses the mylist, and a signed-in request retries the account's
 // own endpoint, carrying the session cookie.
 func TestGetPagePrivateFallsBackToOwn(t *testing.T) {
 	private := strings.Replace(mylistFixture, `"isPublic":true`, `"isPublic":false`, 1)
@@ -227,14 +227,14 @@ func TestGetPagePrivateFallsBackToOwn(t *testing.T) {
 	if got := ownReq.Header.Get("Cookie"); got != "user_session=abc" {
 		t.Errorf("own request Cookie = %q; want the session", got)
 	}
-	// The private list maps like any other.
-	if page.Name != "テストリスト" || len(page.Items) != 3 || page.TotalItemCount != 3 {
-		t.Errorf("own page = %+v; want the private list's contents", page)
+	// The private mylist maps like any other.
+	if page.Name != "テストマイリスト" || len(page.Items) != 3 || page.TotalItemCount != 3 {
+		t.Errorf("own page = %+v; want the private mylist's contents", page)
 	}
 }
 
 // TestGetPageGuestSkipsOwnEndpoint checks that a guest never probes the
-// account endpoint, and hears that login is what a private list needs.
+// account endpoint, and hears that login is what a private mylist needs.
 func TestGetPageGuestSkipsOwnEndpoint(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +256,7 @@ func TestGetPageGuestSkipsOwnEndpoint(t *testing.T) {
 	}
 }
 
-// TestGetPagePublicDoesNotFallBack checks that a public list never costs
+// TestGetPagePublicDoesNotFallBack checks that a public mylist never costs
 // the own probe, even signed in.
 func TestGetPagePublicDoesNotFallBack(t *testing.T) {
 	var hits int32
@@ -279,12 +279,12 @@ func TestGetPagePublicDoesNotFallBack(t *testing.T) {
 	}
 }
 
-// ownMylistsFixture is the account list of the ListOwn tests: one private
-// list with a sample entry, one public with none.
+// ownMylistsFixture is the account's mylists for the ListOwn tests: one private
+// mylist with a sample entry, one public with none.
 const ownMylistsFixture = `{"meta":{"status":200},"data":{"mylists":[` +
-	`{"id":71043760,"isPublic":false,"name":"非公開リスト","itemsCount":2,` +
+	`{"id":71043760,"isPublic":false,"name":"非公開マイリスト","itemsCount":2,` +
 	`"sampleItems":[{"watchId":"sm1","video":{"id":"sm1","title":"曲A","thumbnail":{"url":"https://nicovideo.cdn.nimg.jp/thumbnails/1/1"}}}]},` +
-	`{"id":71043761,"isPublic":true,"name":"公開リスト","itemsCount":0,"sampleItems":[]}` +
+	`{"id":71043761,"isPublic":true,"name":"公開マイリスト","itemsCount":0,"sampleItems":[]}` +
 	`]}}`
 
 func TestListOwn(t *testing.T) {
@@ -313,18 +313,18 @@ func TestListOwn(t *testing.T) {
 	if len(own) != 2 {
 		t.Fatalf("got %d mylists, want 2", len(own))
 	}
-	if own[0].ID != "71043760" || own[0].Name != "非公開リスト" || own[0].IsPublic || own[0].ItemCount != 2 {
-		t.Errorf("private list = %+v", own[0])
+	if own[0].ID != "71043760" || own[0].Name != "非公開マイリスト" || own[0].IsPublic || own[0].ItemCount != 2 {
+		t.Errorf("private mylist = %+v", own[0])
 	}
 	if len(own[0].Items) != 1 || own[0].Items[0].Title != "曲A" || own[0].Items[0].ThumbURL == "" {
 		t.Errorf("sample entries = %+v", own[0].Items)
 	}
 	if own[1].ID != "71043761" || !own[1].IsPublic || own[1].ItemCount != 0 || len(own[1].Items) != 0 {
-		t.Errorf("public list = %+v", own[1])
+		t.Errorf("public mylist = %+v", own[1])
 	}
 }
 
-// TestListOwnRequiresLogin checks a guest's account list is refused with a
+// TestListOwnRequiresLogin checks a guest's account mylists are refused with a
 // login hint rather than looking like an empty account.
 func TestListOwnRequiresLogin(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -344,7 +344,7 @@ func TestListOwnRequiresLogin(t *testing.T) {
 
 // savedFixture is a one-page mylist used by the saved-snapshot tests.
 const savedFixture = `{"meta":{"status":200},"data":{"mylist":{` +
-	`"name":"保存リスト","description":"保存説明","isPublic":true,` +
+	`"name":"保存マイリスト","description":"保存説明","isPublic":true,` +
 	`"owner":{"name":"保存者"},` +
 	`"items":[` +
 	`{"watchId":"sm1","video":{"id":"sm1","title":"曲A","duration":125,"owner":{"name":"作者A"}}},` +
@@ -382,19 +382,19 @@ func TestSavedMylists(t *testing.T) {
 	}
 
 	// Save two, then upsert one by URL without duplicating.
-	if _, err := m.SaveMylist("27411728", "リストA"); err != nil {
+	if _, err := m.SaveMylist("27411728", "マイリストA"); err != nil {
 		t.Fatalf("SaveMylist = %v; want nil", err)
 	}
-	if _, err := m.SaveMylist("https://www.nicovideo.jp/mylist/100", "リストB"); err != nil {
+	if _, err := m.SaveMylist("https://www.nicovideo.jp/mylist/100", "マイリストB"); err != nil {
 		t.Fatalf("SaveMylist = %v; want nil", err)
 	}
-	got, err = m.SaveMylist("https://nico.ms/mylist/27411728", "リストA更新")
+	got, err = m.SaveMylist("https://nico.ms/mylist/27411728", "マイリストA更新")
 	if err != nil {
 		t.Fatalf("SaveMylist upsert = %v; want nil", err)
 	}
-	if len(got) != 2 || got[0].ID != "27411728" || got[0].Name != "リストA更新" ||
-		got[1].ID != "100" || got[1].Name != "リストB" {
-		t.Fatalf("upserted list = %+v; want 2 records, updated name, no duplicates", got)
+	if len(got) != 2 || got[0].ID != "27411728" || got[0].Name != "マイリストA更新" ||
+		got[1].ID != "100" || got[1].Name != "マイリストB" {
+		t.Fatalf("upserted mylist = %+v; want 2 records, updated name, no duplicates", got)
 	}
 
 	// The stored record holds the fetched contents, not just the reference.
@@ -471,7 +471,7 @@ func TestSaveMylistFetchError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	m := &Mylist{client: srv.Client(), baseURL: srv.URL, configDir: t.TempDir()}
-	if _, err := m.SaveMylist("27411728", "リスト"); err == nil {
+	if _, err := m.SaveMylist("27411728", "マイリスト"); err == nil {
 		t.Error("SaveMylist(bad fetch) = nil error; want an error")
 	}
 	if got, err := m.ListSaved(); err != nil || len(got) != 0 {
@@ -480,7 +480,7 @@ func TestSaveMylistFetchError(t *testing.T) {
 }
 
 func TestFetchAllMergesPages(t *testing.T) {
-	final := `{"meta":{"status":200},"data":{"mylist":{"name":"テストリスト","isPublic":true,` +
+	final := `{"meta":{"status":200},"data":{"mylist":{"name":"テストマイリスト","isPublic":true,` +
 		`"items":[{"watchId":"sm4","video":{"id":"sm4","title":"曲D"}}],` +
 		`"totalItemCount":4,"hasNext":false}}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -500,7 +500,7 @@ func TestFetchAllMergesPages(t *testing.T) {
 	if len(got.Items) != 4 || got.Items[3].Title != "曲D" {
 		t.Errorf("merged items = %+v; want 4 items incl. 曲D", got.Items)
 	}
-	if got.Name != "テストリスト" {
+	if got.Name != "テストマイリスト" {
 		t.Errorf("header must come from page 1: %+v", got)
 	}
 	if got.HasNext {
@@ -999,7 +999,7 @@ func TestFetchPageWaitsOutRetryAfter(t *testing.T) {
 	m := &Mylist{client: srv.Client(), baseURL: srv.URL}
 
 	page, err := m.GetPage("27411728", 1)
-	if err != nil || page.Name != "テストリスト" {
+	if err != nil || page.Name != "テストマイリスト" {
 		t.Fatalf("GetPage after one 429 = %+v, %v; want the page", page, err)
 	}
 	if n := atomic.LoadInt32(&hits); n != 2 {

@@ -14,10 +14,10 @@ import (
 // the playback engine.
 type PlayerCommand struct {
 	Action string `json:"action"`
-	// ID names the list the items belong to: the player keeps the queue of
-	// the list the playing track came from, so it has to tell the lists apart.
+	// ID names the mylist the items belong to: the player keeps the queue of
+	// the mylist the playing track came from, so it has to tell the mylists apart.
 	ID string `json:"id,omitempty"`
-	// Name is the list's display name, which the queue screen labels the
+	// Name is the mylist's display name, which the queue screen labels the
 	// queue with.
 	Name       string       `json:"name,omitempty"`
 	Items      []MylistItem `json:"items,omitempty"`
@@ -25,7 +25,7 @@ type PlayerCommand struct {
 	PositionMS float64      `json:"positionMs,omitempty"`
 	Volume     float64      `json:"volume"`
 	Enabled    bool         `json:"enabled,omitempty"`
-	// Rows are the rows of the playlist a drag moves, and To the row they
+	// Rows are the rows of the queue a drag moves, and To the row they
 	// go before.
 	Rows []int `json:"rows,omitempty"`
 	To   int   `json:"to,omitempty"`
@@ -36,14 +36,14 @@ type PlayerCommand struct {
 // playing, and its position.
 type playerState struct {
 	WatchID string
-	// ListID names the list the playback queue was built from; it can differ
-	// from the list shown while its track keeps playing.
-	ListID string
-	// Name is the display name of the list playing; the queue screen labels
+	// MylistID names the mylist the playback queue was built from; it can differ
+	// from the mylist shown while its track keeps playing.
+	MylistID string
+	// Name is the display name of the mylist playing; the queue screen labels
 	// the queue with it.
 	Name string
 	// Title, Uploader and ThumbURL describe the playing track, so the bar
-	// shows it even where the loaded list does not hold it. Quality names
+	// shows it even where the loaded mylist does not hold it. Quality names
 	// the audio band playing, "320kbps" with a premium session.
 	Title    string
 	Uploader string
@@ -58,10 +58,10 @@ type playerState struct {
 	PositionMS float64
 	DurationMS float64
 	Volume     float64
-	// Order is the queue as it plays: the watch ID of each track in playlist
+	// Order is the queue as it plays: the watch ID of each track in queue
 	// order, the track playing first under shuffle. Items carries the tracks
 	// themselves, so the queue screen shows the queue without the loaded
-	// list.
+	// mylist.
 	Order []string
 	Items []MylistItem
 	// QueueIndex is the row of the track playing in Order, and QueuePos is
@@ -90,34 +90,34 @@ type nativeApp struct {
 	// hands them to playback.
 	sent  []PlayerCommand
 	theme *ui.Theme
-	// router keeps the pages of the window, the home and the lists, so the
+	// router keeps the pages of the window, the home and the mylists, so the
 	// side buttons of a mouse and Alt+Left/Right go back and forward
 	// between them.
 	router *ui.Router
 
-	// saved holds the pinned lists' local snapshots; they show first on the
+	// saved holds the pinned mylists' local snapshots; they show first on the
 	// home.
 	saved []SavedMylist
 	// ownMylists is the signed-in account's mylists, private ones included,
 	// fetched for the home; nil while signed out and until they arrive.
 	ownMylists  []OwnMylist
 	sidebarOpen bool
-	// queueOpen shows the queue in place of the home and list pages.
+	// queueOpen shows the queue in place of the home and mylist pages.
 	queueOpen bool
-	// queueMenuRow is the playlist row whose menu is open, -1 for none, and
+	// queueMenuRow is the queue row whose menu is open, -1 for none, and
 	// queueMenuOpen drives the popover until it is dismissed.
 	queueMenuRow  int
 	queueMenuOpen bool
-	// menuOpen drives the right-click menu of a list, menuEntry the list it
+	// menuOpen drives the right-click menu of a mylist, menuEntry the mylist it
 	// pins, and menuX and menuY where it opened within its anchor, the
 	// sidebar item or card named by menuAnchorID. menuBuilt says a frame
 	// built the menu, so one whose anchor left the screen closes.
 	menuOpen     bool
-	menuEntry    listEntry
+	menuEntry    mylistEntry
 	menuX, menuY float32
 	menuAnchorID uint64
 	menuBuilt    bool
-	// queueChoice is the playlist row the list last chose, -1 for none: a
+	// queueChoice is the queue row the list last chose, -1 for none: a
 	// choice plays the track before the next frame.
 	queueChoice int
 	// queueFollow and queueFollowTrack remember the track playing the queue
@@ -135,7 +135,7 @@ type nativeApp struct {
 	nextPage  int
 	hasMore   bool
 	loading   bool
-	// loadingID names the list a load is fetching, so a page waiting for it
+	// loadingID names the mylist a load is fetching, so a page waiting for it
 	// asks once rather than every frame.
 	loadingID   string
 	saving      bool
@@ -144,7 +144,7 @@ type nativeApp struct {
 	statusError bool
 	playerError string
 	trackList   ui.ListState
-	// queueList scrolls the playlist view of the playing screen.
+	// queueList scrolls the queue view of the playing screen.
 	queueList      ui.ListState
 	player         playerState
 	pendingAdvance bool
@@ -169,7 +169,7 @@ type nativeApp struct {
 	thumbs    map[string]*ui.Bitmap
 	thumbBusy map[string]bool
 	thumbFail map[string]bool
-	// fillQueue holds the entries of the loaded list whose pictures are not
+	// fillQueue holds the entries of the loaded mylist whose pictures are not
 	// cached yet; the view fills them one at a time in the background.
 	fillQueue  []MylistItem
 	fillActive bool
@@ -192,7 +192,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	t.Radius = 8
 	t.Spacing = 4
 	router := ui.NewRouter(homePath)
-	// Pages show at once: the list a page waits for does not load twice.
+	// Pages show at once: the mylist a page waits for does not load twice.
 	router.Transition = ui.TransitionNone
 	return &nativeApp{
 		mylist:       mylist,
@@ -233,7 +233,7 @@ func (app *nativeApp) view(c *ui.Context) {
 	})
 	ui.Modal(c, &app.importing, func() { app.importDialog(c) })
 	ui.Modal(c, &app.confirmLogout, func() { app.logoutDialog(c) })
-	// A menu whose list left the screen, as after a refresh, does not stay
+	// A menu whose mylist left the screen, as after a refresh, does not stay
 	// open on the element that took its place.
 	if app.menuOpen && !app.menuBuilt {
 		app.menuOpen = false
@@ -259,38 +259,38 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 			ui.Divider(c)
 			page := app.router.Path()
 			// Choosing a destination leaves the queue screen for it, even the
-			// list already showing, whose click changes no route of its own.
-			// The library lists what the home shows, in its order.
-			entries := app.listEntries()
-			homeClicked, listClicked := false, false
+			// mylist already showing, whose click changes no route of its own.
+			// The sidebar lists the same mylists as the home, in its order.
+			entries := app.mylistEntries()
+			homeClicked, mylistClicked := false, false
 			sidebar := ui.Sidebar(c, &page, func() {
 				item := ui.SidebarItem(c, homePath, nil, "ホーム")
 				homeClicked = item.Clicked()
-				ui.SidebarSection(c, "ライブラリ", nil, func() {
+				ui.SidebarSection(c, "マイリスト", nil, func() {
 					for _, entry := range entries {
-						item := ui.SidebarItem(c, listPath(entry.ID), nil, entry.Name)
+						item := ui.SidebarItem(c, mylistPath(entry.ID), nil, entry.Name)
 						if entry.Pinned {
 							item.Children(func() { app.pinBadge(c) })
 						}
 						if item.RightClicked() {
-							app.openListMenu(item, entry)
+							app.openMylistMenu(item, entry)
 						}
-						app.listMenu(c, item, entry)
+						app.mylistMenu(c, item, entry)
 						if item.Clicked() {
 							app.menuOpen = false
-							listClicked = true
+							mylistClicked = true
 						}
 					}
 				})
 			}).Grow(1)
-			if homeClicked || listClicked {
+			if homeClicked || mylistClicked {
 				app.queueOpen = false
 			}
 			if sidebar.Changed() {
 				app.router.Push(page)
 			}
 			if len(entries) == 0 {
-				ui.Text(c, "リストはありません").FontSize(12).TextColor(app.theme.TextMuted)
+				ui.Text(c, "マイリストはありません").FontSize(12).TextColor(app.theme.TextMuted)
 			}
 			app.accountRow(c)
 		})
@@ -393,16 +393,16 @@ func (app *nativeApp) sidebarToggle(c *ui.Context, opening bool) {
 	}
 }
 
-// homePath routes to the home; the route of a list is listPath of its ID.
+// homePath routes to the home; the route of a mylist is mylistPath of its ID.
 const homePath = "/"
 
-// listPath is the route showing the list a mylist ID names.
-func listPath(id string) string { return "/list/" + id }
+// mylistPath is the route showing the mylist the ID names.
+func mylistPath(id string) string { return "/mylist/" + id }
 
-// playlistCardWidth is the width of one playlist card: two 16:9 tiles wide
+// mylistCardWidth is the width of one mylist card: two 16:9 tiles wide
 // plus its own padding. Two cards fit even at the narrowest window with the
 // sidebar open.
-const playlistCardWidth = 200
+const mylistCardWidth = 200
 
 // queueView is the screen the player bar opens: the queue as it plays, with
 // the track playing kept in sight. The player itself has no picture: the
@@ -414,7 +414,7 @@ func (app *nativeApp) queueView(c *ui.Context) {
 }
 
 // queuePanel lists the tracks in the order they play, the track playing
-// first under shuffle, labelled with the list the queue came from and its
+// first under shuffle, labelled with the mylist the queue came from and its
 // size.
 func (app *nativeApp) queuePanel(c *ui.Context) {
 	ui.Column(c).Grow(1).FillHeight().Gap(4).Padding(18, 26, 12).Children(func() {
@@ -426,7 +426,7 @@ func (app *nativeApp) queuePanel(c *ui.Context) {
 	})
 }
 
-// queueMeta labels the queue: the list it came from, its size, and the
+// queueMeta labels the queue: the mylist it came from, its size, and the
 // shuffle.
 func (app *nativeApp) queueMeta() string {
 	parts := make([]string, 0, 3)
@@ -441,7 +441,7 @@ func (app *nativeApp) queueMeta() string {
 }
 
 // queueRows lists the tracks of the report's order, which is the queue as
-// it plays, and scrolls the track playing to the top of the list as it
+// it plays, and scrolls the track playing to the top of the queue as it
 // moves on, so the queue reads in the order it plays.
 func (app *nativeApp) queueRows(c *ui.Context) {
 	rows := app.queueItems()
@@ -543,7 +543,7 @@ func (app *nativeApp) menuItem(c *ui.Context, label string) ui.Element {
 }
 
 // queueMenu shows the menu button of a row with the menu it opens: only on
-// the row the pointer is over, as the three dots a playlist row carries.
+// the row the pointer is over, as the three dots a queue row carries.
 func (app *nativeApp) queueMenu(c *ui.Context, item MylistItem, i int, hovered bool) {
 	button := ui.Button(c, "").Label("曲のメニュー").Tooltip("曲のメニュー").Padding(4, 7).Radius(6)
 	if !hovered {
@@ -597,14 +597,14 @@ func (app *nativeApp) queueItems() []MylistItem {
 	order := app.player.Order
 	rows := make([]MylistItem, 0, len(order))
 	for _, watchID := range order {
-		rows = append(rows, app.listItem(watchID))
+		rows = append(rows, app.trackItem(watchID))
 	}
 	return rows
 }
 
-// listItem returns the entry of watchID the player's report carries, or one
+// trackItem returns the entry of watchID the player's report carries, or one
 // carrying what the ID alone tells, which is enough for a row.
-func (app *nativeApp) listItem(watchID string) MylistItem {
+func (app *nativeApp) trackItem(watchID string) MylistItem {
 	for i := range app.player.Items {
 		if app.player.Items[i].WatchID == watchID {
 			return app.player.Items[i]
@@ -619,7 +619,7 @@ func (app *nativeApp) homeView(c *ui.Context) {
 	ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Gap(18).Children(func() {
 		ui.Column(c).Gap(5).Children(func() {
 			ui.Text(c, "ホーム").FontSize(27).Bold()
-			sub := "聴きたいリストを選んで再生"
+			sub := "聴きたいマイリストを選んで再生"
 			if len(app.saved) == 0 && len(app.ownMylists) == 0 {
 				sub = "マイリストは「+」から読み込めます"
 			}
@@ -634,46 +634,46 @@ func (app *nativeApp) homeView(c *ui.Context) {
 	})
 }
 
-// homeCards lays the home's cards out — the shared list order of
-// listEntries, then the import card — each card carrying its pictures and
+// homeCards lays the home's cards out — the shared mylist order of
+// mylistEntries, then the import card — each card carrying its pictures and
 // marks.
 func (app *nativeApp) homeCards(c *ui.Context) {
-	for _, entry := range app.listEntries() {
-		app.listCard(c, entry)
+	for _, entry := range app.mylistEntries() {
+		app.mylistCard(c, entry)
 	}
 	app.importCard(c)
 }
 
-// listEntry is one list the home and the sidebar show: what the sidebar
+// mylistEntry is one mylist the home and the sidebar show: what the sidebar
 // needs (the name) and what a card needs (the label, the pictures and the
 // pin and private marks).
-type listEntry struct {
+type mylistEntry struct {
 	ID    string
 	Name  string
 	Meta  string
 	Items []MylistItem
-	// Pinned is the list pinned to the top of the home; Private, that only
+	// Pinned is the mylist pinned to the top of the home; Private, that only
 	// its owner sees it.
 	Pinned  bool
 	Private bool
 }
 
-// listEntries returns the lists to show, in the one order the home and the
-// sidebar share: the pinned ones first — a pinned own list with the
+// mylistEntries returns the mylists to show, in the one order the home and the
+// sidebar share: the pinned ones first — a pinned own mylist with the
 // account's live name and size — then the account's other mylists.
-func (app *nativeApp) listEntries() []listEntry {
+func (app *nativeApp) mylistEntries() []mylistEntry {
 	pinned := make(map[string]bool, len(app.saved))
 	for i := range app.saved {
 		pinned[app.saved[i].ID] = true
 	}
-	entries := make([]listEntry, 0, len(app.saved)+len(app.ownMylists))
+	entries := make([]mylistEntry, 0, len(app.saved)+len(app.ownMylists))
 	for i := range app.saved {
 		entry := app.saved[i]
-		e := listEntry{
+		e := mylistEntry{
 			ID: entry.ID, Name: entry.Name, Meta: savedMeta(entry),
 			Items: entry.Items, Pinned: true,
 		}
-		if own, ok := app.ownList(entry.ID); ok {
+		if own, ok := app.ownMylist(entry.ID); ok {
 			e.Name, e.Meta = own.Name, countMeta(own.ItemCount)
 			e.Items, e.Private = own.Items, !own.IsPublic
 		}
@@ -684,7 +684,7 @@ func (app *nativeApp) listEntries() []listEntry {
 		if pinned[own.ID] {
 			continue
 		}
-		entries = append(entries, listEntry{
+		entries = append(entries, mylistEntry{
 			ID: own.ID, Name: own.Name, Meta: countMeta(own.ItemCount),
 			Items: own.Items, Private: !own.IsPublic,
 		})
@@ -692,8 +692,8 @@ func (app *nativeApp) listEntries() []listEntry {
 	return entries
 }
 
-// ownList returns the account's mylist with the ID, when it has one.
-func (app *nativeApp) ownList(id string) (OwnMylist, bool) {
+// ownMylist returns the account's mylist with the ID, when it has one.
+func (app *nativeApp) ownMylist(id string) (OwnMylist, bool) {
 	for i := range app.ownMylists {
 		if app.ownMylists[i].ID == id {
 			return app.ownMylists[i], true
@@ -705,7 +705,7 @@ func (app *nativeApp) ownList(id string) (OwnMylist, bool) {
 // importCard shows the last card of the home: one big tile with a plus,
 // opening the dialog that reads a mylist in by URL or ID.
 func (app *nativeApp) importCard(c *ui.Context) {
-	card := ui.Button(c, "").Label("マイリストを読み込む").Width(playlistCardWidth).
+	card := ui.Button(c, "").Label("マイリストを読み込む").Width(mylistCardWidth).
 		Padding(12).Radius(12).Border(1, app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 	if card.Hovered() {
 		card.Background(app.theme.SurfaceHover)
@@ -757,10 +757,10 @@ func (app *nativeApp) importInput() {
 	}
 	app.importing = false
 	app.queueOpen = false
-	app.fetchList(strings.TrimSpace(app.input))
+	app.fetchMylist(strings.TrimSpace(app.input))
 }
 
-// statusLine shows the app's status, silent when it has none. List pages
+// statusLine shows the app's status, silent when it has none. Mylist pages
 // show it in their footer instead.
 func (app *nativeApp) statusLine(c *ui.Context) {
 	if app.status == "" {
@@ -773,12 +773,12 @@ func (app *nativeApp) statusLine(c *ui.Context) {
 	ui.Text(c, app.status).FontSize(12).TextColor(color)
 }
 
-// listCard shows one list — the account's own or a pinned snapshot — as a
+// mylistCard shows one mylist — the account's own or a pinned snapshot — as a
 // card: its first four track pictures in a 2×2 tile, its name and its meta
-// line, its pin and lock marks. Clicking the card opens the list; the
+// line, its pin and lock marks. Clicking the card opens the mylist; the
 // right-click menu pins and unpins it.
-func (app *nativeApp) listCard(c *ui.Context, entry listEntry) {
-	card := ui.Button(c, "").Label(entry.Name).Width(playlistCardWidth).
+func (app *nativeApp) mylistCard(c *ui.Context, entry mylistEntry) {
+	card := ui.Button(c, "").Label(entry.Name).Width(mylistCardWidth).
 		Padding(12).Radius(12).Border(1, app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 	if card.Hovered() {
 		card.Background(app.theme.SurfaceHover)
@@ -798,21 +798,21 @@ func (app *nativeApp) listCard(c *ui.Context, entry listEntry) {
 	if card.Clicked() {
 		app.menuOpen = false
 		app.queueOpen = false
-		app.router.Push(listPath(entry.ID))
+		app.router.Push(mylistPath(entry.ID))
 	}
 	// The keyboard opens the same menu with the menu key or Shift+F10;
 	// both ask every frame, so either one stays registered.
 	f10 := card.Shortcut(ui.Shift, ui.KeyF10)
 	menuKey := card.Shortcut(0, ui.KeyContextMenu)
 	if card.RightClicked() || f10 || menuKey {
-		app.openListMenu(card, entry)
+		app.openMylistMenu(card, entry)
 	}
-	app.listMenu(c, card, entry)
+	app.mylistMenu(c, card, entry)
 }
 
-// openListMenu opens the pin menu of a list at the pointer, or below the
+// openMylistMenu opens the pin menu of a mylist at the pointer, or below the
 // element the keyboard asked on, which the pointer may be away from.
-func (app *nativeApp) openListMenu(anchor ui.Element, entry listEntry) {
+func (app *nativeApp) openMylistMenu(anchor ui.Element, entry mylistEntry) {
 	x, y, over := anchor.PointerPosition()
 	if !over {
 		x, y = 0, anchor.Bounds().H
@@ -822,12 +822,12 @@ func (app *nativeApp) openListMenu(anchor ui.Element, entry listEntry) {
 	app.menuAnchorID = anchor.ID()
 }
 
-// listMenu shows the pin menu of a list on its anchor while it is the one
-// the menu belongs to: one item that pins or unpins the list. The panel
+// mylistMenu shows the pin menu of a mylist on its anchor while it is the one
+// the menu belongs to: one item that pins or unpins the mylist. The panel
 // opens where the right-click was, clamped into the window, rather than the
 // system's own menu, so it carries the app's look.
-func (app *nativeApp) listMenu(c *ui.Context, anchor ui.Element, entry listEntry) {
-	// The ID names the element, which a refresh may give another list.
+func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistEntry) {
+	// The ID names the element, which a refresh may give another mylist.
 	if !app.menuOpen || app.menuAnchorID != anchor.ID() || app.menuEntry.ID != entry.ID {
 		return
 	}
@@ -842,7 +842,7 @@ func (app *nativeApp) listMenu(c *ui.Context, anchor ui.Element, entry listEntry
 		panel.AttachTo(anchor, ui.AnchorTopLeft, ui.AnchorTopLeft).Margin(app.menuY, 0, 0, app.menuX).
 			Padding(4).Radius(app.theme.Radius + 2).Background(app.theme.Background).
 			Border(1, app.theme.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).
-			Role(ui.RoleMenu).Label("リストのメニュー")
+			Role(ui.RoleMenu).Label("マイリストのメニュー")
 		item := app.menuItem(c, label).Role(ui.RoleMenuItemCheckBox).Checked(entry.Pinned)
 		if item.Clicked() {
 			app.menuOpen = false
@@ -855,7 +855,7 @@ func (app *nativeApp) listMenu(c *ui.Context, anchor ui.Element, entry listEntry
 	})
 }
 
-// countMeta labels a list with its size.
+// countMeta labels a mylist with its size.
 func countMeta(count int) string { return fmt.Sprintf("全%d曲", count) }
 
 // cardBadges marks a card's tile: the pin badge over the tile's top-right
@@ -887,7 +887,7 @@ func (app *nativeApp) pinBadge(c *ui.Context) ui.Element {
 		})
 }
 
-// cardTiles lays a playlist's first four track pictures out as a 2×2 tile,
+// cardTiles lays a mylist's first four track pictures out as a 2×2 tile,
 // keeping the corners filled with placeholders where a track or its
 // picture is missing.
 func (app *nativeApp) cardTiles(c *ui.Context, items []MylistItem) {
@@ -928,32 +928,32 @@ func savedMeta(entry SavedMylist) string {
 	return countMeta(total)
 }
 
-// content builds the page the router shows: the home, or a list.
+// content builds the page the router shows: the home, or a mylist.
 func (app *nativeApp) content(c *ui.Context) {
 	app.router.View(c, func(r *ui.Route) {
 		switch {
 		case r.Match(homePath):
 			r.Title("ホーム")
 			app.homeView(c)
-		case r.Match("/list/{id}"):
-			app.listView(c, r)
+		case r.Match("/mylist/{id}"):
+			app.mylistView(c, r)
 		default:
 			app.homeView(c)
 		}
 	})
 }
 
-// listView fills the content area with the list its route names, loading it
-// when it is not the one loaded; the loaded list stays as pages change, so
+// mylistView fills the content area with the mylist its route names, loading it
+// when it is not the one loaded; the loaded mylist stays as pages change, so
 // only the page shown asks for one.
-func (app *nativeApp) listView(c *ui.Context, r *ui.Route) {
+func (app *nativeApp) mylistView(c *ui.Context, r *ui.Route) {
 	id := r.Param("id")
-	app.openList(id)
+	app.openMylist(id)
 	if app.page == nil || app.page.ID != id {
 		r.Title("読み込み中")
 		ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Children(func() {
 			if app.status == "" {
-				ui.Text(c, "リストを読み込んでいます…").FontSize(13).TextColor(app.theme.TextMuted)
+				ui.Text(c, "マイリストを読み込んでいます…").FontSize(13).TextColor(app.theme.TextMuted)
 			} else {
 				app.statusLine(c)
 			}
@@ -961,14 +961,14 @@ func (app *nativeApp) listView(c *ui.Context, r *ui.Route) {
 		return
 	}
 	r.Title(app.page.Name)
-	app.listPage(c)
+	app.mylistPage(c)
 }
 
-// listPage fills the content area with the loaded list.
-func (app *nativeApp) listPage(c *ui.Context) {
+// mylistPage fills the content area with the loaded mylist.
+func (app *nativeApp) mylistPage(c *ui.Context) {
 	ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Gap(14).Children(func() {
 		app.pumpThumbnailFill()
-		app.listHeader(c)
+		app.mylistHeader(c)
 		ui.Row(c).Gap(14).Justify(ui.Start).Padding(10, 12).
 			BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border).Children(func() {
 			ui.Text(c, "#").Width(28).FontSize(12).TextColor(app.theme.TextMuted)
@@ -998,7 +998,7 @@ func (app *nativeApp) listPage(c *ui.Context) {
 	})
 }
 
-func (app *nativeApp) listHeader(c *ui.Context) {
+func (app *nativeApp) mylistHeader(c *ui.Context) {
 	ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Gap(5).Children(func() {
 			ui.Text(c, app.page.Name).FontSize(27).Bold().SingleLine().Ellipsis("…")
@@ -1041,7 +1041,7 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		if !playable {
 			label = "取得できません（" + item.WatchID + "）"
 		}
-		// The list carries no playback state: the player's own screens show
+		// The mylist carries no playback state: the player's own screens show
 		// what plays, and a row here only reacts to the pointer.
 		row := ui.Button(c, "").Label(label).FillWidth().Padding(8, 12).Radius(8).
 			BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
@@ -1069,7 +1069,7 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		})
 		if row.Clicked() {
 			app.selectTrack(item)
-			// Playing from the list hands the view to the queue screen,
+			// Playing from the mylist hands the view to the queue screen,
 			// which follows the track as it plays.
 			app.queueOpen = true
 		}
@@ -1136,17 +1136,17 @@ func thumbSlotWidth(h, w float32) float32 {
 	return max(w, h*16/9+thumbSlotSlack)
 }
 
-// queueThumbnailFill schedules the pictures of a loaded list to be cached in
-// the background, so a list refreshed or reopened gains its pictures without
+// queueThumbnailFill schedules the pictures of a loaded mylist to be cached in
+// the background, so a mylist refreshed or reopened gains its pictures without
 // every row having to be scrolled into view.
 func (app *nativeApp) queueThumbnailFill(items []MylistItem) {
 	app.fillQueue = append(app.fillQueue, items...)
 }
 
-// pumpThumbnailFill caches the next missing picture of the queued list, one
+// pumpThumbnailFill caches the next missing picture of the queued mylist, one
 // load at a time, as the view builds. Keeping to one load keeps the shared
 // limiter's queue short, so a row the user scrolls to is never stuck behind
-// the whole list.
+// the whole mylist.
 func (app *nativeApp) pumpThumbnailFill() {
 	if app.window == nil || app.fillActive {
 		return
@@ -1189,7 +1189,7 @@ func (app *nativeApp) fillThumbnail(item MylistItem) {
 
 // requestThumbnail loads item's picture in the background: the memory
 // cache, the disk cache, then the CDN. Loads of one video collapse into one
-// goroutine, and a failure is remembered until the list is loaded anew.
+// goroutine, and a failure is remembered until the mylist is loaded anew.
 func (app *nativeApp) requestThumbnail(item MylistItem) {
 	if app.window == nil || item.WatchID == "" || app.thumbBusy[item.WatchID] || app.thumbFail[item.WatchID] {
 		return
@@ -1233,7 +1233,7 @@ func thumbSizeOK(b *ui.Bitmap) bool {
 }
 
 // resetThumbFailures lets pictures that once failed try again, after the
-// list was loaded anew.
+// mylist was loaded anew.
 func (app *nativeApp) resetThumbFailures() {
 	app.thumbFail = map[string]bool{}
 }
@@ -1433,8 +1433,8 @@ func (app *nativeApp) savedEntry(id string) *SavedMylist {
 	return nil
 }
 
-// unpin drops the local snapshot of the pinned list id; one of the
-// account's own lists returns to its live place on the home.
+// unpin drops the local snapshot of the pinned mylist id; one of the
+// account's own mylists returns to its live place on the home.
 func (app *nativeApp) unpin(id string) {
 	if entry := app.savedEntry(id); entry != nil {
 		app.removeSaved(*entry)
@@ -1442,7 +1442,7 @@ func (app *nativeApp) unpin(id string) {
 }
 
 // playingTrack is the track the report names, built without looking at the
-// loaded list: the playing list is not always the one on screen.
+// loaded mylist: the playing mylist is not always the one on screen.
 func (app *nativeApp) playingTrack() MylistItem {
 	return MylistItem{
 		WatchID:   app.player.WatchID,
@@ -1453,21 +1453,21 @@ func (app *nativeApp) playingTrack() MylistItem {
 	}
 }
 
-// openList shows the list id names: the one loaded, the pinned copy, else
+// openMylist shows the mylist the ID names: the one loaded, the pinned copy, else
 // the API's first page.
-func (app *nativeApp) openList(id string) {
+func (app *nativeApp) openMylist(id string) {
 	if id == "" || app.page != nil && app.page.ID == id {
 		return
 	}
 	if app.loading && app.loadingID == id {
 		return
 	}
-	// Opening a list leaves the playing screen for it, as home does.
+	// Opening a mylist leaves the playing screen for it, as home does.
 	app.queueOpen = false
 	if app.openSaved(id) {
 		return
 	}
-	app.fetchList(id)
+	app.fetchMylist(id)
 }
 
 // openSaved shows the pinned snapshot of the mylist id names, reporting
@@ -1500,16 +1500,16 @@ func (app *nativeApp) openSaved(id string) bool {
 		app.setStatus("ピン留めした内容から表示中（更新するまで通信しません）")
 		app.playerError = ""
 		// The player keeps the queue and the track it is playing; only a
-		// track of this list played from here moves the queue to it.
+		// track of this mylist played from here moves the queue to it.
 		app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
 		return true
 	}
 	return false
 }
 
-// fetchList loads page 1 of the list the input names, an ID or a URL, into
+// fetchMylist loads page 1 of the mylist the input names, an ID or a URL, into
 // the player and the view; the route follows the ID the API reports.
-func (app *nativeApp) fetchList(input string) {
+func (app *nativeApp) fetchMylist(input string) {
 	if strings.TrimSpace(input) == "" {
 		return
 	}
@@ -1540,7 +1540,7 @@ func (app *nativeApp) fetchList(input string) {
 			app.resetThumbFailures()
 			app.queueThumbnailFill(page.Items)
 			app.setStatus("")
-			app.router.Push(listPath(page.ID))
+			app.router.Push(mylistPath(page.ID))
 			app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
 		})
 	}()
@@ -1578,12 +1578,12 @@ func (app *nativeApp) loadMore() {
 	}()
 }
 
-// canLoadNext reports whether loading the next page of the shown list may
-// extend the playing queue: only the queue built from that list can take it.
-// The playing list is not always the one on screen, and its pages are not
+// canLoadNext reports whether loading the next page of the shown mylist may
+// extend the playing queue: only the queue built from that mylist can take it.
+// The playing mylist is not always the one on screen, and its pages are not
 // loaded from here.
 func (app *nativeApp) canLoadNext() bool {
-	return app.hasMore && app.page != nil && app.player.ListID == app.page.ID
+	return app.hasMore && app.page != nil && app.player.MylistID == app.page.ID
 }
 
 // advance moves to the next track, whether the button asked for it or the

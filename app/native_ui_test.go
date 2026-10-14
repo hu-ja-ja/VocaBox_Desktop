@@ -18,8 +18,11 @@ import (
 func TestNativeUITogglesSidebar(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	tester := ui.NewTester(app.view, 1120, 760)
-	if !tester.HasText("VocaBox") || !tester.HasText("ライブラリ") {
+	if !tester.HasText("VocaBox") {
 		t.Fatalf("sidebar is not shown initially: %q", tester.Texts())
+	}
+	if _, ok := tester.Find("マイリスト"); !ok {
+		t.Fatalf("sidebar section is not shown initially: %q", tester.Texts())
 	}
 	wordmark, hasWordmark := tester.Find("VocaBox")
 	tagline, hasTagline := tester.Find("NICONICO MUSIC")
@@ -33,7 +36,8 @@ func TestNativeUITogglesSidebar(t *testing.T) {
 	if err := tester.Click("サイドバーを閉じる"); err != nil {
 		t.Fatal(err)
 	}
-	if _, hasLogo := tester.Find("V"); app.sidebarOpen || !hasLogo || tester.HasText("ライブラリ") {
+	_, hasSection := tester.Find("マイリスト")
+	if _, hasLogo := tester.Find("V"); app.sidebarOpen || !hasLogo || hasSection {
 		t.Fatalf("sidebar did not close cleanly: open=%v texts=%q", app.sidebarOpen, tester.Texts())
 	}
 	openButton, ok := tester.Find("サイドバーを開く")
@@ -55,7 +59,7 @@ func TestNativeUIOpensSavedSnapshot(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.saved = []SavedMylist{{
 		ID:   "123",
-		Name: "作業用プレイリスト",
+		Name: "作業用マイリスト",
 		Items: []MylistItem{{
 			WatchID:   "sm9",
 			Title:     "サンプル曲",
@@ -69,7 +73,7 @@ func TestNativeUIOpensSavedSnapshot(t *testing.T) {
 	if !tester.HasText("VocaBox") {
 		t.Fatalf("initial view is missing VocaBox: %q", tester.Texts())
 	}
-	if err := tester.Click("作業用プレイリスト"); err != nil {
+	if err := tester.Click("作業用マイリスト"); err != nil {
 		t.Fatal(err)
 	}
 	if app.page == nil || app.page.ID != "123" || len(app.page.Items) != 1 {
@@ -173,7 +177,7 @@ func TestNativeUIHomeImportsFromCard(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	tester := ui.NewTester(app.view, 1120, 760)
 
-	// An empty library still offers the import card.
+	// An empty home still offers the import card.
 	if !tester.HasText("マイリストを読み込む") {
 		t.Fatalf("import card is missing: %q", tester.Texts())
 	}
@@ -207,30 +211,30 @@ func TestNativeUIHomeImportsFromCard(t *testing.T) {
 	}
 }
 
-// TestNativeUIHomePinsFirst checks the home's cards: the pinned lists come
-// first with their pin mark, a pinned own list shows once with the account's
-// live name and size, a private list carries the lock mark, the account's
+// TestNativeUIHomePinsFirst checks the home's cards: the pinned mylists come
+// first with their pin mark, a pinned own mylist shows once with the account's
+// live name and size, a private mylist carries the lock mark, the account's
 // other mylists follow, the import card stays last, and signing out keeps
 // the pinned local copies.
 func TestNativeUIHomePinsFirst(t *testing.T) {
 	mylist := NewMylist()
 	mylist.configDir = t.TempDir()
 	app := newNativeApp(mylist)
-	// The sidebar shows its own pin marks for the same lists, so close it
+	// The sidebar shows its own pin marks for the same mylists, so close it
 	// and let the test look at the cards alone.
 	app.sidebarOpen = false
 	app.loggedIn = true
 	app.ownMylists = []OwnMylist{
-		{ID: "71043760", Name: "自分の非公開リスト", ItemCount: 2,
+		{ID: "71043760", Name: "自分の非公開マイリスト", ItemCount: 2,
 			Items: []MylistItem{{WatchID: "sm1", Title: "一曲目", Available: true}}},
-		{ID: "71043761", Name: "自分の公開リスト", ItemCount: 0, IsPublic: true},
+		{ID: "71043761", Name: "自分の公開マイリスト", ItemCount: 0, IsPublic: true},
 	}
 	app.saved = []SavedMylist{
-		// The pinned own list: the live account form must win over the
+		// The pinned own mylist: the live account form must win over the
 		// snapshot's stale size.
-		{ID: "71043760", Name: "自分の非公開リスト", TotalItemCount: 9,
+		{ID: "71043760", Name: "自分の非公開マイリスト", TotalItemCount: 9,
 			Items: []MylistItem{{WatchID: "sm1", Title: "古い一曲目", Available: true}}},
-		{ID: "555", Name: "ピン留めした公開リスト", TotalItemCount: 3,
+		{ID: "555", Name: "ピン留めした公開マイリスト", TotalItemCount: 3,
 			Items: []MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}}},
 	}
 	tester := ui.NewTester(app.view, 1120, 760)
@@ -265,13 +269,13 @@ func TestNativeUIHomePinsFirst(t *testing.T) {
 		t.Fatalf("the private badge is not below the pin: pin=%v lock=%v", pin, lock)
 	}
 	if tester.HasText("全9曲") {
-		t.Fatalf("the pinned own list shows its stale snapshot size: %q", tester.Texts())
+		t.Fatalf("the pinned own mylist shows its stale snapshot size: %q", tester.Texts())
 	}
 	if tester.HasText("保存済み") {
 		t.Fatalf("the old saved heading is still shown: %q", tester.Texts())
 	}
 
-	// Pinned first, the account's other lists after them, import last.
+	// Pinned first, the account's other mylists after them, import last.
 	texts := tester.Texts()
 	index := func(s string) int {
 		for i, text := range texts {
@@ -286,30 +290,30 @@ func TestNativeUIHomePinsFirst(t *testing.T) {
 		t.Fatalf("home order is wrong: %q", texts)
 	}
 
-	// Signing out drops the live lists and keeps the pinned local copies.
+	// Signing out drops the live mylists and keeps the pinned local copies.
 	app.clearSession()
 	tester.Frame()
-	if !tester.HasText("ピン留めした公開リスト") || !tester.HasText("全9曲") {
-		t.Fatalf("logout dropped the pinned lists: %q", tester.Texts())
+	if !tester.HasText("ピン留めした公開マイリスト") || !tester.HasText("全9曲") {
+		t.Fatalf("logout dropped the pinned mylists: %q", tester.Texts())
 	}
-	if tester.HasText("自分の公開リスト") {
-		t.Fatalf("logout kept the live account lists: %q", tester.Texts())
+	if tester.HasText("自分の公開マイリスト") {
+		t.Fatalf("logout kept the live account mylists: %q", tester.Texts())
 	}
 }
 
 // TestNativeUIHomeUnpinsFromMenu checks the card's right-click menu: a
-// pinned card offers ピン留めを外す, and choosing it unpins the list and
+// pinned card offers ピン留めを外す, and choosing it unpins the mylist and
 // drops the card.
 func TestNativeUIHomeUnpinsFromMenu(t *testing.T) {
 	mylist := NewMylist()
 	mylist.configDir = t.TempDir()
 	app := newNativeApp(mylist)
 	app.sidebarOpen = false
-	app.saved = []SavedMylist{{ID: "555", Name: "ピン留めした公開リスト", TotalItemCount: 3,
+	app.saved = []SavedMylist{{ID: "555", Name: "ピン留めした公開マイリスト", TotalItemCount: 3,
 		Items: []MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}}}}
 	tester := ui.NewTester(app.view, 1120, 760)
 
-	if err := tester.RightClick("ピン留めした公開リスト"); err != nil {
+	if err := tester.RightClick("ピン留めした公開マイリスト"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := tester.Find("ピン留めを外す"); !ok {
@@ -319,9 +323,9 @@ func TestNativeUIHomeUnpinsFromMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(app.saved) != 0 {
-		t.Fatalf("the list stays pinned: %+v", app.saved)
+		t.Fatalf("the mylist stays pinned: %+v", app.saved)
 	}
-	if tester.HasText("ピン留めした公開リスト") {
+	if tester.HasText("ピン留めした公開マイリスト") {
 		t.Fatalf("the card stays after unpinning: %q", tester.Texts())
 	}
 }
@@ -342,10 +346,10 @@ func TestNativeUIHomePinsFromMenu(t *testing.T) {
 
 	app := newNativeApp(mylist)
 	app.sidebarOpen = false
-	app.ownMylists = []OwnMylist{{ID: "71043760", Name: "自分の公開リスト", ItemCount: 2, IsPublic: true}}
+	app.ownMylists = []OwnMylist{{ID: "71043760", Name: "自分の公開マイリスト", ItemCount: 2, IsPublic: true}}
 	tester := ui.NewTester(app.view, 1120, 760)
 
-	if err := tester.RightClick("自分の公開リスト"); err != nil {
+	if err := tester.RightClick("自分の公開マイリスト"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := tester.Find("ピン留め"); !ok {
@@ -359,34 +363,34 @@ func TestNativeUIHomePinsFromMenu(t *testing.T) {
 	}
 }
 
-// TestNativeUISidebarListsLikeHome checks the sidebar's library uses the
-// home's order: the pinned lists first with the account's live name, the
+// TestNativeUISidebarMylistsLikeHome checks the sidebar's mylists use the
+// home's order: the pinned mylists first with the account's live name, the
 // account's other mylists after them, each pinnable from its menu.
-func TestNativeUISidebarListsLikeHome(t *testing.T) {
+func TestNativeUISidebarMylistsLikeHome(t *testing.T) {
 	mylist := NewMylist()
 	mylist.configDir = t.TempDir()
 	app := newNativeApp(mylist)
 	app.loggedIn = true
 	app.ownMylists = []OwnMylist{
-		{ID: "71043760", Name: "自分の非公開リスト", ItemCount: 2},
-		{ID: "71043761", Name: "自分の公開リスト", ItemCount: 12, IsPublic: true},
+		{ID: "71043760", Name: "自分の非公開マイリスト", ItemCount: 2},
+		{ID: "71043761", Name: "自分の公開マイリスト", ItemCount: 12, IsPublic: true},
 	}
 	app.saved = []SavedMylist{{ID: "71043760", Name: "古い名前", TotalItemCount: 9}}
 	tester := ui.NewTester(app.view, 1120, 760)
 
-	pinned, ok := tester.Find("自分の非公開リスト")
+	pinned, ok := tester.Find("自分の非公開マイリスト")
 	if !ok || pinned.X > 250 {
-		t.Fatalf("the pinned list is missing from the sidebar: %v, %v", pinned, ok)
+		t.Fatalf("the pinned mylist is missing from the sidebar: %v, %v", pinned, ok)
 	}
-	own, ok := tester.Find("自分の公開リスト")
+	own, ok := tester.Find("自分の公開マイリスト")
 	if !ok || own.X > 250 {
-		t.Fatalf("the account's other list is missing from the sidebar: %v, %v", own, ok)
+		t.Fatalf("the account's other mylist is missing from the sidebar: %v, %v", own, ok)
 	}
 	if tester.HasText("古い名前") {
 		t.Fatalf("the sidebar shows the snapshot's stale name: %q", tester.Texts())
 	}
 	if pinned.Y >= own.Y {
-		t.Fatalf("the pinned list does not come first: pinned=%v own=%v", pinned, own)
+		t.Fatalf("the pinned mylist does not come first: pinned=%v own=%v", pinned, own)
 	}
 
 	// The pinned item carries the pin mark on its right, the unpinned one
@@ -406,7 +410,7 @@ func TestNativeUISidebarListsLikeHome(t *testing.T) {
 		t.Fatalf("pin marks = %d; want the sidebar's and the pinned card's", marks)
 	}
 
-	// An unpinned list can be pinned from its sidebar menu.
+	// An unpinned mylist can be pinned from its sidebar menu.
 	tester.RightClickAt(own.X+own.W/2, own.Y+own.H/2)
 	if !app.menuOpen {
 		t.Fatalf("the sidebar menu did not open: %q", tester.Texts())
@@ -418,7 +422,7 @@ func TestNativeUISidebarListsLikeHome(t *testing.T) {
 }
 
 // TestNativeUISidebarUnpinsFromMenu checks the sidebar's right-click menu:
-// choosing ピン留めを外す unpins the list, dropping it from the sidebar and
+// choosing ピン留めを外す unpins the mylist, dropping it from the sidebar and
 // the home.
 func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
 	mylist := NewMylist()
@@ -440,20 +444,20 @@ func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(app.saved) != 0 {
-		t.Fatalf("the list stays pinned: %+v", app.saved)
+		t.Fatalf("the mylist stays pinned: %+v", app.saved)
 	}
 	if tester.HasText("サイドバーのピン") {
-		t.Fatalf("the unpinned list still shows: %q", tester.Texts())
+		t.Fatalf("the unpinned mylist still shows: %q", tester.Texts())
 	}
-	if !tester.HasText("リストはありません") {
-		t.Fatalf("the empty library says nothing: %q", tester.Texts())
+	if !tester.HasText("マイリストはありません") {
+		t.Fatalf("the empty sidebar says nothing: %q", tester.Texts())
 	}
 }
 
-// TestNativeUIListMenuOpensAtPointer checks the card's menu opens where the
+// TestNativeUIMylistMenuOpensAtPointer checks the card's menu opens where the
 // pointer right-clicked rather than below the card, and moves in from the
 // window's edge.
-func TestNativeUIListMenuOpensAtPointer(t *testing.T) {
+func TestNativeUIMylistMenuOpensAtPointer(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.sidebarOpen = false
 	app.ownMylists = []OwnMylist{
@@ -471,7 +475,7 @@ func TestNativeUIListMenuOpensAtPointer(t *testing.T) {
 	}
 	x, y := card.X+16, card.Y+card.H-16
 	tester.RightClickAt(x, y)
-	panel, ok := tester.Find("リストのメニュー")
+	panel, ok := tester.Find("マイリストのメニュー")
 	if !ok {
 		t.Fatalf("the menu did not open: %q", tester.Texts())
 	}
@@ -488,12 +492,12 @@ func TestNativeUIListMenuOpensAtPointer(t *testing.T) {
 	if app.menuEntry.ID != "71043761" {
 		t.Fatalf("the menu still belongs to %q", app.menuEntry.ID)
 	}
-	panel, ok = tester.Find("リストのメニュー")
+	panel, ok = tester.Find("マイリストのメニュー")
 	if !ok || !near(panel.X, other.X+16) || !near(panel.Y, other.Y+16) {
 		t.Fatalf("the menu did not move to the second card: %v, %v", panel, ok)
 	}
 	tester.Key(0, ui.KeyEscape)
-	if _, ok := tester.Find("リストのメニュー"); ok {
+	if _, ok := tester.Find("マイリストのメニュー"); ok {
 		t.Fatal("Escape did not close the menu")
 	}
 
@@ -506,7 +510,7 @@ func TestNativeUIListMenuOpensAtPointer(t *testing.T) {
 	}
 	tester = narrow
 	tester.RightClickAt(card.X+card.W-4, card.Y+card.H-16)
-	panel, ok = tester.Find("リストのメニュー")
+	panel, ok = tester.Find("マイリストのメニュー")
 	if !ok {
 		t.Fatalf("the menu did not open in the narrow window: %q", tester.Texts())
 	}
@@ -515,9 +519,9 @@ func TestNativeUIListMenuOpensAtPointer(t *testing.T) {
 	}
 }
 
-// TestNativeUIListMenuKeyboard checks the card's menu opens from the
+// TestNativeUIMylistMenuKeyboard checks the card's menu opens from the
 // keyboard — the menu key and Shift+F10 — and its item works from there.
-func TestNativeUIListMenuKeyboard(t *testing.T) {
+func TestNativeUIMylistMenuKeyboard(t *testing.T) {
 	mylist := NewMylist()
 	mylist.configDir = t.TempDir()
 	app := newNativeApp(mylist)
@@ -552,7 +556,7 @@ func TestNativeUIListMenuKeyboard(t *testing.T) {
 	}
 	tester.Key(0, ui.KeyEnter)
 	if len(app.saved) != 0 {
-		t.Fatalf("Enter did not unpin the list: %+v", app.saved)
+		t.Fatalf("Enter did not unpin the mylist: %+v", app.saved)
 	}
 }
 
@@ -575,56 +579,56 @@ func lastCommand(commands []PlayerCommand, action string) (PlayerCommand, bool) 
 	return PlayerCommand{}, false
 }
 
-// TestNativeUIKeepsPlayingTrackAcrossLists checks that opening another list
-// neither stops the track playing nor hands the queue to the shown list.
-func TestNativeUIKeepsPlayingTrackAcrossLists(t *testing.T) {
+// TestNativeUIKeepsPlayingTrackAcrossMylists checks that opening another mylist
+// neither stops the track playing nor hands the queue to the shown mylist.
+func TestNativeUIKeepsPlayingTrackAcrossMylists(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.saved = []SavedMylist{
-		{ID: "111", Name: "リストA", Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}},
-		{ID: "222", Name: "リストB", Items: []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}}},
+		{ID: "111", Name: "マイリストA", Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}},
+		{ID: "222", Name: "マイリストB", Items: []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}}},
 	}
 	tester := ui.NewTester(app.view, 1120, 760)
-	if err := tester.Click("リストA"); err != nil {
+	if err := tester.Click("マイリストA"); err != nil {
 		t.Fatal(err)
 	}
-	// The player reports a track of A playing while list B is shown.
-	app.player = playerState{WatchID: "sm1", ListID: "111", Title: "Aの曲", Ready: true, Playing: true, Volume: 1}
+	// The player reports a track of A playing while mylist B is shown.
+	app.player = playerState{WatchID: "sm1", MylistID: "111", Title: "Aの曲", Ready: true, Playing: true, Volume: 1}
 	app.sent = nil
 
-	if err := tester.Click("リストB"); err != nil {
+	if err := tester.Click("マイリストB"); err != nil {
 		t.Fatal(err)
 	}
 	if app.player.WatchID != "sm1" || !app.player.Playing {
-		t.Fatalf("switching lists stopped the playing track: %#v", app.player)
+		t.Fatalf("switching mylists stopped the playing track: %#v", app.player)
 	}
 	set, ok := lastCommand(app.sent, "setItems")
 	if !ok || set.ID != "222" {
-		t.Fatalf("the opened list was not sent: %#v", app.sent)
+		t.Fatalf("the opened mylist was not sent: %#v", app.sent)
 	}
 	if !tester.HasText("Aの曲") {
 		t.Fatalf("the player bar lost the playing track: %q", tester.Texts())
 	}
 }
-// TestNativeUICanLoadNextOnlyForPlayingList checks that only the queue built
-// from the shown list takes its next page: a list merely shown must not feed
-// the queue of the list playing.
-func TestNativeUICanLoadNextOnlyForPlayingList(t *testing.T) {
+// TestNativeUICanLoadNextOnlyForPlayingMylist checks that only the queue built
+// from the shown mylist takes its next page: a mylist merely shown must not feed
+// the queue of the mylist playing.
+func TestNativeUICanLoadNextOnlyForPlayingMylist(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.page = &MylistPage{ID: "222"}
 	app.hasMore = true
-	app.player = playerState{WatchID: "sm1", ListID: "111"}
+	app.player = playerState{WatchID: "sm1", MylistID: "111"}
 
 	if app.canLoadNext() {
-		t.Fatal("loading the shown list must not extend another list's queue")
+		t.Fatal("loading the shown mylist must not extend another mylist's queue")
 	}
 	app.advance()
 	if app.pendingAdvance || app.loading || hasCommand(app.sent, "next") {
 		t.Fatalf("advancing left the playing queue: pending=%v loading=%v", app.pendingAdvance, app.loading)
 	}
 
-	app.player.ListID = "222"
+	app.player.MylistID = "222"
 	if !app.canLoadNext() {
-		t.Fatal("the playing list's next page can extend its queue")
+		t.Fatal("the playing mylist's next page can extend its queue")
 	}
 	app.page = nil
 	if app.canLoadNext() {
@@ -633,7 +637,7 @@ func TestNativeUICanLoadNextOnlyForPlayingList(t *testing.T) {
 }
 
 // TestNativeUIQueueScreenShowsTheQueue checks the screen the bar opens: the
-// queue in playing order, labelled with the list it came from, with a row
+// queue in playing order, labelled with the mylist it came from, with a row
 // click selecting the track and home leaving the screen.
 func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 	app := newNativeApp(NewMylist())
@@ -644,7 +648,7 @@ func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 	}
 	app.saved = []SavedMylist{{ID: "123", Name: "作業用キュー", Items: items}}
 	app.player = playerState{
-		WatchID: "sm2", ListID: "123", Name: "作業用キュー", Title: "二曲目",
+		WatchID: "sm2", MylistID: "123", Name: "作業用キュー", Title: "二曲目",
 		Ready: true, Playing: true, Volume: 1,
 		Order: []string{"sm2", "sm3", "sm1"}, Items: items, QueueIndex: 0, QueuePos: 0,
 	}
@@ -658,12 +662,12 @@ func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 		t.Fatal("the queue screen did not open")
 	}
 	if !tester.HasText("作業用キュー") || !tester.HasText("3曲") {
-		t.Fatalf("the queue is not labelled with the list it came from: %q", tester.Texts())
+		t.Fatalf("the queue is not labelled with the mylist it came from: %q", tester.Texts())
 	}
 	// A row is chosen by the list itself, which is what a drag needs too.
 	two, ok := tester.Find("二曲目")
 	if !ok {
-		t.Fatalf("the playlist is missing tracks: %q", tester.Texts())
+		t.Fatalf("the queue is missing tracks: %q", tester.Texts())
 	}
 	tester.ClickAt(two.X+10, two.Y+two.H/2)
 	if !hasCommand(app.sent, "select") {
@@ -674,7 +678,7 @@ func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 	}
 	selected, ok := lastCommand(app.sent, "select")
 	if !ok || selected.WatchID != "sm2" {
-		t.Fatalf("a playlist row did not play its track: %#v", app.sent)
+		t.Fatalf("a queue row did not play its track: %#v", app.sent)
 	}
 
 	// The queue keeps the track playing on top as it moves on.
@@ -691,8 +695,8 @@ func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 	}
 }
 
-// TestNativeUIQueueDragReorders checks the playlist rows move by dragging
-// them, the way the list pages' rows do not.
+// TestNativeUIQueueDragReorders checks the queue rows move by dragging
+// them, the way the mylist pages' rows do not.
 func TestNativeUIQueueDragReorders(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.queueOpen = true
@@ -708,11 +712,11 @@ func TestNativeUIQueueDragReorders(t *testing.T) {
 	tester := ui.NewTester(app.view, 1120, 760)
 	first, ok := tester.Find("一曲目")
 	if !ok {
-		t.Fatalf("the playlist is not shown: %q", tester.Texts())
+		t.Fatalf("the queue is not shown: %q", tester.Texts())
 	}
 	last, ok := tester.Find("三曲目")
 	if !ok {
-		t.Fatalf("the playlist is not shown: %q", tester.Texts())
+		t.Fatalf("the queue is not shown: %q", tester.Texts())
 	}
 	tester.Press(first.X+20, first.Y+first.H/2)
 	for k := 1; k <= 4; k++ {
@@ -809,7 +813,7 @@ func TestNativeUIPlayerBarBlankAreaTogglesQueue(t *testing.T) {
 	}
 }
 
-// TestNativeUIQueueCommands checks the playlist rows drive the player:
+// TestNativeUIQueueCommands checks the queue rows drive the player:
 // removing a track and reordering rows.
 func TestNativeUIQueueCommands(t *testing.T) {
 	app := newNativeApp(NewMylist())
@@ -837,17 +841,17 @@ func TestNativeUIQueueCommands(t *testing.T) {
 }
 
 // TestQueueItemsComeFromTheReport checks the queue screen follows the
-// player's own state alone: the list the app happens to show neither
+// player's own state alone: the mylist the app happens to show neither
 // reorders the queue nor fills a track the player does not carry.
 func TestQueueItemsComeFromTheReport(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.page = &MylistPage{ID: "9", Items: []MylistItem{
-		{WatchID: "sm2", Title: "表示中リストの曲", Available: true},
-		{WatchID: "sm1", Title: "表示中リストの曲", Available: true},
+		{WatchID: "sm2", Title: "表示中マイリストの曲", Available: true},
+		{WatchID: "sm1", Title: "表示中マイリストの曲", Available: true},
 	}}
 	app.player = playerState{
 		Order: []string{"sm2", "sm9", "sm1"},
-		Items: []MylistItem{{WatchID: "sm9", Title: "再生中リストの曲", Available: true}},
+		Items: []MylistItem{{WatchID: "sm9", Title: "再生中マイリストの曲", Available: true}},
 	}
 	got := app.queueItems()
 	ids := make([]string, 0, len(got))
@@ -857,68 +861,68 @@ func TestQueueItemsComeFromTheReport(t *testing.T) {
 	if len(ids) != 3 || ids[0] != "sm2" || ids[1] != "sm9" || ids[2] != "sm1" {
 		t.Fatalf("queue order = %#v; want sm2, sm9, sm1", ids)
 	}
-	if got[1].Title != "再生中リストの曲" {
+	if got[1].Title != "再生中マイリストの曲" {
 		t.Fatalf("the report's track lost its metadata: %#v", got[1])
 	}
 	if got[0].Title != "" || got[2].Title != "" {
-		t.Fatalf("a track the report does not carry was filled in from the shown list: %#v", got)
+		t.Fatalf("a track the report does not carry was filled in from the shown mylist: %#v", got)
 	}
 }
 
-// TestNativeUIListDoesNotFollowPlayback checks the playlist screen carries
-// no playback state: opening a list keeps its top in view however far down
+// TestNativeUIMylistDoesNotFollowPlayback checks the mylist screen carries
+// no playback state: opening a mylist keeps its top in view however far down
 // the track playing sits.
-func TestNativeUIListDoesNotFollowPlayback(t *testing.T) {
+func TestNativeUIMylistDoesNotFollowPlayback(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	items := make([]MylistItem, 100)
 	for i := range items {
 		items[i] = MylistItem{WatchID: fmt.Sprintf("sm%d", i+1), Title: fmt.Sprintf("曲%d", i+1), Available: true}
 	}
-	app.saved = []SavedMylist{{ID: "123", Name: "作業用リスト", Items: items}}
+	app.saved = []SavedMylist{{ID: "123", Name: "作業用マイリスト", Items: items}}
 
 	tester := ui.NewTester(app.view, 1120, 760)
-	if err := tester.Click("作業用リスト"); err != nil {
+	if err := tester.Click("作業用マイリスト"); err != nil {
 		t.Fatal(err)
 	}
 	app.player = playerState{WatchID: "sm80", Ready: true, Volume: 1}
 	tester.Frame()
 	if first, _ := app.trackList.Visible(); first != 0 {
-		t.Fatalf("the list followed the track playing: first=%d", first)
+		t.Fatalf("the mylist followed the track playing: first=%d", first)
 	}
 }
 
-// TestNativeUISidebarListLeavesQueueScreen checks choosing a list in the
+// TestNativeUISidebarMylistLeavesQueueScreen checks choosing a mylist in the
 // sidebar leaves the queue screen for it, as choosing home does, even the
-// list already showing, whose click changes no route of its own.
-func TestNativeUISidebarListLeavesQueueScreen(t *testing.T) {
+// mylist already showing, whose click changes no route of its own.
+func TestNativeUISidebarMylistLeavesQueueScreen(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.saved = []SavedMylist{
-		{ID: "111", Name: "リストA", Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}},
-		{ID: "222", Name: "リストB", Items: []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}}},
+		{ID: "111", Name: "マイリストA", Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}},
+		{ID: "222", Name: "マイリストB", Items: []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}}},
 	}
 	tester := ui.NewTester(app.view, 1120, 760)
-	if err := tester.Click("リストA"); err != nil {
+	if err := tester.Click("マイリストA"); err != nil {
 		t.Fatal(err)
 	}
 	app.queueOpen = true
 	tester.Frame()
-	if err := tester.Click("リストB"); err != nil {
+	if err := tester.Click("マイリストB"); err != nil {
 		t.Fatal(err)
 	}
 	if app.queueOpen {
-		t.Fatal("choosing another list left the queue screen open")
+		t.Fatal("choosing another mylist left the queue screen open")
 	}
-	if app.router.Path() != "/list/222" || app.page == nil || app.page.ID != "222" || !tester.HasText("Bの曲") {
-		t.Fatalf("the chosen list was not opened: path=%q page=%#v texts=%q", app.router.Path(), app.page, tester.Texts())
+	if app.router.Path() != "/mylist/222" || app.page == nil || app.page.ID != "222" || !tester.HasText("Bの曲") {
+		t.Fatalf("the chosen mylist was not opened: path=%q page=%#v texts=%q", app.router.Path(), app.page, tester.Texts())
 	}
 
 	app.queueOpen = true
 	tester.Frame()
-	if err := tester.Click("リストB"); err != nil {
+	if err := tester.Click("マイリストB"); err != nil {
 		t.Fatal(err)
 	}
 	if app.queueOpen {
-		t.Fatal("choosing the shown list again left the queue screen open")
+		t.Fatal("choosing the shown mylist again left the queue screen open")
 	}
 }
 
@@ -990,7 +994,7 @@ func TestNativeUITrackClickPlaysIt(t *testing.T) {
 		t.Fatalf("clicking a track did not play it: %#v", app.sent)
 	}
 	if !app.queueOpen {
-		t.Fatal("playing from the list did not open the queue screen")
+		t.Fatal("playing from the mylist did not open the queue screen")
 	}
 }
 
@@ -1050,10 +1054,10 @@ func TestNativeUIPlayerBarFitsMinimumWidth(t *testing.T) {
 	}
 }
 
-func TestNativeUIHomeOpensPlaylistCards(t *testing.T) {
+func TestNativeUIHomeOpensMylistCards(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	// With the sidebar closed the card is the only element named after the
-	// playlist, so a click targets the card.
+	// mylist, so a click targets the card.
 	app.sidebarOpen = false
 	app.saved = []SavedMylist{{
 		ID:             "123",
@@ -1070,29 +1074,29 @@ func TestNativeUIHomeOpensPlaylistCards(t *testing.T) {
 
 	tester := ui.NewTester(app.view, 1120, 760)
 	if !tester.HasText("ホーム") || !tester.HasText("作業用ホーム") || !tester.HasText("全6曲") {
-		t.Fatalf("home does not show the playlist card: %q", tester.Texts())
+		t.Fatalf("home does not show the mylist card: %q", tester.Texts())
 	}
 	if err := tester.Click("作業用ホーム"); err != nil {
 		t.Fatal(err)
 	}
-	if app.router.Path() != "/list/123" || app.page == nil || app.page.ID != "123" {
-		t.Fatalf("card did not open the playlist: path=%q page=%#v", app.router.Path(), app.page)
+	if app.router.Path() != "/mylist/123" || app.page == nil || app.page.ID != "123" {
+		t.Fatalf("card did not open the mylist: path=%q page=%#v", app.router.Path(), app.page)
 	}
 	if !tester.HasText("一曲目") {
-		t.Fatalf("opened list is not shown: %q", tester.Texts())
+		t.Fatalf("opened mylist is not shown: %q", tester.Texts())
 	}
 
 	// The side buttons of a mouse arrive as the back and forward keys.
 	tester.Key(0, ui.KeyBack)
-	if app.router.Path() != "/" || !tester.HasText("聴きたいリストを選んで再生") {
+	if app.router.Path() != "/" || !tester.HasText("聴きたいマイリストを選んで再生") {
 		t.Fatalf("back did not return home: path=%q", app.router.Path())
 	}
 	if app.page == nil || app.page.ID != "123" {
-		t.Fatalf("the opened list was dropped: %#v", app.page)
+		t.Fatalf("the opened mylist was dropped: %#v", app.page)
 	}
 	tester.Key(0, ui.KeyForward)
-	if app.router.Path() != "/list/123" || !tester.HasText("一曲目") {
-		t.Fatalf("forward did not return to the list: path=%q", app.router.Path())
+	if app.router.Path() != "/mylist/123" || !tester.HasText("一曲目") {
+		t.Fatalf("forward did not return to the mylist: path=%q", app.router.Path())
 	}
 
 	app.sidebarOpen = true
@@ -1100,11 +1104,11 @@ func TestNativeUIHomeOpensPlaylistCards(t *testing.T) {
 	if err := tester.Click("ホーム"); err != nil {
 		t.Fatal(err)
 	}
-	if app.router.Path() != "/" || !tester.HasText("聴きたいリストを選んで再生") {
+	if app.router.Path() != "/" || !tester.HasText("聴きたいマイリストを選んで再生") {
 		t.Fatalf("sidebar home item did not return home: path=%q", app.router.Path())
 	}
 	if app.page == nil || app.page.ID != "123" {
-		t.Fatalf("the opened list was dropped: %#v", app.page)
+		t.Fatalf("the opened mylist was dropped: %#v", app.page)
 	}
 }
 
@@ -1166,13 +1170,13 @@ func TestNativeUIThumbnailPlaceholderNeedsWindow(t *testing.T) {
 		t.Fatalf("track is not shown: %q", tester.Texts())
 	}
 	// Without a window there is nothing to load into: the row keeps its
-	// placeholder, the list's pictures wait in the fill queue, and no load
+	// placeholder, the mylist's pictures wait in the fill queue, and no load
 	// starts.
 	if len(app.thumbBusy) != 0 || len(app.thumbs) != 0 {
 		t.Fatalf("unexpected thumbnail load: busy=%v thumbs=%d", app.thumbBusy, len(app.thumbs))
 	}
 	if len(app.fillQueue) != 1 {
-		t.Fatalf("fill queue = %d; want the list's entry queued", len(app.fillQueue))
+		t.Fatalf("fill queue = %d; want the mylist's entry queued", len(app.fillQueue))
 	}
 }
 
@@ -1195,7 +1199,7 @@ func TestNeedsThumbnail(t *testing.T) {
 	}
 	app.thumbFail["sm2"] = true
 	if app.needsThumbnail(MylistItem{WatchID: "sm2", Available: true}) {
-		t.Error("a failed picture must not retry until the list reloads")
+		t.Error("a failed picture must not retry until the mylist reloads")
 	}
 	if app.needsThumbnail(MylistItem{WatchID: "sm3"}) {
 		t.Error("an unavailable entry has no picture to fetch")

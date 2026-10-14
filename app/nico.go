@@ -432,7 +432,7 @@ func audioVariants(master string) []audioVariant {
 
 // SessionCookie returns the Cookie header the jar would send to rawURL, ""
 // as a guest: the mylist service sends the same session to the metadata
-// API, so the account's own private lists answer.
+// API, so the account's own private mylists answer.
 func (n *Nico) SessionCookie(rawURL string) string { return n.cookieHeader(rawURL) }
 
 // cookieHeader is the Cookie header value the jar would send to rawURL. The

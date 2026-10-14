@@ -81,9 +81,9 @@ type MylistPage struct {
 	Items          []MylistItem `json:"items"`
 }
 
-// Mylist looks up NicoNico mylist metadata: public lists as a guest, and
-// the signed-in account's own lists — private ones included — through the
-// session's cookies. It also keeps locally held snapshots of saved lists.
+// Mylist looks up NicoNico mylist metadata: public mylists as a guest, and
+// the signed-in account's own mylists — private ones included — through the
+// session's cookies. It also keeps locally held snapshots of saved mylists.
 // The lookups use the community-documented unofficial NVAPI endpoints.
 type Mylist struct {
 	client  *http.Client
@@ -104,7 +104,7 @@ type Mylist struct {
 	// pageInterval spaces the pages of a full snapshot fetch. Zero means
 	// none, as in tests.
 	pageInterval time.Duration
-	// savedMu serializes saved-list file operations on this instance.
+	// savedMu serializes file operations on the saved mylists.
 	// HTTP fetches never take it.
 	savedMu sync.Mutex
 }
@@ -120,8 +120,8 @@ func NewMylist() *Mylist {
 }
 
 // GetPage returns page (1-based) of the mylist identified by input, which
-// is a numeric ID or a supported mylist URL: a public list as a guest, and
-// the account's own private list once signed in.
+// is a numeric ID or a supported mylist URL: a public mylist as a guest, and
+// the account's own private mylist once signed in.
 func (m *Mylist) GetPage(input string, page int) (MylistPage, error) {
 	id, err := ParseMylistInput(input)
 	if err != nil {
@@ -150,7 +150,7 @@ type OwnMylist struct {
 
 // ListOwn returns the signed-in account's mylists, private ones included.
 // Without a session the API refuses, which the caller only logs: the home
-// simply shows no own lists.
+// simply shows no own mylists.
 func (m *Mylist) ListOwn() ([]OwnMylist, error) {
 	rawURL := fmt.Sprintf("%s/v1/users/me/mylists?sampleItemCount=%d", m.baseURL, ownSampleCount)
 	body, err := m.fetchBody(rawURL)
@@ -160,7 +160,7 @@ func (m *Mylist) ListOwn() ([]OwnMylist, error) {
 	return mapOwnMylists(body)
 }
 
-// SavedMylist is one persisted mylist snapshot — a pinned list on the home:
+// SavedMylist is one persisted mylist snapshot — a pinned mylist on the home:
 // ID, display name, and the mylist's contents as fetched when pinned or last
 // refreshed. This is the local source of truth for reading it back. Tracks,
 // credentials, and media are never persisted.
@@ -173,7 +173,7 @@ type SavedMylist struct {
 	Items          []MylistItem `json:"items,omitempty"`
 }
 
-// maxSavedBody bounds the saved-list file.
+// maxSavedBody bounds the saved mylists file.
 const maxSavedBody = 1 << 20
 
 // maxSettingsBody bounds the settings file.
@@ -252,7 +252,7 @@ func (m *Mylist) ListSaved() ([]SavedMylist, error) {
 
 // SaveMylist fetches every page of the mylist identified by input and
 // upserts a local snapshot of it under name, returning the saved snapshots.
-// Input accepts an ID or a supported URL; the account's own private lists
+// Input accepts an ID or a supported URL; the account's own private mylists
 // refresh while signed in. Fetching happens before the file
 // lock, so HTTP never blocks other file operations.
 func (m *Mylist) SaveMylist(input, name string) ([]SavedMylist, error) {
@@ -280,7 +280,7 @@ func (m *Mylist) SaveMylist(input, name string) ([]SavedMylist, error) {
 	})
 }
 
-// upsertSaved replaces or appends entry and persists the list. Callers hold
+// upsertSaved replaces or appends entry and persists the mylists. Callers hold
 // savedMu.
 func (m *Mylist) upsertSaved(entry SavedMylist) ([]SavedMylist, error) {
 	saved, err := m.readSaved()
@@ -645,19 +645,19 @@ func (m *Mylist) readSaved() ([]SavedMylist, error) {
 		return []SavedMylist{}, nil
 	}
 	if err != nil {
-		return nil, errors.New("ピン留めしたリストを読み込めませんでした")
+		return nil, errors.New("ピン留めしたマイリストを読み込めませんでした")
 	}
 	defer f.Close()
 	body, err := io.ReadAll(io.LimitReader(f, maxSavedBody+1))
 	if err != nil {
-		return nil, errors.New("ピン留めしたリストを読み込めませんでした")
+		return nil, errors.New("ピン留めしたマイリストを読み込めませんでした")
 	}
 	if len(body) > maxSavedBody {
-		return nil, errors.New("ピン留めしたリストの記録が大きすぎます")
+		return nil, errors.New("ピン留めしたマイリストの記録が大きすぎます")
 	}
 	var saved []SavedMylist
 	if err := json.Unmarshal(body, &saved); err != nil {
-		return nil, errors.New("ピン留めしたリストの記録が壊れています")
+		return nil, errors.New("ピン留めしたマイリストの記録が壊れています")
 	}
 	if saved == nil {
 		saved = []SavedMylist{}
@@ -675,10 +675,10 @@ func (m *Mylist) writeSaved(saved []SavedMylist) error {
 	}
 	body, err := json.MarshalIndent(saved, "", "  ")
 	if err != nil {
-		return errors.New("ピン留めしたリストを書き込めませんでした")
+		return errors.New("ピン留めしたマイリストを書き込めませんでした")
 	}
 	if err := os.WriteFile(path, body, 0o644); err != nil {
-		return errors.New("ピン留めしたリストを書き込めませんでした")
+		return errors.New("ピン留めしたマイリストを書き込めませんでした")
 	}
 	return nil
 }
@@ -726,7 +726,7 @@ func (m *Mylist) fetchBody(rawURL string) ([]byte, error) {
 // mylistRequest sends one request, waiting out one Retry-After when the
 // API asks to slow down. A second refusal returns, so a busy API does not
 // hold the caller any longer. The session's cookies ride along: the
-// account's own lists are answered only with them.
+// account's own mylists are answered only with them.
 func (m *Mylist) mylistRequest(rawURL string) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequest(http.MethodGet, rawURL, nil)
@@ -820,7 +820,7 @@ func (e mylistStatusError) Error() string {
 
 func mylistHTTPError(status int) error { return mylistStatusError{status: status} }
 
-// isMylistDenied reports whether err is the API refusing this list — not
+// isMylistDenied reports whether err is the API refusing this mylist — not
 // found or not allowed — the cases the account's own endpoint may still
 // answer for.
 func isMylistDenied(err error) bool {

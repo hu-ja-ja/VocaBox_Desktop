@@ -63,7 +63,7 @@ func TestPlayQueueBoundariesShuffleAppendRepeatReset(t *testing.T) {
 		t.Fatalf("ordered items = %v", got)
 	}
 
-	// Shuffle lays the whole list out again: the track playing first, every
+	// Shuffle lays the whole queue out again: the track playing first, every
 	// other entry once in a fresh random order.
 	q.setShuffle(true)
 	if !q.isShuffle() {
@@ -132,7 +132,7 @@ func TestPlayQueueBoundariesShuffleAppendRepeatReset(t *testing.T) {
 		t.Fatal("the queue's end still claims a next")
 	}
 
-	// Repeat wraps the whole list both ways.
+	// Repeat wraps the whole queue both ways.
 	q.repeat = true
 	if next, ok := q.moveNext(); !ok || next.WatchID != seen[0] {
 		t.Fatalf("repeat did not wrap to the head: %#v, %v", next, ok)
@@ -254,7 +254,7 @@ func TestPlayQueueRemoveKeepsThePlayingTrack(t *testing.T) {
 }
 
 // TestPlayQueueMoveReordersRows checks the drag's reordering: to counts rows
-// before the drop, in the list as it stands.
+// before the drop, in the queue as it stands.
 func TestPlayQueueMoveReordersRows(t *testing.T) {
 	q := &playQueue{}
 	abcd := queueTracks("a", "b", "c", "d")
@@ -299,7 +299,7 @@ func indexOfStrings(xs []string, v string) int {
 }
 
 // TestPlayQueueZeroValueShufflesSafely: the engine turns the saved shuffle
-// preference on before any list arrives, on a queue nothing selected.
+// preference on before any mylist arrives, on a queue nothing selected.
 func TestPlayQueueZeroValueShufflesSafely(t *testing.T) {
 	q := &playQueue{}
 	q.setShuffle(true)

@@ -5,9 +5,9 @@ import (
 	"sort"
 )
 
-// playQueue is one list's playing queue, the queue the queue screen shows:
+// playQueue is one mylist's playing queue, the queue the queue screen shows:
 // the entries in the order they play. Callers keep unplayable entries out;
-// navigation here is pure. Repeat wraps the whole list; shuffle permutes
+// navigation here is pure. Repeat wraps the whole queue; shuffle permutes
 // every entry with the track playing first, so the order it reports is the
 // order it plays. It is the Go home of the former src/queue.ts.
 type playQueue struct {
@@ -83,7 +83,7 @@ func (q *playQueue) remove(watchID string) {
 }
 
 // move places the entries of the rows from at the row before to, as a
-// hand-ordered playlist: the drag knows the playing order only, so rows are
+// hand-ordered queue: the drag knows the playing order only, so rows are
 // its positions.
 func (q *playQueue) move(from []int, to int) {
 	seen := map[int]bool{}
@@ -138,7 +138,7 @@ func (q *playQueue) reset(items []MylistItem) {
 	q.repeat = false
 }
 
-// append adds the entries of a list's next page: in place without shuffle,
+// append adds the entries of a mylist's next page: in place without shuffle,
 // and folded into the remaining shuffle with one.
 func (q *playQueue) append(items []MylistItem) {
 	base := len(q.items)
@@ -203,7 +203,7 @@ func (q *playQueue) selectTrack(item MylistItem) (MylistItem, bool) {
 }
 
 // moveNext moves to the entry after the one playing, or reports none: the
-// stop at the end is what tells the player a list ran out.
+// stop at the end is what tells the player a mylist ran out.
 func (q *playQueue) moveNext() (MylistItem, bool) {
 	if len(q.order) == 0 {
 		return MylistItem{}, false
@@ -237,7 +237,7 @@ func (q *playQueue) movePrev() (MylistItem, bool) {
 }
 
 // hasLoadedNext reports whether the next track is already in the queue,
-// rather than one a list's next page would have to bring.
+// rather than one a mylist's next page would have to bring.
 func (q *playQueue) hasLoadedNext() bool {
 	if len(q.order) == 0 || q.pos < 0 {
 		return false
@@ -267,8 +267,8 @@ func (q *playQueue) setShuffle(on bool) {
 	}
 }
 
-// shuffleRange lays the whole playlist out again: the track playing first
-// (until one is selected there is none, so the whole list is shuffled), the
+// shuffleRange lays the whole queue out again: the track playing first
+// (until one is selected there is none, so the whole queue is shuffled), the
 // rest in a fresh random order, every entry exactly once.
 func (q *playQueue) shuffleRange() {
 	head := q.playingIndex()
