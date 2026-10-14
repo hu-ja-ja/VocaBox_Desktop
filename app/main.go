@@ -13,6 +13,7 @@ func main() {
 	// settings.json, rather than mygo's default store.
 	mygo.App.SetWindowStateStore(windowStateStore{mylist: mylist})
 	app := newNativeApp(mylist)
+	app.playback = newPlayback(app)
 	if saved, err := mylist.ListSaved(); err != nil {
 		app.setError(err)
 	} else {
@@ -21,13 +22,17 @@ func main() {
 	if settings, err := mylist.LoadSettings(); err != nil {
 		log.Printf("settings: %v", err)
 	} else {
+		// The engine owns the queue's modes: hand the saved preferences over
+		// before the first list arrives.
+		app.playback.queue.setShuffle(settings.Shuffle)
+		app.playback.queue.repeat = settings.Repeat
 		app.player.Volume = settings.Volume
 		app.player.Shuffle = settings.Shuffle
 		app.player.Repeat = settings.Repeat
 	}
-	mygo.Bind(mylist, &PlayerBridge{app: app})
 
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		app.playback.shutdown()
 		if err := mylist.SaveSettings(Settings{
 			Volume:  app.player.Volume,
 			Shuffle: app.player.Shuffle,
@@ -48,15 +53,6 @@ func main() {
 			BackgroundColor: "#121217",
 			Content:         ui.View(app.view),
 		})
-		player, err := app.window.NewWebView(mygo.WebViewOptions{URL: "/audio.html", BackgroundColor: "#121217"})
-		if err != nil {
-			log.Printf("player webview: %v", err)
-			app.playerError = "プレイヤーを初期化できませんでした。"
-			app.window.Invalidate()
-			return
-		}
-		app.playerView = player
-		app.window.Invalidate()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

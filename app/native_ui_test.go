@@ -48,7 +48,6 @@ func TestNativeUITogglesSidebar(t *testing.T) {
 
 func TestNativeUIOpensSavedSnapshot(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.playerLoaded = true
 	app.saved = []SavedMylist{{
 		ID:   "123",
 		Name: "作業用プレイリスト",
@@ -75,12 +74,12 @@ func TestNativeUIOpensSavedSnapshot(t *testing.T) {
 		t.Fatalf("track is not shown: %q", tester.Texts())
 	}
 
-	app.player = PlayerReport{WatchID: "sm9", Ready: true, PositionMS: 0, DurationMS: 90_000, Volume: 1}
+	app.player = playerState{WatchID: "sm9", Ready: true, PositionMS: 0, DurationMS: 90_000, Volume: 1}
 	if err := tester.Click("再生"); err != nil {
 		t.Fatal(err)
 	}
-	if !hasCommand(app.pending, "play") {
-		t.Fatalf("icon play button did not send a command: %#v", app.pending)
+	if !hasCommand(app.sent, "play") {
+		t.Fatalf("icon play button did not send a command: %#v", app.sent)
 	}
 }
 
@@ -117,8 +116,8 @@ func TestNativeUIHomeImportsFromCard(t *testing.T) {
 	if app.importing {
 		t.Fatal("cancel did not close the dialog")
 	}
-	if app.page != nil || len(app.pending) != 0 {
-		t.Fatalf("cancel must not open anything: pending=%d page=%#v", len(app.pending), app.page)
+	if app.page != nil || len(app.sent) != 0 {
+		t.Fatalf("cancel must not open anything: sent=%d page=%#v", len(app.sent), app.page)
 	}
 }
 
@@ -145,7 +144,6 @@ func lastCommand(commands []PlayerCommand, action string) (PlayerCommand, bool) 
 // neither stops the track playing nor hands the queue to the shown list.
 func TestNativeUIKeepsPlayingTrackAcrossLists(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.playerLoaded = true
 	app.saved = []SavedMylist{
 		{ID: "111", Name: "リストA", Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}},
 		{ID: "222", Name: "リストB", Items: []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}}},
@@ -154,10 +152,9 @@ func TestNativeUIKeepsPlayingTrackAcrossLists(t *testing.T) {
 	if err := tester.Click("リストA"); err != nil {
 		t.Fatal(err)
 	}
-	// The player reports a track of A playing, as it does while the list
-	// plays on in its webview.
-	app.player = PlayerReport{WatchID: "sm1", ListID: "111", Title: "Aの曲", Ready: true, Playing: true, Volume: 1}
-	app.pending = nil
+	// The player reports a track of A playing while list B is shown.
+	app.player = playerState{WatchID: "sm1", ListID: "111", Title: "Aの曲", Ready: true, Playing: true, Volume: 1}
+	app.sent = nil
 
 	if err := tester.Click("リストB"); err != nil {
 		t.Fatal(err)
@@ -165,15 +162,14 @@ func TestNativeUIKeepsPlayingTrackAcrossLists(t *testing.T) {
 	if app.player.WatchID != "sm1" || !app.player.Playing {
 		t.Fatalf("switching lists stopped the playing track: %#v", app.player)
 	}
-	set, ok := lastCommand(app.pending, "setItems")
+	set, ok := lastCommand(app.sent, "setItems")
 	if !ok || set.ID != "222" {
-		t.Fatalf("the opened list was not sent: %#v", app.pending)
+		t.Fatalf("the opened list was not sent: %#v", app.sent)
 	}
 	if !tester.HasText("Aの曲") {
 		t.Fatalf("the player bar lost the playing track: %q", tester.Texts())
 	}
 }
-
 // TestNativeUICanLoadNextOnlyForPlayingList checks that only the queue built
 // from the shown list takes its next page: a list merely shown must not feed
 // the queue of the list playing.
@@ -181,13 +177,13 @@ func TestNativeUICanLoadNextOnlyForPlayingList(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.page = &MylistPage{ID: "222"}
 	app.hasMore = true
-	app.player = PlayerReport{WatchID: "sm1", ListID: "111"}
+	app.player = playerState{WatchID: "sm1", ListID: "111"}
 
 	if app.canLoadNext() {
 		t.Fatal("loading the shown list must not extend another list's queue")
 	}
-	app.advance(true)
-	if app.pendingAdvance || app.loading || hasCommand(app.pending, "next") {
+	app.advance()
+	if app.pendingAdvance || app.loading || hasCommand(app.sent, "next") {
 		t.Fatalf("advancing left the playing queue: pending=%v loading=%v", app.pendingAdvance, app.loading)
 	}
 
@@ -206,14 +202,13 @@ func TestNativeUICanLoadNextOnlyForPlayingList(t *testing.T) {
 // click selecting the track and home leaving the screen.
 func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.playerLoaded = true
 	items := []MylistItem{
 		{WatchID: "sm1", Title: "一曲目", Available: true},
 		{WatchID: "sm2", Title: "二曲目", Available: true},
 		{WatchID: "sm3", Title: "三曲目", Available: true},
 	}
 	app.saved = []SavedMylist{{ID: "123", Name: "作業用キュー", Items: items}}
-	app.player = PlayerReport{
+	app.player = playerState{
 		WatchID: "sm2", ListID: "123", Name: "作業用キュー", Title: "二曲目",
 		Ready: true, Playing: true, Volume: 1,
 		Order: []string{"sm2", "sm3", "sm1"}, Items: items, QueueIndex: 0, QueuePos: 0,
@@ -236,15 +231,15 @@ func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 		t.Fatalf("the playlist is missing tracks: %q", tester.Texts())
 	}
 	tester.ClickAt(two.X+10, two.Y+two.H/2)
-	if !hasCommand(app.pending, "select") {
+	if !hasCommand(app.sent, "select") {
 		// The label of a virtual list settles a frame late; aim again.
 		tester.Frame()
 		two, _ = tester.Find("二曲目")
 		tester.ClickAt(two.X+10, two.Y+two.H/2)
 	}
-	selected, ok := lastCommand(app.pending, "select")
-	if !ok || selected.WatchID != "sm2" || !selected.Autoplay {
-		t.Fatalf("a playlist row did not play its track: %#v", app.pending)
+	selected, ok := lastCommand(app.sent, "select")
+	if !ok || selected.WatchID != "sm2" {
+		t.Fatalf("a playlist row did not play its track: %#v", app.sent)
 	}
 
 	// The queue keeps the track playing on top as it moves on.
@@ -266,8 +261,7 @@ func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 func TestNativeUIQueueDragReorders(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.queueOpen = true
-	app.playerLoaded = true
-	app.player = PlayerReport{
+	app.player = playerState{
 		Name:  "作業用ドラッグ",
 		Order: []string{"sm1", "sm2", "sm3"},
 		Items: []MylistItem{
@@ -291,9 +285,9 @@ func TestNativeUIQueueDragReorders(t *testing.T) {
 		tester.Move(first.X+20, first.Y+first.H/2+(last.Y+last.H-first.Y)*f)
 	}
 	tester.Release(first.X+20, last.Y+last.H)
-	moved, ok := lastCommand(app.pending, "move")
+	moved, ok := lastCommand(app.sent, "move")
 	if !ok || len(moved.Rows) != 1 || moved.Rows[0] != 0 {
-		t.Fatalf("dragging a row did not move it: %#v", app.pending)
+		t.Fatalf("dragging a row did not move it: %#v", app.sent)
 	}
 }
 
@@ -310,7 +304,7 @@ func TestNativeUIQueueCanScrollAfterFollowingThePlayingTrack(t *testing.T) {
 		items[i] = MylistItem{WatchID: id, Title: id, Available: true}
 		order[i] = id
 	}
-	app.player = PlayerReport{
+	app.player = playerState{
 		Name: "作業用スクロール", WatchID: "sm200", Order: order, Items: items,
 		QueueIndex: 199, QueuePos: 199,
 	}
@@ -329,7 +323,7 @@ func TestNativeUIQueueCanScrollAfterFollowingThePlayingTrack(t *testing.T) {
 func TestNativeUIQueueMenuTogglesOnSecondClick(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.queueOpen = true
-	app.player = PlayerReport{
+	app.player = playerState{
 		Name:  "作業用メニュー",
 		Order: []string{"sm1", "sm2"},
 		Items: []MylistItem{
@@ -385,8 +379,7 @@ func TestNativeUIPlayerBarBlankAreaTogglesQueue(t *testing.T) {
 func TestNativeUIQueueCommands(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.queueOpen = true
-	app.playerLoaded = true
-	app.player = PlayerReport{
+	app.player = playerState{
 		Name:  "作業用コマンド",
 		Order: []string{"sm1", "sm2"},
 		Items: []MylistItem{
@@ -396,28 +389,28 @@ func TestNativeUIQueueCommands(t *testing.T) {
 	}
 
 	app.removeFromQueue(MylistItem{WatchID: "sm2"})
-	removed, ok := lastCommand(app.pending, "remove")
+	removed, ok := lastCommand(app.sent, "remove")
 	if !ok || removed.WatchID != "sm2" {
-		t.Fatalf("removing did not reach the player: %#v", app.pending)
+		t.Fatalf("removing did not reach the player: %#v", app.sent)
 	}
 
 	app.moveQueueRows([]int{0}, 2)
-	moved, ok := lastCommand(app.pending, "move")
+	moved, ok := lastCommand(app.sent, "move")
 	if !ok || len(moved.Rows) != 1 || moved.Rows[0] != 0 || moved.To != 2 {
-		t.Fatalf("reordering did not reach the player: %#v", app.pending)
+		t.Fatalf("reordering did not reach the player: %#v", app.sent)
 	}
 }
 
 // TestQueueItemsComeFromTheReport checks the queue screen follows the
-// player's report alone: the list the app happens to show neither reorders
-// the queue nor fills a track the report does not carry.
+// player's own state alone: the list the app happens to show neither
+// reorders the queue nor fills a track the player does not carry.
 func TestQueueItemsComeFromTheReport(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.page = &MylistPage{ID: "9", Items: []MylistItem{
 		{WatchID: "sm2", Title: "表示中リストの曲", Available: true},
 		{WatchID: "sm1", Title: "表示中リストの曲", Available: true},
 	}}
-	app.player = PlayerReport{
+	app.player = playerState{
 		Order: []string{"sm2", "sm9", "sm1"},
 		Items: []MylistItem{{WatchID: "sm9", Title: "再生中リストの曲", Available: true}},
 	}
@@ -442,7 +435,6 @@ func TestQueueItemsComeFromTheReport(t *testing.T) {
 // the track playing sits.
 func TestNativeUIListDoesNotFollowPlayback(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.playerLoaded = true
 	items := make([]MylistItem, 100)
 	for i := range items {
 		items[i] = MylistItem{WatchID: fmt.Sprintf("sm%d", i+1), Title: fmt.Sprintf("曲%d", i+1), Available: true}
@@ -453,7 +445,7 @@ func TestNativeUIListDoesNotFollowPlayback(t *testing.T) {
 	if err := tester.Click("作業用リスト"); err != nil {
 		t.Fatal(err)
 	}
-	app.player = PlayerReport{WatchID: "sm80", Ready: true, Volume: 1}
+	app.player = playerState{WatchID: "sm80", Ready: true, Volume: 1}
 	tester.Frame()
 	if first, _ := app.trackList.Visible(); first != 0 {
 		t.Fatalf("the list followed the track playing: first=%d", first)
@@ -465,7 +457,6 @@ func TestNativeUIListDoesNotFollowPlayback(t *testing.T) {
 // list already showing, whose click changes no route of its own.
 func TestNativeUISidebarListLeavesQueueScreen(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.playerLoaded = true
 	app.saved = []SavedMylist{
 		{ID: "111", Name: "リストA", Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}},
 		{ID: "222", Name: "リストB", Items: []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}}},
@@ -509,7 +500,7 @@ func TestNativeUIQueueFollowsTheTrackPlaying(t *testing.T) {
 		items[i] = MylistItem{WatchID: id, Title: id, Available: true}
 		order[i] = id
 	}
-	app.player = PlayerReport{
+	app.player = playerState{
 		Name: "作業用追従", WatchID: "sm1", Order: order, Items: items,
 		QueueIndex: 0, QueuePos: 0,
 	}
@@ -542,7 +533,6 @@ func TestNativeUIQueueFollowsTheTrackPlaying(t *testing.T) {
 
 func TestNativeUITrackClickPlaysIt(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.playerLoaded = true
 	app.saved = []SavedMylist{{
 		ID:   "123",
 		Name: "作業用クリック",
@@ -560,9 +550,9 @@ func TestNativeUITrackClickPlaysIt(t *testing.T) {
 	if err := tester.Click("サンプル曲"); err != nil {
 		t.Fatal(err)
 	}
-	selected, ok := lastCommand(app.pending, "select")
-	if !ok || !selected.Autoplay || selected.WatchID != "sm9" {
-		t.Fatalf("clicking a track did not play it: %#v", app.pending)
+	selected, ok := lastCommand(app.sent, "select")
+	if !ok || selected.WatchID != "sm9" {
+		t.Fatalf("clicking a track did not play it: %#v", app.sent)
 	}
 	if !app.queueOpen {
 		t.Fatal("playing from the list did not open the queue screen")
@@ -596,7 +586,7 @@ func TestNativeUIPlayerBarCentersTransport(t *testing.T) {
 	centered := play.X + play.W/2
 
 	// A long track playing leaves the transport where it is.
-	app.player = PlayerReport{
+	app.player = playerState{
 		WatchID: "sm9", Title: "とても長い曲名がここに来ても再生ボタンは動かないでほしい",
 		Uploader: "投稿者", Ready: true, Volume: 1,
 	}
@@ -612,7 +602,7 @@ func TestNativeUIPlayerBarCentersTransport(t *testing.T) {
 
 func TestNativeUIPlayerBarFitsMinimumWidth(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.player = PlayerReport{
+	app.player = playerState{
 		WatchID: "sm9", Title: "ウィンドウ幅が狭いときも表示が崩れない長い曲名",
 		Uploader: "投稿者", Ready: true, Volume: 1,
 	}
@@ -722,7 +712,6 @@ func TestThumbSlotHoldsTitlesInLine(t *testing.T) {
 
 func TestNativeUIThumbnailPlaceholderNeedsWindow(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.playerLoaded = true
 	app.saved = []SavedMylist{{
 		ID:   "123",
 		Name: "作業用サムネ",
@@ -786,13 +775,12 @@ func TestNeedsThumbnail(t *testing.T) {
 // one seek when the pointer lets go, and leaves playback alone meanwhile.
 func TestNativeUISeekBarScrubsWithoutFightingReports(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.playerLoaded = true
-	app.player = PlayerReport{
+	app.player = playerState{
 		WatchID: "sm1", Title: "Aの曲", Ready: true, Playing: true,
 		PositionMS: 30_000, DurationMS: 120_000, Volume: 1,
 	}
 	tester := ui.NewTester(app.view, 1120, 760)
-	app.pending = nil
+	app.sent = nil
 
 	bar, ok := tester.Find("再生位置")
 	if !ok {
@@ -813,16 +801,16 @@ func TestNativeUISeekBarScrubsWithoutFightingReports(t *testing.T) {
 	if app.seekValue != dragged {
 		t.Fatalf("a report tugged the thumb from %v to %v", dragged, app.seekValue)
 	}
-	if len(app.pending) != 0 {
-		t.Fatalf("scrubbing sent commands before the pointer let go: %#v", app.pending)
+	if len(app.sent) != 0 {
+		t.Fatalf("scrubbing sent commands before the pointer let go: %#v", app.sent)
 	}
 
 	// Letting go, even away from the bar's thin strip, seeks once, to the
 	// position the user chose.
 	tester.Release(x, bar.Y-30)
-	seek, ok := lastCommand(app.pending, "seek")
+	seek, ok := lastCommand(app.sent, "seek")
 	if !ok || seek.PositionMS != dragged {
-		t.Fatalf("releasing did not seek to the dragged position: %#v", app.pending)
+		t.Fatalf("releasing did not seek to the dragged position: %#v", app.sent)
 	}
 	if !app.seekSettling {
 		t.Fatal("the bar did not wait for the player to report the seek")
@@ -830,7 +818,7 @@ func TestNativeUISeekBarScrubsWithoutFightingReports(t *testing.T) {
 
 	// Until the player reports the seek landing, the thumb holds the
 	// position rather than snapping back to a stale report.
-	app.pending = nil
+	app.sent = nil
 	tester.Frame()
 	if app.seekValue != dragged {
 		t.Fatalf("the thumb snapped back to %v before the seek landed", app.seekValue)
@@ -848,13 +836,12 @@ func TestNativeUISeekBarScrubsWithoutFightingReports(t *testing.T) {
 // of the track playing tug the thumb from under the pointer.
 func TestNativeUIVolumeBarStepsWhileDragging(t *testing.T) {
 	app := newNativeApp(NewMylist())
-	app.playerLoaded = true
-	app.player = PlayerReport{
+	app.player = playerState{
 		WatchID: "sm1", Title: "Aの曲", Ready: true, Playing: true,
 		PositionMS: 30_000, DurationMS: 120_000, Volume: 0.5,
 	}
 	tester := ui.NewTester(app.view, 1120, 760)
-	app.pending = nil
+	app.sent = nil
 
 	bar, ok := tester.Find("音量")
 	if !ok {
@@ -866,44 +853,44 @@ func TestNativeUIVolumeBarStepsWhileDragging(t *testing.T) {
 	if !app.volumeHeld {
 		t.Fatal("pressing the bar did not take the hold")
 	}
-	if len(app.pending) != 0 {
-		t.Fatalf("pressing sent a command: %#v", app.pending)
+	if len(app.sent) != 0 {
+		t.Fatalf("pressing sent a command: %#v", app.sent)
 	}
 
 	// A move inside the step keeps the player's level where it is.
 	tester.Move(x+2, y)
-	if len(app.pending) != 0 {
-		t.Fatalf("a move inside the step sent a command: %#v", app.pending)
+	if len(app.sent) != 0 {
+		t.Fatalf("a move inside the step sent a command: %#v", app.sent)
 	}
 
 	// A step-sized move tells the player once.
 	tester.Move(x+12, y)
 	stepped := app.volumeValue
-	volume, ok := lastCommand(app.pending, "volume")
-	if !ok || volume.Volume != stepped || len(app.pending) != 1 {
-		t.Fatalf("a step-sized move did not send the level once: %#v value=%v", app.pending, stepped)
+	volume, ok := lastCommand(app.sent, "volume")
+	if !ok || volume.Volume != stepped || len(app.sent) != 1 {
+		t.Fatalf("a step-sized move did not send the level once: %#v value=%v", app.sent, stepped)
 	}
 
 	// A fast drag outruns the interval: the next step waits its turn rather
 	// than sending another command in the same instant.
 	tester.Move(x+30, y)
-	if len(app.pending) != 1 {
-		t.Fatalf("a drag inside the interval sent again: %#v", app.pending)
+	if len(app.sent) != 1 {
+		t.Fatalf("a drag inside the interval sent again: %#v", app.sent)
 	}
 	time.Sleep(volumeSendInterval + 20*time.Millisecond)
 	before := app.volumeValue
 	tester.Move(x+45, y)
-	volume, ok = lastCommand(app.pending, "volume")
-	if !ok || len(app.pending) != 2 || volume.Volume != before {
-		t.Fatalf("a drag past the interval did not send: %#v value=%v", app.pending, before)
+	volume, ok = lastCommand(app.sent, "volume")
+	if !ok || len(app.sent) != 2 || volume.Volume != before {
+		t.Fatalf("a drag past the interval did not send: %#v value=%v", app.sent, before)
 	}
 
 	// The track reports as it plays on: the thumb must not fall back.
 	held := app.volumeValue
 	app.player.Volume = 0.9
 	tester.Frame()
-	if app.volumeValue != held || len(app.pending) != 2 {
-		t.Fatalf("a report tugged the thumb from %v to %v: %#v", held, app.volumeValue, app.pending)
+	if app.volumeValue != held || len(app.sent) != 2 {
+		t.Fatalf("a report tugged the thumb from %v to %v: %#v", held, app.volumeValue, app.sent)
 	}
 
 	// Letting go sends the level the pointer chose, and the bar settles: no
@@ -913,14 +900,14 @@ func TestNativeUIVolumeBarStepsWhileDragging(t *testing.T) {
 	tester.Release(x+14, y)
 	tester.Frame()
 	tester.Frame()
-	volume, ok = lastCommand(app.pending, "volume")
+	volume, ok = lastCommand(app.sent, "volume")
 	if !ok || volume.Volume != chosen {
-		t.Fatalf("releasing did not send the chosen level: %#v want %v", app.pending, chosen)
+		t.Fatalf("releasing did not send the chosen level: %#v want %v", app.sent, chosen)
 	}
-	after := len(app.pending)
+	after := len(app.sent)
 	tester.Frame()
 	tester.Frame()
-	if len(app.pending) != after {
-		t.Fatalf("the bar kept sending after the release: %#v", app.pending)
+	if len(app.sent) != after {
+		t.Fatalf("the bar kept sending after the release: %#v", app.sent)
 	}
 }

@@ -10,10 +10,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// PlayerCommandEvent sends controls and queue changes to the audio page,
-// the out-of-view page carrying the official embed that plays the audio.
-var PlayerCommandEvent = mygo.NewEvent[PlayerCommand]("playerCommand")
-
+// PlayerCommand carries one player control or queue change from the UI to
+// the playback engine.
 type PlayerCommand struct {
 	Action string `json:"action"`
 	// ID names the list the items belong to: the player keeps the queue of
@@ -24,7 +22,6 @@ type PlayerCommand struct {
 	Name       string       `json:"name,omitempty"`
 	Items      []MylistItem `json:"items,omitempty"`
 	WatchID    string       `json:"watchId,omitempty"`
-	Autoplay   bool         `json:"autoplay,omitempty"`
 	PositionMS float64      `json:"positionMs,omitempty"`
 	Volume     float64      `json:"volume"`
 	Enabled    bool         `json:"enabled,omitempty"`
@@ -34,51 +31,53 @@ type PlayerCommand struct {
 	To   int   `json:"to,omitempty"`
 }
 
-type PlayerReport struct {
-	Type     string `json:"type"`
-	Session  string `json:"session"`
-	Sequence uint64 `json:"sequence"`
-	WatchID  string `json:"watchId"`
+// playerState is what the playback engine reports about the player, the
+// fields the UI reads on every frame: the queue as it plays, the track
+// playing, and its position.
+type playerState struct {
+	WatchID string
 	// ListID names the list the playback queue was built from; it can differ
 	// from the list shown while its track keeps playing.
-	ListID string `json:"listId"`
+	ListID string
 	// Name is the display name of the list playing; the queue screen labels
 	// the queue with it.
-	Name string `json:"name"`
+	Name string
 	// Title, Uploader and ThumbURL describe the playing track, so the bar
 	// shows it even where the loaded list does not hold it.
-	Title      string  `json:"title"`
-	Uploader   string  `json:"uploader"`
-	ThumbURL   string  `json:"thumbnailUrl"`
-	Ready      bool    `json:"ready"`
-	Playing    bool    `json:"playing"`
-	CanPrev    bool    `json:"canPrev"`
-	CanNext    bool    `json:"canNext"`
-	Shuffle    bool    `json:"shuffle"`
-	Repeat     bool    `json:"repeat"`
-	PositionMS float64 `json:"positionMs"`
-	DurationMS float64 `json:"durationMs"`
-	Volume     float64 `json:"volume"`
-	Error      string  `json:"error"`
+	Title    string
+	Uploader string
+	ThumbURL string
+	Ready    bool
+	Playing  bool
+	CanNext  bool
+	Shuffle  bool
+	Repeat   bool
+	// PositionMS and DurationMS are the track's, and Volume the 0..1 level.
+	PositionMS float64
+	DurationMS float64
+	Volume     float64
 	// Order is the queue as it plays: the watch ID of each track in playlist
 	// order, the track playing first under shuffle. Items carries the tracks
 	// themselves, so the queue screen shows the queue without the loaded
 	// list.
-	Order []string     `json:"order"`
-	Items []MylistItem `json:"items"`
+	Order []string
+	Items []MylistItem
 	// QueueIndex is the row of the track playing in Order, and QueuePos is
 	// where that track sits in the queue, both -1 for none.
-	QueueIndex int `json:"queueIndex"`
-	QueuePos   int `json:"queuePos"`
+	QueueIndex int
+	QueuePos   int
 }
 
 type nativeApp struct {
-	mylist       *Mylist
-	window       *mygo.Window
-	playerView   *mygo.WebView
-	playerLoaded bool
-	pending      []PlayerCommand
-	theme        *ui.Theme
+	mylist *Mylist
+	window *mygo.Window
+	// playback is the player: the queue and the AmsHelper child process.
+	// Tests leave it nil and inspect the commands the UI sent instead.
+	playback *playback
+	// sent records the commands the UI sent, for tests; the app itself
+	// hands them to playback.
+	sent []PlayerCommand
+	theme *ui.Theme
 	// router keeps the pages of the window, the home and the lists, so the
 	// side buttons of a mouse and Alt+Left/Right go back and forward
 	// between them.
@@ -118,9 +117,7 @@ type nativeApp struct {
 	trackList   ui.ListState
 	// queueList scrolls the playlist view of the playing screen.
 	queueList      ui.ListState
-	player         PlayerReport
-	playerSession  string
-	playerSequence uint64
+	player         playerState
 	pendingAdvance bool
 	// seekValue is the position the bar shows: the player's while it plays,
 	// and the user's while they scrub the bar, so the reports of the track
@@ -173,7 +170,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 		router:       router,
 		theme:        t,
 		sidebarOpen:  true,
-		player:       PlayerReport{Volume: 1},
+		player:       playerState{Volume: 1},
 		thumbs:       map[string]*ui.Bitmap{},
 		thumbBusy:    map[string]bool{},
 		thumbFail:    map[string]bool{},
@@ -203,12 +200,6 @@ func (app *nativeApp) view(c *ui.Context) {
 			})
 		})
 		app.playerBar(c)
-		if app.playerView != nil {
-			// ponytail: 1×1 transparent web view keeps the official video out of the
-			// audio UI; confirm MyGo WebView2 continues playback at this size before
-			// depending on it.
-			ui.WebView(c, app.playerView).Absolute().Left(0).Top(0).Size(1, 1).Opacity(0).PassThrough()
-		}
 	})
 	ui.Modal(c, &app.importing, func() { app.importDialog(c) })
 }
@@ -307,8 +298,8 @@ func listPath(id string) string { return "/list/" + id }
 const playlistCardWidth = 200
 
 // queueView is the screen the player bar opens: the queue as it plays, with
-// the track playing kept in sight. The embed keeps playing out of view,
-// with no video shown and no player of its own.
+// the track playing kept in sight. The player itself has no picture: the
+// AmsHelper plays audio on its own.
 func (app *nativeApp) queueView(c *ui.Context) {
 	ui.Row(c).Grow(1).FillHeight().AlignItems(ui.Stretch).Children(func() {
 		app.queuePanel(c)
@@ -1048,7 +1039,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				app.queueFollowTrack = ""
 			}
 			// The player restarts the track first while it is past its
-			// opening, so the button carries no CanPrev here.
+			// opening, so the button needs no can-previous state.
 			previous := ui.Button(c, "").Label("前へ").Tooltip("前へ").Children(func() {
 				ui.Icon(c, iconSkipBack).FontSize(18)
 			}).Disabled(app.player.WatchID == "")
@@ -1075,7 +1066,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				ui.Icon(c, iconSkipForward).FontSize(18)
 			}).Disabled(app.player.WatchID == "" || (!app.player.CanNext && !app.canLoadNext() && !app.player.Repeat))
 			if next.Clicked() {
-				app.advance(true)
+				app.advance()
 			}
 			repeat := ui.Toggle(c, &app.player.Repeat, "").Label("ループ").Tooltip("ループ").Children(func() {
 				ui.Icon(c, iconRepeat).FontSize(18)
@@ -1304,16 +1295,18 @@ func (app *nativeApp) canLoadNext() bool {
 	return app.hasMore && app.page != nil && app.player.ListID == app.page.ID
 }
 
-func (app *nativeApp) advance(autoplay bool) {
+// advance moves to the next track, whether the button asked for it or the
+// track playing ran out.
+func (app *nativeApp) advance() {
 	if app.player.CanNext {
-		app.sendPlayer(PlayerCommand{Action: "next", Autoplay: autoplay})
+		app.sendPlayer(PlayerCommand{Action: "next"})
 		return
 	}
 	if app.canLoadNext() {
-		app.pendingAdvance = autoplay
+		app.pendingAdvance = true
 		app.loadMore()
 	} else if app.player.Repeat && app.player.WatchID != "" {
-		app.sendPlayer(PlayerCommand{Action: "next", Autoplay: autoplay})
+		app.sendPlayer(PlayerCommand{Action: "next"})
 	}
 }
 
@@ -1324,7 +1317,7 @@ func (app *nativeApp) selectTrack(item MylistItem) {
 	}
 	app.pendingAdvance = false
 	app.playerError = ""
-	app.sendPlayer(PlayerCommand{Action: "select", WatchID: item.WatchID, Autoplay: true})
+	app.sendPlayer(PlayerCommand{Action: "select", WatchID: item.WatchID})
 }
 
 func (app *nativeApp) saveCurrent() {
@@ -1386,14 +1379,14 @@ func (app *nativeApp) removeSaved(entry SavedMylist) {
 	app.setStatus("保存した参照を削除しました。")
 }
 
+// sendPlayer hands one command to the playback engine; in tests, without an
+// engine, the command is only recorded, which is what the UI tests assert on.
 func (app *nativeApp) sendPlayer(command PlayerCommand) {
-	if !app.playerLoaded || app.playerView == nil {
-		app.pending = append(app.pending, command)
+	if app.playback != nil {
+		app.playback.handle(command)
 		return
 	}
-	if err := PlayerCommandEvent.EmitPage(app.playerView.Page(), command); err != nil {
-		app.playerError = "プレイヤーに操作を送れませんでした。"
-	}
+	app.sent = append(app.sent, command)
 }
 
 func (app *nativeApp) setStatus(status string) {
@@ -1404,94 +1397,6 @@ func (app *nativeApp) setStatus(status string) {
 func (app *nativeApp) setError(err error) {
 	app.status = err.Error()
 	app.statusError = true
-}
-
-func (app *nativeApp) flushPlayerCommands() {
-	for _, command := range app.pending {
-		if err := PlayerCommandEvent.EmitPage(app.playerView.Page(), command); err != nil {
-			app.playerError = "プレイヤーに操作を送れませんでした。"
-			break
-		}
-	}
-	app.pending = nil
-}
-
-// PlayerBridge reports events from the isolated WebView running the official
-// embed player. All view state changes return to the window's UI thread.
-type PlayerBridge struct {
-	app *nativeApp
-}
-
-func (b *PlayerBridge) Report(report PlayerReport) {
-	app := b.app
-	if app == nil || app.window == nil {
-		return
-	}
-	app.window.Update(func() {
-		if report.Type == "ready" {
-			wasLoaded := app.playerLoaded
-			currentID := app.player.WatchID
-			wasPlaying := app.player.Playing
-			shuffle, repeat, volume := app.player.Shuffle, app.player.Repeat, app.player.Volume
-			app.playerLoaded = true
-			app.playerSession = report.Session
-			app.playerSequence = report.Sequence
-			if wasLoaded {
-				app.pending = nil
-				app.player = PlayerReport{Shuffle: shuffle, Repeat: repeat, Volume: volume}
-				items := []MylistItem(nil)
-				id := ""
-				name := ""
-				if app.page != nil {
-					id, name, items = app.page.ID, app.page.Name, app.page.Items
-				}
-				app.pending = append(app.pending, PlayerCommand{Action: "setItems", ID: id, Name: name, Items: items})
-				if shuffle {
-					app.pending = append(app.pending, PlayerCommand{Action: "shuffle", Enabled: true})
-				}
-				if repeat {
-					app.pending = append(app.pending, PlayerCommand{Action: "repeat", Enabled: true})
-				}
-				app.pending = append(app.pending, PlayerCommand{Action: "volume", Volume: volume})
-				if currentID != "" {
-					app.pending = append(app.pending, PlayerCommand{Action: "select", WatchID: currentID, Autoplay: wasPlaying})
-				}
-			} else {
-				// First load: the page starts on its own defaults, so the
-				// saved preferences are handed over before anything plays.
-				app.pending = append(app.pending,
-					PlayerCommand{Action: "volume", Volume: volume},
-					PlayerCommand{Action: "shuffle", Enabled: shuffle},
-					PlayerCommand{Action: "repeat", Enabled: repeat},
-				)
-			}
-			app.flushPlayerCommands()
-			return
-		}
-		if report.Session != app.playerSession || report.Sequence <= app.playerSequence {
-			return
-		}
-		app.playerSequence = report.Sequence
-		app.player = report
-		if report.Error != "" {
-			app.playerError = report.Error
-		}
-		if report.Type == "ended" || report.Type == "needsNext" {
-			app.advance(true)
-		} else if app.pendingAdvance && !app.loading {
-			if report.CanNext {
-				app.pendingAdvance = false
-				app.sendPlayer(PlayerCommand{Action: "next", Autoplay: true})
-			} else if app.canLoadNext() {
-				app.loadMore()
-			} else {
-				app.pendingAdvance = false
-				if report.Repeat && report.WatchID != "" {
-					app.sendPlayer(PlayerCommand{Action: "next", Autoplay: true})
-				}
-			}
-		}
-	})
 }
 
 func formatMillis(ms float64) string {
