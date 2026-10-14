@@ -6,8 +6,10 @@ It bundles the third-party works listed below.
 ## Lucide icons
 
 The icons under `icons/` (`play`, `pause`, `skip-back`, `skip-forward`,
-`repeat`, `shuffle`, `volume-2`, `menu`, `plus`) are taken from
-[Lucide](https://lucide.dev), unmodified apart from line breaks.
+`repeat`, `shuffle`, `volume-2`, `menu`, `plus`, `queue`,
+`ellipsis-vertical`, `pin`, `lock`) are taken from
+[Lucide](https://lucide.dev), unmodified apart from line breaks, except the
+pin, whose filled variant is used.
 
 ISC License
 

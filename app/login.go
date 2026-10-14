@@ -137,6 +137,26 @@ func (app *nativeApp) completeLogin(window *mygo.Window, header string) {
 	}
 	app.finishLogin(window, "ログインしました。", false)
 	app.loadAccount()
+	app.loadOwnMylists()
+}
+
+// loadOwnMylists fetches the signed-in account's mylists, private ones
+// included, in the background; the home shows them once they arrive. A
+// failure leaves the home as it is, so it is only worth a line on the log.
+func (app *nativeApp) loadOwnMylists() {
+	go func() {
+		own, err := app.mylist.ListOwn()
+		if err != nil {
+			log.Printf("mylists: %v", err)
+			return
+		}
+		app.update(func() {
+			if !app.loggedIn {
+				return
+			}
+			app.ownMylists = own
+		})
+	}()
 }
 
 // loadAccount fetches the signed-in account's name and picture in the
@@ -226,6 +246,7 @@ func (app *nativeApp) clearSession() {
 	}
 	app.loggedIn = false
 	app.accountName, app.accountIcon = "", nil
+	app.ownMylists = nil
 }
 
 // update runs fn on the UI thread; without a window, as in tests, it runs

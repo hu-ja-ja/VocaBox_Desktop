@@ -103,6 +103,9 @@ const previousRestartMS = 3000
 
 func newPlayback(app *nativeApp) *playback {
 	p := &playback{app: app, nico: NewNico()}
+	// The mylist lookup rides the same session: the account's own lists,
+	// private ones included, answer only with its cookies.
+	app.mylist.session = p.nico.SessionCookie
 	p.acquire = p.prepareSources
 	p.spawn = p.spawnHelper
 	p.post = func(fn func()) {

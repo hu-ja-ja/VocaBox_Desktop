@@ -42,6 +42,12 @@ var queueSVG []byte
 //go:embed icons/ellipsis-vertical.svg
 var ellipsisSVG []byte
 
+//go:embed icons/pin.svg
+var pinSVG []byte
+
+//go:embed icons/lock.svg
+var lockSVG []byte
+
 var (
 	iconPlay        = ui.MustParseSVG(playSVG)
 	iconPause       = ui.MustParseSVG(pauseSVG)
@@ -54,4 +60,6 @@ var (
 	iconPlus        = ui.MustParseSVG(plusSVG)
 	iconQueue       = ui.MustParseSVG(queueSVG)
 	iconMore        = ui.MustParseSVG(ellipsisSVG)
+	iconPin         = ui.MustParseSVG(pinSVG)
+	iconLock        = ui.MustParseSVG(lockSVG)
 )

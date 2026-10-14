@@ -87,7 +87,7 @@ func TestGetPageMapsResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPage returned an error: %v", err)
 	}
-	if gotReq.URL.Path != "/mylists/27411728" || gotReq.URL.Query().Get("page") != "2" || gotReq.URL.Query().Get("pageSize") != "100" {
+	if gotReq.URL.Path != "/v2/mylists/27411728" || gotReq.URL.Query().Get("page") != "2" || gotReq.URL.Query().Get("pageSize") != "100" {
 		t.Errorf("unexpected request URL: %s", gotReq.URL)
 	}
 	if gotReq.Header.Get("X-Frontend-ID") != "6" || gotReq.Header.Get("X-Frontend-Version") != "0" {
@@ -124,7 +124,6 @@ func TestGetPageMapsResponse(t *testing.T) {
 }
 
 func TestGetPageErrors(t *testing.T) {
-	private := strings.Replace(mylistFixture, `"isPublic":true`, `"isPublic":false`, 1)
 	badStatus := strings.Replace(mylistFixture, `"status":200`, `"status":404`, 1)
 
 	cases := []struct {
@@ -139,7 +138,6 @@ func TestGetPageErrors(t *testing.T) {
 		{"http 500", "27411728", http.StatusInternalServerError, "error"},
 		{"http 404 with html body", "27411728", http.StatusNotFound, "<html>nope</html>"},
 		{"api status", "27411728", http.StatusOK, badStatus},
-		{"private list", "27411728", http.StatusOK, private},
 		{"bad json", "27411728", http.StatusOK, "{oops"},
 	}
 	for _, tc := range cases {
@@ -187,6 +185,161 @@ func TestGetPageErrors(t *testing.T) {
 			t.Errorf("want page=1 in %q", path)
 		}
 	})
+}
+
+// TestGetPagePrivateFallsBackToOwn checks the private path: the public
+// endpoint refuses the list, and a signed-in request retries the account's
+// own endpoint, carrying the session cookie.
+func TestGetPagePrivateFallsBackToOwn(t *testing.T) {
+	private := strings.Replace(mylistFixture, `"isPublic":true`, `"isPublic":false`, 1)
+	var publicHits, ownHits int32
+	var ownReq *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/") {
+			atomic.AddInt32(&publicHits, 1)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		atomic.AddInt32(&ownHits, 1)
+		ownReq = r
+		_, _ = w.Write([]byte(private))
+	}))
+	t.Cleanup(srv.Close)
+
+	m := &Mylist{
+		client:  srv.Client(),
+		baseURL: srv.URL,
+		session: func(string) string { return "user_session=abc" },
+	}
+	page, err := m.GetPage("27411728", 1)
+	if err != nil {
+		t.Fatalf("GetPage returned an error: %v", err)
+	}
+	if publicHits != 1 || ownHits != 1 {
+		t.Errorf("requests: public=%d own=%d; want one each", publicHits, ownHits)
+	}
+	if ownReq.URL.Path != "/v1/users/me/mylists/27411728" {
+		t.Errorf("own request path = %q", ownReq.URL.Path)
+	}
+	if q := ownReq.URL.Query(); q.Get("pageSize") != "100" || q.Get("page") != "1" {
+		t.Errorf("own request query = %q", ownReq.URL.RawQuery)
+	}
+	if got := ownReq.Header.Get("Cookie"); got != "user_session=abc" {
+		t.Errorf("own request Cookie = %q; want the session", got)
+	}
+	// The private list maps like any other.
+	if page.Name != "テストリスト" || len(page.Items) != 3 || page.TotalItemCount != 3 {
+		t.Errorf("own page = %+v; want the private list's contents", page)
+	}
+}
+
+// TestGetPageGuestSkipsOwnEndpoint checks that a guest never probes the
+// account endpoint, and hears that login is what a private list needs.
+func TestGetPageGuestSkipsOwnEndpoint(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	m := &Mylist{client: srv.Client(), baseURL: srv.URL}
+	_, err := m.GetPage("27411728", 1)
+	if err == nil {
+		t.Fatal("want an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "ログイン") {
+		t.Errorf("error = %v; want a login hint", err)
+	}
+	if n := atomic.LoadInt32(&hits); n != 1 {
+		t.Errorf("requests = %d; want only the public one", n)
+	}
+}
+
+// TestGetPagePublicDoesNotFallBack checks that a public list never costs
+// the own probe, even signed in.
+func TestGetPagePublicDoesNotFallBack(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = w.Write([]byte(mylistFixture))
+	}))
+	t.Cleanup(srv.Close)
+
+	m := &Mylist{
+		client:  srv.Client(),
+		baseURL: srv.URL,
+		session: func(string) string { return "user_session=abc" },
+	}
+	if _, err := m.GetPage("27411728", 1); err != nil {
+		t.Fatalf("GetPage returned an error: %v", err)
+	}
+	if n := atomic.LoadInt32(&hits); n != 1 {
+		t.Errorf("requests = %d; want only the public one", n)
+	}
+}
+
+// ownMylistsFixture is the account list of the ListOwn tests: one private
+// list with a sample entry, one public with none.
+const ownMylistsFixture = `{"meta":{"status":200},"data":{"mylists":[` +
+	`{"id":71043760,"isPublic":false,"name":"非公開リスト","itemsCount":2,` +
+	`"sampleItems":[{"watchId":"sm1","video":{"id":"sm1","title":"曲A","thumbnail":{"url":"https://nicovideo.cdn.nimg.jp/thumbnails/1/1"}}}]},` +
+	`{"id":71043761,"isPublic":true,"name":"公開リスト","itemsCount":0,"sampleItems":[]}` +
+	`]}}`
+
+func TestListOwn(t *testing.T) {
+	var gotReq *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotReq = r
+		_, _ = w.Write([]byte(ownMylistsFixture))
+	}))
+	t.Cleanup(srv.Close)
+
+	m := &Mylist{
+		client:  srv.Client(),
+		baseURL: srv.URL,
+		session: func(string) string { return "user_session=abc" },
+	}
+	own, err := m.ListOwn()
+	if err != nil {
+		t.Fatalf("ListOwn returned an error: %v", err)
+	}
+	if gotReq.URL.Path != "/v1/users/me/mylists" || gotReq.URL.Query().Get("sampleItemCount") != "4" {
+		t.Errorf("request URL = %s", gotReq.URL)
+	}
+	if got := gotReq.Header.Get("Cookie"); got != "user_session=abc" {
+		t.Errorf("Cookie = %q; want the session", got)
+	}
+	if len(own) != 2 {
+		t.Fatalf("got %d mylists, want 2", len(own))
+	}
+	if own[0].ID != "71043760" || own[0].Name != "非公開リスト" || own[0].IsPublic || own[0].ItemCount != 2 {
+		t.Errorf("private list = %+v", own[0])
+	}
+	if len(own[0].Items) != 1 || own[0].Items[0].Title != "曲A" || own[0].Items[0].ThumbURL == "" {
+		t.Errorf("sample entries = %+v", own[0].Items)
+	}
+	if own[1].ID != "71043761" || !own[1].IsPublic || own[1].ItemCount != 0 || len(own[1].Items) != 0 {
+		t.Errorf("public list = %+v", own[1])
+	}
+}
+
+// TestListOwnRequiresLogin checks a guest's account list is refused with a
+// login hint rather than looking like an empty account.
+func TestListOwnRequiresLogin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	m := &Mylist{client: srv.Client(), baseURL: srv.URL}
+	_, err := m.ListOwn()
+	if err == nil {
+		t.Fatal("ListOwn as a guest = nil error; want a refusal")
+	}
+	if !strings.Contains(err.Error(), "ログイン") {
+		t.Errorf("error = %v; want a login hint", err)
+	}
 }
 
 // savedFixture is a one-page mylist used by the saved-snapshot tests.

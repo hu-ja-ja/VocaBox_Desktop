@@ -17,7 +17,7 @@ import (
 
 const (
 	// nvapiBaseURL is the only host this app fetches mylist metadata from.
-	nvapiBaseURL = "https://nvapi.nicovideo.jp/v2"
+	nvapiBaseURL = "https://nvapi.nicovideo.jp"
 	// thumbnailCDNHost is the host this app derives picture URLs from.
 	thumbnailCDNHost = "nicovideo.cdn.nimg.jp"
 	// thumbnailImageDomain is nicovideo's image domain: the only domain
@@ -53,7 +53,7 @@ const (
 // nor a supported mylist URL.
 var errMylistInput = errors.New("マイリストのIDまたはURLの形式が正しくありません")
 
-// MylistItem is one entry of a public mylist. Video metadata can be absent
+// MylistItem is one entry of a mylist. Video metadata can be absent
 // (deleted/private video); such items stay listed as unavailable rather than
 // being dropped or filled in.
 type MylistItem struct {
@@ -70,7 +70,7 @@ type MylistItem struct {
 	ThumbURL string `json:"thumbnailUrl,omitempty"`
 }
 
-// MylistPage is one page of public mylist metadata.
+// MylistPage is one page of mylist metadata.
 type MylistPage struct {
 	ID             string       `json:"id"`
 	Name           string       `json:"name"`
@@ -81,13 +81,17 @@ type MylistPage struct {
 	Items          []MylistItem `json:"items"`
 }
 
-// Mylist looks up public NicoNico mylist metadata. This stage covers public
-// metadata lookup plus locally held snapshots of saved public mylists:
-// no auth, playback, or download. The lookup uses the community-documented
-// unofficial NVAPI endpoint, with explicit user approval for public metadata.
+// Mylist looks up NicoNico mylist metadata: public lists as a guest, and
+// the signed-in account's own lists — private ones included — through the
+// session's cookies. It also keeps locally held snapshots of saved lists.
+// The lookups use the community-documented unofficial NVAPI endpoints.
 type Mylist struct {
 	client  *http.Client
 	baseURL string
+	// session returns the Cookie header to send to an API URL, "" as a
+	// guest. Nil means no session source, as in tests that build a Mylist
+	// directly and in the guest-only stages.
+	session func(rawURL string) string
 	// configDir overrides the user config directory holding mylists.json.
 	// Empty means os.UserConfigDir()/VocaBox. Tests set a temp dir.
 	configDir string
@@ -115,8 +119,9 @@ func NewMylist() *Mylist {
 	}
 }
 
-// GetPage returns page (1-based) of the public mylist identified by input,
-// which is a numeric ID or a supported mylist URL.
+// GetPage returns page (1-based) of the mylist identified by input, which
+// is a numeric ID or a supported mylist URL: a public list as a guest, and
+// the account's own private list once signed in.
 func (m *Mylist) GetPage(input string, page int) (MylistPage, error) {
 	id, err := ParseMylistInput(input)
 	if err != nil {
@@ -128,10 +133,37 @@ func (m *Mylist) GetPage(input string, page int) (MylistPage, error) {
 	return m.fetchPage(id, page)
 }
 
-// SavedMylist is one persisted public-mylist snapshot: ID, display name, and
-// the mylist's contents as fetched when saved or last refreshed. This is the
-// local source of truth for reading a saved mylist back. Tracks, credentials,
-// and media are never persisted.
+// ownSampleCount asks each of the account's mylists for a few entries:
+// enough for a card's 2×2 pictures, few enough to stay one request.
+const ownSampleCount = 4
+
+// OwnMylist is one mylist of the signed-in account, private ones included:
+// what the home shows as a card.
+type OwnMylist struct {
+	ID        string
+	Name      string
+	IsPublic  bool
+	ItemCount int
+	// Items are the first few entries, for the card's pictures.
+	Items []MylistItem
+}
+
+// ListOwn returns the signed-in account's mylists, private ones included.
+// Without a session the API refuses, which the caller only logs: the home
+// simply shows no own lists.
+func (m *Mylist) ListOwn() ([]OwnMylist, error) {
+	rawURL := fmt.Sprintf("%s/v1/users/me/mylists?sampleItemCount=%d", m.baseURL, ownSampleCount)
+	body, err := m.fetchBody(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	return mapOwnMylists(body)
+}
+
+// SavedMylist is one persisted mylist snapshot — a pinned list on the home:
+// ID, display name, and the mylist's contents as fetched when pinned or last
+// refreshed. This is the local source of truth for reading it back. Tracks,
+// credentials, and media are never persisted.
 type SavedMylist struct {
 	ID             string       `json:"id"`
 	Name           string       `json:"name"`
@@ -210,7 +242,7 @@ func (m *Mylist) SaveSettings(settings Settings) error {
 	return nil
 }
 
-// ListSaved returns saved public-mylist snapshots, oldest first. A missing
+// ListSaved returns saved mylist snapshots, oldest first. A missing
 // file means none saved yet.
 func (m *Mylist) ListSaved() ([]SavedMylist, error) {
 	m.savedMu.Lock()
@@ -218,9 +250,10 @@ func (m *Mylist) ListSaved() ([]SavedMylist, error) {
 	return m.readSaved()
 }
 
-// SaveMylist fetches every page of the public mylist identified by input and
+// SaveMylist fetches every page of the mylist identified by input and
 // upserts a local snapshot of it under name, returning the saved snapshots.
-// Input accepts an ID or a supported URL. Fetching happens before the file
+// Input accepts an ID or a supported URL; the account's own private lists
+// refresh while signed in. Fetching happens before the file
 // lock, so HTTP never blocks other file operations.
 func (m *Mylist) SaveMylist(input, name string) ([]SavedMylist, error) {
 	id, err := ParseMylistInput(input)
@@ -229,7 +262,7 @@ func (m *Mylist) SaveMylist(input, name string) ([]SavedMylist, error) {
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, errors.New("保存するマイリストの名前がありません")
+		return nil, errors.New("ピン留めするマイリストの名前がありません")
 	}
 	snapshot, err := m.fetchAll(id)
 	if err != nil {
@@ -612,19 +645,19 @@ func (m *Mylist) readSaved() ([]SavedMylist, error) {
 		return []SavedMylist{}, nil
 	}
 	if err != nil {
-		return nil, errors.New("保存したマイリストを読み込めませんでした")
+		return nil, errors.New("ピン留めしたリストを読み込めませんでした")
 	}
 	defer f.Close()
 	body, err := io.ReadAll(io.LimitReader(f, maxSavedBody+1))
 	if err != nil {
-		return nil, errors.New("保存したマイリストを読み込めませんでした")
+		return nil, errors.New("ピン留めしたリストを読み込めませんでした")
 	}
 	if len(body) > maxSavedBody {
-		return nil, errors.New("保存したマイリストの記録が大きすぎます")
+		return nil, errors.New("ピン留めしたリストの記録が大きすぎます")
 	}
 	var saved []SavedMylist
 	if err := json.Unmarshal(body, &saved); err != nil {
-		return nil, errors.New("保存したマイリストの記録が壊れています")
+		return nil, errors.New("ピン留めしたリストの記録が壊れています")
 	}
 	if saved == nil {
 		saved = []SavedMylist{}
@@ -642,38 +675,59 @@ func (m *Mylist) writeSaved(saved []SavedMylist) error {
 	}
 	body, err := json.MarshalIndent(saved, "", "  ")
 	if err != nil {
-		return errors.New("保存したマイリストを書き込めませんでした")
+		return errors.New("ピン留めしたリストを書き込めませんでした")
 	}
 	if err := os.WriteFile(path, body, 0o644); err != nil {
-		return errors.New("保存したマイリストを書き込めませんでした")
+		return errors.New("ピン留めしたリストを書き込めませんでした")
 	}
 	return nil
 }
 
+// fetchPage returns page (1-based) of the mylist: the public endpoint, and
+// — when a session is loaded and the public one refuses — the account's own
+// endpoint, which is where private mylists are served from.
+//
+//	shortcut: a private mylist costs one refused probe per page; remember
+//	the route if that ever shows up in practice.
 func (m *Mylist) fetchPage(id string, page int) (MylistPage, error) {
-	resp, err := m.mylistRequest(id, page)
+	rawURL := fmt.Sprintf("%s/v2/mylists/%s?pageSize=%d&page=%d", m.baseURL, id, mylistPageSize, page)
+	body, err := m.fetchBody(rawURL)
+	if err != nil && m.sessionCookie(rawURL) != "" && isMylistDenied(err) {
+		rawURL = fmt.Sprintf("%s/v1/users/me/mylists/%s?pageSize=%d&page=%d", m.baseURL, id, mylistPageSize, page)
+		body, err = m.fetchBody(rawURL)
+	}
 	if err != nil {
 		return MylistPage{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return MylistPage{}, mylistHTTPError(resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMylistBody+1))
-	if err != nil {
-		return MylistPage{}, errors.New("マイリストの取得に失敗しました")
-	}
-	if len(body) > maxMylistBody {
-		return MylistPage{}, errors.New("マイリストの応答が大きすぎます")
 	}
 	return mapMylistPage(id, body)
 }
 
-// mylistRequest sends one page request, waiting out one Retry-After when the
+// fetchBody sends one API request and returns its body, mapping the
+// answer's failures to messages the player can show.
+func (m *Mylist) fetchBody(rawURL string) ([]byte, error) {
+	resp, err := m.mylistRequest(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, mylistHTTPError(resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMylistBody+1))
+	if err != nil {
+		return nil, errors.New("マイリストの取得に失敗しました")
+	}
+	if len(body) > maxMylistBody {
+		return nil, errors.New("マイリストの応答が大きすぎます")
+	}
+	return body, nil
+}
+
+// mylistRequest sends one request, waiting out one Retry-After when the
 // API asks to slow down. A second refusal returns, so a busy API does not
-// hold the caller any longer.
-func (m *Mylist) mylistRequest(id string, page int) (*http.Response, error) {
-	rawURL := fmt.Sprintf("%s/mylists/%s?pageSize=%d&page=%d", m.baseURL, id, mylistPageSize, page)
+// hold the caller any longer. The session's cookies ride along: the
+// account's own lists are answered only with them.
+func (m *Mylist) mylistRequest(rawURL string) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 		if err != nil {
@@ -682,6 +736,9 @@ func (m *Mylist) mylistRequest(id string, page int) (*http.Response, error) {
 		req.Header.Set("X-Frontend-ID", "6")
 		req.Header.Set("X-Frontend-Version", "0")
 		req.Header.Set("User-Agent", mylistUserAgent)
+		if cookie := m.sessionCookie(rawURL); cookie != "" {
+			req.Header.Set("Cookie", cookie)
+		}
 		resp, err := m.client.Do(req)
 		if err != nil {
 			return nil, errors.New("マイリストの取得に失敗しました（通信エラー）")
@@ -694,6 +751,15 @@ func (m *Mylist) mylistRequest(id string, page int) (*http.Response, error) {
 		resp.Body.Close()
 		time.Sleep(wait)
 	}
+}
+
+// sessionCookie is the Cookie header the session provides for an API URL,
+// "" as a guest or with no session source.
+func (m *Mylist) sessionCookie(rawURL string) string {
+	if m.session == nil {
+		return ""
+	}
+	return m.session(rawURL)
 }
 
 // retryAfter reads a Retry-After header, in seconds or as an HTTP date, up
@@ -735,17 +801,38 @@ func (m *Mylist) fetchAll(id string) (MylistPage, error) {
 	return snapshot, nil
 }
 
-func mylistHTTPError(status int) error {
-	if status == http.StatusNotFound {
-		return errors.New("マイリストが見つかりません（公開マイリストのIDまたはURLを入力してください）")
+// mylistStatusError is an API answer that failed with an HTTP status: the
+// caller can tell a refusal — which the account's own endpoint may still
+// answer — from a busy or broken API.
+type mylistStatusError struct{ status int }
+
+func (e mylistStatusError) Error() string {
+	switch e.status {
+	case http.StatusNotFound:
+		return "マイリストが見つかりません（非公開マイリストはログインすると読み込めます）"
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "マイリストを表示できません（非公開マイリストはログインすると読み込めます）"
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+		return "ニコニコが混み合っています。しばらくしてからもう一度お試しください"
 	}
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return errors.New("マイリストを表示できません（非公開または利用できない可能性があります。公開マイリストのIDまたはURLを入力してください）")
+	return fmt.Sprintf("マイリストの取得に失敗しました（HTTP %d）", e.status)
+}
+
+func mylistHTTPError(status int) error { return mylistStatusError{status: status} }
+
+// isMylistDenied reports whether err is the API refusing this list — not
+// found or not allowed — the cases the account's own endpoint may still
+// answer for.
+func isMylistDenied(err error) bool {
+	var status mylistStatusError
+	if !errors.As(err, &status) {
+		return false
 	}
-	if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
-		return errors.New("ニコニコが混み合っています。しばらくしてからもう一度お試しください")
+	switch status.status {
+	case http.StatusNotFound, http.StatusUnauthorized, http.StatusForbidden:
+		return true
 	}
-	return fmt.Errorf("マイリストの取得に失敗しました（HTTP %d）", status)
+	return false
 }
 
 type nvapiMylistResponse struct {
@@ -811,9 +898,6 @@ func mapMylistPage(id string, body []byte) (MylistPage, error) {
 		return MylistPage{}, fmt.Errorf("マイリストの取得に失敗しました（status %d）", res.Meta.Status)
 	}
 	ml := res.Data.Mylist
-	if !ml.IsPublic {
-		return MylistPage{}, errors.New("非公開マイリストには対応していません")
-	}
 	out := MylistPage{
 		ID:             id,
 		Name:           ml.Name,
@@ -826,18 +910,66 @@ func mapMylistPage(id string, body []byte) (MylistPage, error) {
 		out.Owner = ml.Owner.Name
 	}
 	for _, it := range ml.Items {
-		item := MylistItem{WatchID: it.WatchID}
-		if it.Video != nil {
-			item.Available = true
-			item.VideoID = it.Video.ID
-			item.Title = it.Video.Title
-			item.Duration = it.Video.Duration
-			item.ThumbURL = nvapiThumbBase(it.Video.Thumbnail)
-			if it.Video.Owner != nil {
-				item.Uploader = it.Video.Owner.Name
-			}
+		out.Items = append(out.Items, mapMylistItem(it))
+	}
+	return out, nil
+}
+
+// mapMylistItem maps one entry: metadata only when the API knew the video.
+func mapMylistItem(it nvapiItem) MylistItem {
+	item := MylistItem{WatchID: it.WatchID}
+	if it.Video != nil {
+		item.Available = true
+		item.VideoID = it.Video.ID
+		item.Title = it.Video.Title
+		item.Duration = it.Video.Duration
+		item.ThumbURL = nvapiThumbBase(it.Video.Thumbnail)
+		if it.Video.Owner != nil {
+			item.Uploader = it.Video.Owner.Name
 		}
-		out.Items = append(out.Items, item)
+	}
+	return item
+}
+
+// nvapiOwnMylistsResponse is GET /v1/users/me/mylists: the signed-in
+// account's mylists, sampleItems carrying a few entries of each.
+type nvapiOwnMylistsResponse struct {
+	Meta struct {
+		Status int `json:"status"`
+	} `json:"meta"`
+	Data struct {
+		Mylists []nvapiOwnMylist `json:"mylists"`
+	} `json:"data"`
+}
+
+type nvapiOwnMylist struct {
+	ID          int         `json:"id"`
+	IsPublic    bool        `json:"isPublic"`
+	Name        string      `json:"name"`
+	ItemsCount  int         `json:"itemsCount"`
+	SampleItems []nvapiItem `json:"sampleItems"`
+}
+
+func mapOwnMylists(body []byte) ([]OwnMylist, error) {
+	var res nvapiOwnMylistsResponse
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, errors.New("マイリストの応答を読み取れませんでした")
+	}
+	if res.Meta.Status != http.StatusOK {
+		return nil, fmt.Errorf("マイリストの取得に失敗しました（status %d）", res.Meta.Status)
+	}
+	out := make([]OwnMylist, 0, len(res.Data.Mylists))
+	for _, ml := range res.Data.Mylists {
+		own := OwnMylist{
+			ID:        strconv.Itoa(ml.ID),
+			Name:      ml.Name,
+			IsPublic:  ml.IsPublic,
+			ItemCount: ml.ItemsCount,
+		}
+		for _, it := range ml.SampleItems {
+			own.Items = append(own.Items, mapMylistItem(it))
+		}
+		out = append(out, own)
 	}
 	return out, nil
 }
@@ -866,7 +998,7 @@ func ParseMylistInput(input string) (string, error) {
 	case "nico.ms":
 		return mylistIDFromSegments(strings.TrimSuffix(u.Path, "/"), "mylist")
 	default:
-		return "", errors.New("対応していないURLです（nicovideo.jp / nico.ms の公開マイリストのみ）")
+		return "", errors.New("対応していないURLです（nicovideo.jp / nico.ms のマイリストのみ）")
 	}
 }
 

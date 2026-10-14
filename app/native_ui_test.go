@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -175,7 +177,7 @@ func TestNativeUIHomeImportsFromCard(t *testing.T) {
 	if !tester.HasText("マイリストを読み込む") {
 		t.Fatalf("import card is missing: %q", tester.Texts())
 	}
-	if tester.HasText("公開マイリストのURLまたはID") {
+	if tester.HasText("マイリストのURLまたはID") {
 		t.Fatalf("the sidebar still carries the import field: %q", tester.Texts())
 	}
 	if err := tester.Click("マイリストを読み込む"); err != nil {
@@ -184,10 +186,10 @@ func TestNativeUIHomeImportsFromCard(t *testing.T) {
 	if !app.importing {
 		t.Fatal("import card did not open the dialog")
 	}
-	if !tester.HasText("公開マイリストを読み込む") {
+	if !tester.HasText("マイリストを読み込む") {
 		t.Fatalf("dialog is not shown: %q", tester.Texts())
 	}
-	if !tester.Focused("公開マイリストのURLまたはID") {
+	if !tester.Focused("マイリストのURLまたはID") {
 		t.Fatal("the dialog did not focus its field")
 	}
 	tester.Type("27411728")
@@ -202,6 +204,246 @@ func TestNativeUIHomeImportsFromCard(t *testing.T) {
 	}
 	if app.page != nil || len(app.sent) != 0 {
 		t.Fatalf("cancel must not open anything: sent=%d page=%#v", len(app.sent), app.page)
+	}
+}
+
+// TestNativeUIHomePinsFirst checks the home's cards: the pinned lists come
+// first with their pin mark, a pinned own list shows once with the account's
+// live name and size, a private list carries the lock mark, the account's
+// other mylists follow, the import card stays last, and signing out keeps
+// the pinned local copies.
+func TestNativeUIHomePinsFirst(t *testing.T) {
+	mylist := NewMylist()
+	mylist.configDir = t.TempDir()
+	app := newNativeApp(mylist)
+	// The sidebar shows its own pin marks for the same lists, so close it
+	// and let the test look at the cards alone.
+	app.sidebarOpen = false
+	app.loggedIn = true
+	app.ownMylists = []OwnMylist{
+		{ID: "71043760", Name: "自分の非公開リスト", ItemCount: 2,
+			Items: []MylistItem{{WatchID: "sm1", Title: "一曲目", Available: true}}},
+		{ID: "71043761", Name: "自分の公開リスト", ItemCount: 0, IsPublic: true},
+	}
+	app.saved = []SavedMylist{
+		// The pinned own list: the live account form must win over the
+		// snapshot's stale size.
+		{ID: "71043760", Name: "自分の非公開リスト", TotalItemCount: 9,
+			Items: []MylistItem{{WatchID: "sm1", Title: "古い一曲目", Available: true}}},
+		{ID: "555", Name: "ピン留めした公開リスト", TotalItemCount: 3,
+			Items: []MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}}},
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	for _, text := range []string{"全2曲", "全3曲", "全0曲"} {
+		if !tester.HasText(text) {
+			t.Fatalf("home does not show %q: %q", text, tester.Texts())
+		}
+	}
+	// The pin and the private mark are badges over the tile: the pin on the
+	// right, the private chip on the left, both above the meta line.
+	pin, ok := tester.Find("ピン留め")
+	if !ok {
+		t.Fatalf("the pin badge is missing: %q", tester.Texts())
+	}
+	lock, ok := tester.Find("非公開")
+	if !ok {
+		t.Fatalf("the private badge is missing: %q", tester.Texts())
+	}
+	meta, ok := tester.Find("全2曲")
+	if !ok {
+		t.Fatalf("the size line is missing: %q", tester.Texts())
+	}
+	if pin.Y >= meta.Y || lock.Y >= meta.Y {
+		t.Fatalf("the badges are not over the tile: pin=%v lock=%v meta=%v", pin, lock, meta)
+	}
+	right := meta.X + meta.W/2
+	if pin.X <= right || lock.X <= right {
+		t.Fatalf("the badges are not on the tile's right: pin=%v lock=%v meta=%v", pin, lock, meta)
+	}
+	if lock.Y <= pin.Y {
+		t.Fatalf("the private badge is not below the pin: pin=%v lock=%v", pin, lock)
+	}
+	if tester.HasText("全9曲") {
+		t.Fatalf("the pinned own list shows its stale snapshot size: %q", tester.Texts())
+	}
+	if tester.HasText("保存済み") {
+		t.Fatalf("the old saved heading is still shown: %q", tester.Texts())
+	}
+
+	// Pinned first, the account's other lists after them, import last.
+	texts := tester.Texts()
+	index := func(s string) int {
+		for i, text := range texts {
+			if text == s {
+				return i
+			}
+		}
+		return -1
+	}
+	if !(index("全2曲") < index("全0曲") && index("全3曲") < index("全0曲") &&
+		index("全0曲") < index("マイリストを読み込む")) {
+		t.Fatalf("home order is wrong: %q", texts)
+	}
+
+	// Signing out drops the live lists and keeps the pinned local copies.
+	app.clearSession()
+	tester.Frame()
+	if !tester.HasText("ピン留めした公開リスト") || !tester.HasText("全9曲") {
+		t.Fatalf("logout dropped the pinned lists: %q", tester.Texts())
+	}
+	if tester.HasText("自分の公開リスト") {
+		t.Fatalf("logout kept the live account lists: %q", tester.Texts())
+	}
+}
+
+// TestNativeUIHomeUnpinsFromMenu checks the card's right-click menu: a
+// pinned card offers ピン留め (checked), and choosing it unpins the list
+// and drops the card.
+func TestNativeUIHomeUnpinsFromMenu(t *testing.T) {
+	mylist := NewMylist()
+	mylist.configDir = t.TempDir()
+	app := newNativeApp(mylist)
+	app.sidebarOpen = false
+	app.saved = []SavedMylist{{ID: "555", Name: "ピン留めした公開リスト", TotalItemCount: 3,
+		Items: []MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}}}}
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	if err := tester.RightClick("ピン留めした公開リスト"); err != nil {
+		t.Fatal(err)
+	}
+	if got := tester.Menu(); len(got) != 1 || got[0] != "ピン留め" {
+		t.Fatalf("card menu = %q; want [ピン留め]", got)
+	}
+	if err := tester.ChooseMenuItem("ピン留め"); err != nil {
+		t.Fatal(err)
+	}
+	if len(app.saved) != 0 {
+		t.Fatalf("the list stays pinned: %+v", app.saved)
+	}
+	if tester.HasText("ピン留めした公開リスト") {
+		t.Fatalf("the card stays after unpinning: %q", tester.Texts())
+	}
+}
+
+// TestNativeUIHomePinsFromMenu checks the other direction: an unpinned card
+// offers ピン留め, and choosing it starts the pin.
+func TestNativeUIHomePinsFromMenu(t *testing.T) {
+	// The fetch holds until the test ends, so the assertion sees the pin
+	// still starting rather than racing the fetch.
+	hold := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-hold
+		_, _ = w.Write([]byte(savedFixture))
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(hold) })
+	mylist := &Mylist{client: srv.Client(), baseURL: srv.URL, configDir: t.TempDir()}
+
+	app := newNativeApp(mylist)
+	app.sidebarOpen = false
+	app.ownMylists = []OwnMylist{{ID: "71043760", Name: "自分の公開リスト", ItemCount: 2, IsPublic: true}}
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	if err := tester.RightClick("自分の公開リスト"); err != nil {
+		t.Fatal(err)
+	}
+	if got := tester.Menu(); len(got) != 1 || got[0] != "ピン留め" {
+		t.Fatalf("card menu = %q; want [ピン留め]", got)
+	}
+	if err := tester.ChooseMenuItem("ピン留め"); err != nil {
+		t.Fatal(err)
+	}
+	if !app.saving {
+		t.Fatalf("choosing ピン留め did not start pinning: saving=%v status=%q", app.saving, app.status)
+	}
+}
+
+// TestNativeUISidebarListsLikeHome checks the sidebar's library uses the
+// home's order: the pinned lists first with the account's live name, the
+// account's other mylists after them, each pinnable from its menu.
+func TestNativeUISidebarListsLikeHome(t *testing.T) {
+	mylist := NewMylist()
+	mylist.configDir = t.TempDir()
+	app := newNativeApp(mylist)
+	app.loggedIn = true
+	app.ownMylists = []OwnMylist{
+		{ID: "71043760", Name: "自分の非公開リスト", ItemCount: 2},
+		{ID: "71043761", Name: "自分の公開リスト", ItemCount: 12, IsPublic: true},
+	}
+	app.saved = []SavedMylist{{ID: "71043760", Name: "古い名前", TotalItemCount: 9}}
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	pinned, ok := tester.Find("自分の非公開リスト")
+	if !ok || pinned.X > 250 {
+		t.Fatalf("the pinned list is missing from the sidebar: %v, %v", pinned, ok)
+	}
+	own, ok := tester.Find("自分の公開リスト")
+	if !ok || own.X > 250 {
+		t.Fatalf("the account's other list is missing from the sidebar: %v, %v", own, ok)
+	}
+	if tester.HasText("古い名前") {
+		t.Fatalf("the sidebar shows the snapshot's stale name: %q", tester.Texts())
+	}
+	if pinned.Y >= own.Y {
+		t.Fatalf("the pinned list does not come first: pinned=%v own=%v", pinned, own)
+	}
+
+	// The pinned item carries the pin mark on its right, the unpinned one
+	// carries none: the sidebar mark and the pinned card's badge are the
+	// only two marks shown.
+	pin, ok := tester.Find("ピン留め")
+	if !ok || pin.X < pinned.X+pinned.W/2 || pin.Y < pinned.Y || pin.Y >= pinned.Y+pinned.H {
+		t.Fatalf("the pin mark is not on the pinned item's right: pin=%v item=%v", pin, pinned)
+	}
+	marks := 0
+	for _, text := range tester.Texts() {
+		if text == "ピン留め" {
+			marks++
+		}
+	}
+	if marks != 2 {
+		t.Fatalf("pin marks = %d; want the sidebar's and the pinned card's", marks)
+	}
+
+	// An unpinned list can be pinned from its sidebar menu.
+	tester.RightClickAt(own.X+own.W/2, own.Y+own.H/2)
+	if got := tester.Menu(); len(got) != 1 || got[0] != "ピン留め" {
+		t.Fatalf("sidebar menu = %q; want [ピン留め]", got)
+	}
+	tester.CloseMenu()
+}
+
+// TestNativeUISidebarUnpinsFromMenu checks the sidebar's right-click menu:
+// choosing ピン留め unpins the list, dropping it from the sidebar and the
+// home.
+func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
+	mylist := NewMylist()
+	mylist.configDir = t.TempDir()
+	app := newNativeApp(mylist)
+	app.saved = []SavedMylist{{ID: "555", Name: "サイドバーのピン", TotalItemCount: 3,
+		Items: []MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}}}}
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	item, ok := tester.Find("サイドバーのピン")
+	if !ok || item.X > 250 {
+		t.Fatalf("the sidebar item was not found: %v, %v", item, ok)
+	}
+	tester.RightClickAt(item.X+item.W/2, item.Y+item.H/2)
+	if got := tester.Menu(); len(got) != 1 || got[0] != "ピン留め" {
+		t.Fatalf("sidebar menu = %q; want [ピン留め]", got)
+	}
+	if err := tester.ChooseMenuItem("ピン留め"); err != nil {
+		t.Fatal(err)
+	}
+	if len(app.saved) != 0 {
+		t.Fatalf("the list stays pinned: %+v", app.saved)
+	}
+	if tester.HasText("サイドバーのピン") {
+		t.Fatalf("the unpinned list still shows: %q", tester.Texts())
+	}
+	if !tester.HasText("リストはありません") {
+		t.Fatalf("the empty library says nothing: %q", tester.Texts())
 	}
 }
 
@@ -733,7 +975,7 @@ func TestNativeUIHomeOpensPlaylistCards(t *testing.T) {
 
 	// The side buttons of a mouse arrive as the back and forward keys.
 	tester.Key(0, ui.KeyBack)
-	if app.router.Path() != "/" || !tester.HasText("保存したプレイリストから選んで再生") {
+	if app.router.Path() != "/" || !tester.HasText("聴きたいリストを選んで再生") {
 		t.Fatalf("back did not return home: path=%q", app.router.Path())
 	}
 	if app.page == nil || app.page.ID != "123" {
@@ -749,7 +991,7 @@ func TestNativeUIHomeOpensPlaylistCards(t *testing.T) {
 	if err := tester.Click("ホーム"); err != nil {
 		t.Fatal(err)
 	}
-	if app.router.Path() != "/" || !tester.HasText("保存したプレイリストから選んで再生") {
+	if app.router.Path() != "/" || !tester.HasText("聴きたいリストを選んで再生") {
 		t.Fatalf("sidebar home item did not return home: path=%q", app.router.Path())
 	}
 	if app.page == nil || app.page.ID != "123" {

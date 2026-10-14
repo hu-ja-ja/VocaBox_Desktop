@@ -95,7 +95,12 @@ type nativeApp struct {
 	// between them.
 	router *ui.Router
 
-	saved       []SavedMylist
+	// saved holds the pinned lists' local snapshots; they show first on the
+	// home.
+	saved []SavedMylist
+	// ownMylists is the signed-in account's mylists, private ones included,
+	// fetched for the home; nil while signed out and until they arrive.
+	ownMylists  []OwnMylist
 	sidebarOpen bool
 	// queueOpen shows the queue in place of the home and list pages.
 	queueOpen bool
@@ -240,13 +245,20 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 			page := app.router.Path()
 			// Choosing a destination leaves the queue screen for it, even the
 			// list already showing, whose click changes no route of its own.
+			// The library lists what the home shows, in its order.
+			entries := app.listEntries()
 			homeClicked, listClicked := false, false
 			sidebar := ui.Sidebar(c, &page, func() {
 				item := ui.SidebarItem(c, homePath, nil, "ホーム")
 				homeClicked = item.Clicked()
 				ui.SidebarSection(c, "ライブラリ", nil, func() {
-					for _, entry := range app.saved {
-						if ui.SidebarItem(c, listPath(entry.ID), nil, entry.Name).Clicked() {
+					for _, entry := range entries {
+						item := ui.SidebarItem(c, listPath(entry.ID), nil, entry.Name)
+						if entry.Pinned {
+							item.Children(func() { app.pinBadge(c) })
+						}
+						item.ContextMenu(func(m *ui.Menu) { app.pinMenu(m, entry) })
+						if item.Clicked() {
 							listClicked = true
 						}
 					}
@@ -258,8 +270,8 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 			if sidebar.Changed() {
 				app.router.Push(page)
 			}
-			if len(app.saved) == 0 {
-				ui.Text(c, "保存したリストはありません").FontSize(12).TextColor(app.theme.TextMuted)
+			if len(entries) == 0 {
+				ui.Text(c, "リストはありません").FontSize(12).TextColor(app.theme.TextMuted)
 			}
 			app.accountRow(c)
 		})
@@ -571,33 +583,97 @@ func (app *nativeApp) listItem(watchID string) MylistItem {
 	return MylistItem{WatchID: watchID}
 }
 
-// homeView shows the import card and the saved playlists as cards, each
-// carrying the pictures of its first four tracks; clicking a playlist card
-// opens it.
+// homeView shows the home's cards: each carries the pictures of its first
+// four tracks, and clicking one opens it.
 func (app *nativeApp) homeView(c *ui.Context) {
 	ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Gap(18).Children(func() {
 		ui.Column(c).Gap(5).Children(func() {
 			ui.Text(c, "ホーム").FontSize(27).Bold()
-			sub := "保存したプレイリストから選んで再生"
-			if len(app.saved) == 0 {
-				sub = "公開マイリストは「+」から読み込めます"
+			sub := "聴きたいリストを選んで再生"
+			if len(app.saved) == 0 && len(app.ownMylists) == 0 {
+				sub = "マイリストは「+」から読み込めます"
 			}
 			ui.Text(c, sub).FontSize(13).TextColor(app.theme.TextMuted)
 		})
 		ui.Scroll(c).Grow(1).Children(func() {
 			ui.Row(c).Wrap().Gap(16).FillWidth().Children(func() {
-				for i := range app.saved {
-					app.playlistCard(c, app.saved[i])
-				}
-				app.importCard(c)
+				app.homeCards(c)
 			})
 		})
 		app.statusLine(c)
 	})
 }
 
+// homeCards lays the home's cards out — the shared list order of
+// listEntries, then the import card — each card carrying its pictures and
+// marks.
+func (app *nativeApp) homeCards(c *ui.Context) {
+	for _, entry := range app.listEntries() {
+		app.listCard(c, entry)
+	}
+	app.importCard(c)
+}
+
+// listEntry is one list the home and the sidebar show: what the sidebar
+// needs (the name) and what a card needs (the label, the pictures and the
+// pin and private marks).
+type listEntry struct {
+	ID    string
+	Name  string
+	Meta  string
+	Items []MylistItem
+	// Pinned is the list pinned to the top of the home; Private, that only
+	// its owner sees it.
+	Pinned  bool
+	Private bool
+}
+
+// listEntries returns the lists to show, in the one order the home and the
+// sidebar share: the pinned ones first — a pinned own list with the
+// account's live name and size — then the account's other mylists.
+func (app *nativeApp) listEntries() []listEntry {
+	pinned := make(map[string]bool, len(app.saved))
+	for i := range app.saved {
+		pinned[app.saved[i].ID] = true
+	}
+	entries := make([]listEntry, 0, len(app.saved)+len(app.ownMylists))
+	for i := range app.saved {
+		entry := app.saved[i]
+		e := listEntry{
+			ID: entry.ID, Name: entry.Name, Meta: savedMeta(entry),
+			Items: entry.Items, Pinned: true,
+		}
+		if own, ok := app.ownList(entry.ID); ok {
+			e.Name, e.Meta = own.Name, countMeta(own.ItemCount)
+			e.Items, e.Private = own.Items, !own.IsPublic
+		}
+		entries = append(entries, e)
+	}
+	for i := range app.ownMylists {
+		own := app.ownMylists[i]
+		if pinned[own.ID] {
+			continue
+		}
+		entries = append(entries, listEntry{
+			ID: own.ID, Name: own.Name, Meta: countMeta(own.ItemCount),
+			Items: own.Items, Private: !own.IsPublic,
+		})
+	}
+	return entries
+}
+
+// ownList returns the account's mylist with the ID, when it has one.
+func (app *nativeApp) ownList(id string) (OwnMylist, bool) {
+	for i := range app.ownMylists {
+		if app.ownMylists[i].ID == id {
+			return app.ownMylists[i], true
+		}
+	}
+	return OwnMylist{}, false
+}
+
 // importCard shows the last card of the home: one big tile with a plus,
-// opening the dialog that reads a public mylist in.
+// opening the dialog that reads a mylist in by URL or ID.
 func (app *nativeApp) importCard(c *ui.Context) {
 	card := ui.Button(c, "").Label("マイリストを読み込む").Width(playlistCardWidth).
 		Padding(12).Radius(12).Border(1, app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
@@ -621,14 +697,14 @@ func (app *nativeApp) importCard(c *ui.Context) {
 	}
 }
 
-// importDialog builds the dialog reading a public mylist in: a field for
-// its URL or ID, and the buttons opening or dismissing it.
+// importDialog builds the dialog reading a mylist in: a field for its URL
+// or ID, and the buttons opening or dismissing it.
 func (app *nativeApp) importDialog(c *ui.Context) {
 	ui.Column(c).Width(380).Gap(14).Children(func() {
-		ui.Text(c, "公開マイリストを読み込む").FontSize(20).Bold()
-		ui.Text(c, "ニコニコ動画の公開マイリストのURLまたはIDを入力してください。").FontSize(12).TextColor(app.theme.TextMuted)
+		ui.Text(c, "マイリストを読み込む").FontSize(20).Bold()
+		ui.Text(c, "ニコニコ動画のマイリストのURLまたはIDを入力してください。").FontSize(12).TextColor(app.theme.TextMuted)
 		field := ui.TextInput(c, &app.input).Placeholder("URL または ID").AutoFocus().
-			Label("公開マイリストのURLまたはID").FillWidth()
+			Label("マイリストのURLまたはID").FillWidth()
 		if field.Submitted() && strings.TrimSpace(app.input) != "" {
 			app.importInput()
 		}
@@ -667,9 +743,11 @@ func (app *nativeApp) statusLine(c *ui.Context) {
 	ui.Text(c, app.status).FontSize(12).TextColor(color)
 }
 
-// playlistCard shows one saved playlist: its first four track pictures in
-// a 2×2 tile, its name and its size. Clicking the card opens the playlist.
-func (app *nativeApp) playlistCard(c *ui.Context, entry SavedMylist) {
+// listCard shows one list — the account's own or a pinned snapshot — as a
+// card: its first four track pictures in a 2×2 tile, its name and its meta
+// line, its pin and lock marks. Clicking the card opens the list; the
+// right-click menu pins and unpins it.
+func (app *nativeApp) listCard(c *ui.Context, entry listEntry) {
 	card := ui.Button(c, "").Label(entry.Name).Width(playlistCardWidth).
 		Padding(12).Radius(12).Border(1, app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 	if card.Hovered() {
@@ -679,15 +757,63 @@ func (app *nativeApp) playlistCard(c *ui.Context, entry SavedMylist) {
 	}
 	card.Children(func() {
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
-			app.cardTiles(c, entry.Items)
+			ui.Box(c).FillWidth().Children(func() {
+				app.cardTiles(c, entry.Items)
+				app.cardBadges(c, entry.Pinned, entry.Private)
+			})
 			ui.Text(c, entry.Name).FontSize(14).Bold().SingleLine().Ellipsis("…")
-			ui.Text(c, savedMeta(entry)).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
+			ui.Text(c, entry.Meta).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
 		})
 	})
 	if card.Clicked() {
 		app.queueOpen = false
 		app.router.Push(listPath(entry.ID))
 	}
+	card.ContextMenu(func(m *ui.Menu) { app.pinMenu(m, entry) })
+}
+
+// pinMenu fills the right-click menu of a list: one check item that pins
+// and unpins it.
+func (app *nativeApp) pinMenu(m *ui.Menu, entry listEntry) {
+	if m.Item("ピン留め").Checked(entry.Pinned).Chosen() {
+		if entry.Pinned {
+			app.unpin(entry.ID)
+		} else {
+			app.saveEntry(entry.ID, entry.Name)
+		}
+	}
+}
+
+// countMeta labels a list with its size.
+func countMeta(count int) string { return fmt.Sprintf("全%d曲", count) }
+
+// cardBadges marks a card's tile: the pin badge over the tile's top-right
+// corner, and the private mark as a chip over its bottom-right.
+func (app *nativeApp) cardBadges(c *ui.Context, pinned, private bool) {
+	if pinned {
+		app.pinBadge(c).Absolute().Top(4).Right(4)
+	}
+	if private {
+		ui.Box(c).Absolute().Bottom(4).Right(4).Radius(10).Padding(3, 7).
+			Background(app.theme.Background).Border(1, app.theme.Border).
+			Children(func() {
+				ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, iconLock).FontSize(11).TextColor(app.theme.Text)
+					ui.Text(c, "非公開").FontSize(11).TextColor(app.theme.Text)
+				})
+			})
+	}
+}
+
+// pinBadge is the pinned mark: the filled, leaning pin on its round dark
+// chip, so it reads on a picture or on a selected row.
+func (app *nativeApp) pinBadge(c *ui.Context) ui.Element {
+	return ui.Box(c).Size(24, 24).Radius(12).Center().
+		Background(app.theme.Background).Border(1, app.theme.Border).
+		Children(func() {
+			ui.Icon(c, iconPin).Label("ピン留め").Tooltip("ピン留め").
+				FontSize(14).TextColor(ui.Hex("#39c5bb")).Rotate(45)
+		})
 }
 
 // cardTiles lays a playlist's first four track pictures out as a 2×2 tile,
@@ -719,16 +845,16 @@ func (app *nativeApp) cardTile(c *ui.Context, item MylistItem) {
 	ui.Box(c).AspectRatio(1).Radius(6).Background(app.theme.SurfaceHover)
 }
 
-// savedMeta labels a playlist card: its owner when known, and its size.
+// savedMeta labels a pinned card: its owner when known, and its size.
 func savedMeta(entry SavedMylist) string {
 	total := entry.TotalItemCount
 	if total == 0 {
 		total = len(entry.Items)
 	}
 	if entry.Owner != "" {
-		return fmt.Sprintf("%s  ·  全%d曲", entry.Owner, total)
+		return entry.Owner + "  ·  " + countMeta(total)
 	}
-	return fmt.Sprintf("全%d曲", total)
+	return countMeta(total)
 }
 
 // content builds the page the router shows: the home, or a list.
@@ -819,10 +945,10 @@ func (app *nativeApp) listHeader(c *ui.Context) {
 			if button := ui.Button(c, "更新").Disabled(app.saving || app.loading); button.Clicked() {
 				app.refreshSaved(*entry)
 			}
-			if button := ui.Button(c, "削除").Disabled(app.saving); button.Clicked() {
+			if button := ui.Button(c, "ピン留めを外す").Disabled(app.saving); button.Clicked() {
 				app.removeSaved(*entry)
 			}
-		} else if button := ui.PrimaryButton(c, "このリストを保存").Disabled(app.saving || app.loading); button.Clicked() {
+		} else if button := ui.PrimaryButton(c, "ピン留め").Disabled(app.saving || app.loading); button.Clicked() {
 			app.saveCurrent()
 		}
 	})
@@ -1223,12 +1349,25 @@ func (app *nativeApp) currentSaved() *SavedMylist {
 	if app.page == nil {
 		return nil
 	}
+	return app.savedEntry(app.page.ID)
+}
+
+// savedEntry returns the pinned snapshot with the ID, when there is one.
+func (app *nativeApp) savedEntry(id string) *SavedMylist {
 	for i := range app.saved {
-		if app.saved[i].ID == app.page.ID {
+		if app.saved[i].ID == id {
 			return &app.saved[i]
 		}
 	}
 	return nil
+}
+
+// unpin drops the local snapshot of the pinned list id; one of the
+// account's own lists returns to its live place on the home.
+func (app *nativeApp) unpin(id string) {
+	if entry := app.savedEntry(id); entry != nil {
+		app.removeSaved(*entry)
+	}
 }
 
 // playingTrack is the track the report names, built without looking at the
@@ -1243,7 +1382,7 @@ func (app *nativeApp) playingTrack() MylistItem {
 	}
 }
 
-// openList shows the list id names: the one loaded, the saved copy, else
+// openList shows the list id names: the one loaded, the pinned copy, else
 // the API's first page.
 func (app *nativeApp) openList(id string) {
 	if id == "" || app.page != nil && app.page.ID == id {
@@ -1260,7 +1399,7 @@ func (app *nativeApp) openList(id string) {
 	app.fetchList(id)
 }
 
-// openSaved shows the saved snapshot of the mylist id names, reporting
+// openSaved shows the pinned snapshot of the mylist id names, reporting
 // whether there is one; the route is already the page shown.
 func (app *nativeApp) openSaved(id string) bool {
 	for _, entry := range app.saved {
@@ -1287,7 +1426,7 @@ func (app *nativeApp) openSaved(id string) bool {
 		app.hasMore = false
 		app.resetThumbFailures()
 		app.queueThumbnailFill(page.Items)
-		app.setStatus("保存内容から表示中（更新するまで通信しません）")
+		app.setStatus("ピン留めした内容から表示中（更新するまで通信しません）")
 		app.playerError = ""
 		// The player keeps the queue and the track it is playing; only a
 		// track of this list played from here moves the queue to it.
@@ -1315,7 +1454,7 @@ func (app *nativeApp) fetchList(input string) {
 	app.sendPlayer(PlayerCommand{Action: "setItems"})
 	go func() {
 		page, err := app.mylist.GetPage(input, 1)
-		app.window.Update(func() {
+		app.update(func() {
 			if token != app.loadToken {
 				return
 			}
@@ -1345,7 +1484,7 @@ func (app *nativeApp) loadMore() {
 	app.setStatus("続きを読み込んでいます…")
 	go func() {
 		page, err := app.mylist.GetPage(pageID, pageNo)
-		app.window.Update(func() {
+		app.update(func() {
 			if token != app.loadToken {
 				return
 			}
@@ -1420,7 +1559,7 @@ func (app *nativeApp) saveEntry(id, name string) {
 	app.setStatus("マイリストを更新しています…")
 	go func() {
 		saved, err := app.mylist.SaveMylist(id, name)
-		app.window.Update(func() {
+		app.update(func() {
 			app.saving = false
 			if err != nil {
 				app.setError(err)
@@ -1445,7 +1584,7 @@ func (app *nativeApp) saveEntry(id, name string) {
 					app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
 				}
 			}
-			app.setStatus("保存しました。")
+			app.setStatus("ピン留めしました。")
 		})
 	}()
 }
@@ -1457,7 +1596,7 @@ func (app *nativeApp) removeSaved(entry SavedMylist) {
 		return
 	}
 	app.saved = saved
-	app.setStatus("保存した参照を削除しました。")
+	app.setStatus("ピン留めを外しました。")
 }
 
 // sendPlayer hands one command to the playback engine; in tests, without an

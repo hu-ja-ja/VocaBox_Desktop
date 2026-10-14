@@ -24,6 +24,7 @@ func main() {
 		} else {
 			app.loggedIn = true
 			app.loadAccount()
+			app.loadOwnMylists()
 		}
 	}
 	if saved, err := mylist.ListSaved(); err != nil {
