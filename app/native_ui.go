@@ -108,6 +108,15 @@ type nativeApp struct {
 	// queueMenuOpen drives the popover until it is dismissed.
 	queueMenuRow  int
 	queueMenuOpen bool
+	// menuOpen drives the right-click menu of a list, menuEntry the list it
+	// pins, and menuX and menuY where it opened within its anchor, the
+	// sidebar item or card named by menuAnchorID. menuBuilt says a frame
+	// built the menu, so one whose anchor left the screen closes.
+	menuOpen     bool
+	menuEntry    listEntry
+	menuX, menuY float32
+	menuAnchorID uint64
+	menuBuilt    bool
 	// queueChoice is the playlist row the list last chose, -1 for none: a
 	// choice plays the track before the next frame.
 	queueChoice int
@@ -224,6 +233,12 @@ func (app *nativeApp) view(c *ui.Context) {
 	})
 	ui.Modal(c, &app.importing, func() { app.importDialog(c) })
 	ui.Modal(c, &app.confirmLogout, func() { app.logoutDialog(c) })
+	// A menu whose list left the screen, as after a refresh, does not stay
+	// open on the element that took its place.
+	if app.menuOpen && !app.menuBuilt {
+		app.menuOpen = false
+	}
+	app.menuBuilt = false
 }
 
 func (app *nativeApp) sidebar(c *ui.Context) {
@@ -257,8 +272,12 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 						if entry.Pinned {
 							item.Children(func() { app.pinBadge(c) })
 						}
-						item.ContextMenu(func(m *ui.Menu) { app.pinMenu(m, entry) })
+						if item.RightClicked() {
+							app.openListMenu(item, entry)
+						}
+						app.listMenu(c, item, entry)
 						if item.Clicked() {
+							app.menuOpen = false
 							listClicked = true
 						}
 					}
@@ -513,6 +532,16 @@ func (app *nativeApp) followQueue(n int) {
 	app.queueList.ScrollTo(app.player.QueueIndex, ui.Start)
 }
 
+// menuItem is one item of an app menu: no face of its own until the pointer
+// is on it, so the panel is the only outline the menu draws.
+func (app *nativeApp) menuItem(c *ui.Context, label string) ui.Element {
+	item := ui.Button(c, label).FillWidth().BorderWidth(0).Background(app.theme.Background)
+	if item.Hovered() {
+		item.Background(app.theme.SurfaceHover)
+	}
+	return item
+}
+
 // queueMenu shows the menu button of a row with the menu it opens: only on
 // the row the pointer is over, as the three dots a playlist row carries.
 func (app *nativeApp) queueMenu(c *ui.Context, item MylistItem, i int, hovered bool) {
@@ -535,7 +564,8 @@ func (app *nativeApp) queueMenu(c *ui.Context, item MylistItem, i int, hovered b
 		return
 	}
 	ui.Popover(c, button, &app.queueMenuOpen, func() {
-		if menuItem := ui.Button(c, "キューから削除").FillWidth(); menuItem.Clicked() {
+		remove := app.menuItem(c, "キューから削除")
+		if remove.Clicked() {
 			app.removeFromQueue(item)
 		}
 	})
@@ -766,22 +796,63 @@ func (app *nativeApp) listCard(c *ui.Context, entry listEntry) {
 		})
 	})
 	if card.Clicked() {
+		app.menuOpen = false
 		app.queueOpen = false
 		app.router.Push(listPath(entry.ID))
 	}
-	card.ContextMenu(func(m *ui.Menu) { app.pinMenu(m, entry) })
+	// The keyboard opens the same menu with the menu key or Shift+F10;
+	// both ask every frame, so either one stays registered.
+	f10 := card.Shortcut(ui.Shift, ui.KeyF10)
+	menuKey := card.Shortcut(0, ui.KeyContextMenu)
+	if card.RightClicked() || f10 || menuKey {
+		app.openListMenu(card, entry)
+	}
+	app.listMenu(c, card, entry)
 }
 
-// pinMenu fills the right-click menu of a list: one check item that pins
-// and unpins it.
-func (app *nativeApp) pinMenu(m *ui.Menu, entry listEntry) {
-	if m.Item("ピン留め").Checked(entry.Pinned).Chosen() {
-		if entry.Pinned {
-			app.unpin(entry.ID)
-		} else {
-			app.saveEntry(entry.ID, entry.Name)
-		}
+// openListMenu opens the pin menu of a list at the pointer, or below the
+// element the keyboard asked on, which the pointer may be away from.
+func (app *nativeApp) openListMenu(anchor ui.Element, entry listEntry) {
+	x, y, over := anchor.PointerPosition()
+	if !over {
+		x, y = 0, anchor.Bounds().H
 	}
+	app.menuOpen, app.menuEntry = true, entry
+	app.menuX, app.menuY = x, y
+	app.menuAnchorID = anchor.ID()
+}
+
+// listMenu shows the pin menu of a list on its anchor while it is the one
+// the menu belongs to: one item that pins or unpins the list. The panel
+// opens where the right-click was, clamped into the window, rather than the
+// system's own menu, so it carries the app's look.
+func (app *nativeApp) listMenu(c *ui.Context, anchor ui.Element, entry listEntry) {
+	// The ID names the element, which a refresh may give another list.
+	if !app.menuOpen || app.menuAnchorID != anchor.ID() || app.menuEntry.ID != entry.ID {
+		return
+	}
+	app.menuBuilt = true
+	label := "ピン留め"
+	if entry.Pinned {
+		label = "ピン留めを外す"
+	}
+	ui.PopoverBase(c, anchor, &app.menuOpen, func(panel ui.Element) {
+		// A margin carries the pointer offset into the attach calculation,
+		// which keeps the panel in the window at the edges.
+		panel.AttachTo(anchor, ui.AnchorTopLeft, ui.AnchorTopLeft).Margin(app.menuY, 0, 0, app.menuX).
+			Padding(4).Radius(app.theme.Radius + 2).Background(app.theme.Background).
+			Border(1, app.theme.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).
+			Role(ui.RoleMenu).Label("リストのメニュー")
+		item := app.menuItem(c, label).Role(ui.RoleMenuItemCheckBox).Checked(entry.Pinned)
+		if item.Clicked() {
+			app.menuOpen = false
+			if entry.Pinned {
+				app.unpin(entry.ID)
+			} else {
+				app.saveEntry(entry.ID, entry.Name)
+			}
+		}
+	})
 }
 
 // countMeta labels a list with its size.

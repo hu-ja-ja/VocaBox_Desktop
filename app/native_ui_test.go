@@ -298,8 +298,8 @@ func TestNativeUIHomePinsFirst(t *testing.T) {
 }
 
 // TestNativeUIHomeUnpinsFromMenu checks the card's right-click menu: a
-// pinned card offers ピン留め (checked), and choosing it unpins the list
-// and drops the card.
+// pinned card offers ピン留めを外す, and choosing it unpins the list and
+// drops the card.
 func TestNativeUIHomeUnpinsFromMenu(t *testing.T) {
 	mylist := NewMylist()
 	mylist.configDir = t.TempDir()
@@ -312,10 +312,10 @@ func TestNativeUIHomeUnpinsFromMenu(t *testing.T) {
 	if err := tester.RightClick("ピン留めした公開リスト"); err != nil {
 		t.Fatal(err)
 	}
-	if got := tester.Menu(); len(got) != 1 || got[0] != "ピン留め" {
-		t.Fatalf("card menu = %q; want [ピン留め]", got)
+	if _, ok := tester.Find("ピン留めを外す"); !ok {
+		t.Fatalf("card menu did not open: %q", tester.Texts())
 	}
-	if err := tester.ChooseMenuItem("ピン留め"); err != nil {
+	if err := tester.Click("ピン留めを外す"); err != nil {
 		t.Fatal(err)
 	}
 	if len(app.saved) != 0 {
@@ -348,10 +348,10 @@ func TestNativeUIHomePinsFromMenu(t *testing.T) {
 	if err := tester.RightClick("自分の公開リスト"); err != nil {
 		t.Fatal(err)
 	}
-	if got := tester.Menu(); len(got) != 1 || got[0] != "ピン留め" {
-		t.Fatalf("card menu = %q; want [ピン留め]", got)
+	if _, ok := tester.Find("ピン留め"); !ok {
+		t.Fatalf("card menu did not open: %q", tester.Texts())
 	}
-	if err := tester.ChooseMenuItem("ピン留め"); err != nil {
+	if err := tester.Click("ピン留め"); err != nil {
 		t.Fatal(err)
 	}
 	if !app.saving {
@@ -408,15 +408,18 @@ func TestNativeUISidebarListsLikeHome(t *testing.T) {
 
 	// An unpinned list can be pinned from its sidebar menu.
 	tester.RightClickAt(own.X+own.W/2, own.Y+own.H/2)
-	if got := tester.Menu(); len(got) != 1 || got[0] != "ピン留め" {
-		t.Fatalf("sidebar menu = %q; want [ピン留め]", got)
+	if !app.menuOpen {
+		t.Fatalf("the sidebar menu did not open: %q", tester.Texts())
 	}
-	tester.CloseMenu()
+	tester.Key(0, ui.KeyEscape)
+	if app.menuOpen {
+		t.Fatal("Escape did not close the sidebar menu")
+	}
 }
 
 // TestNativeUISidebarUnpinsFromMenu checks the sidebar's right-click menu:
-// choosing ピン留め unpins the list, dropping it from the sidebar and the
-// home.
+// choosing ピン留めを外す unpins the list, dropping it from the sidebar and
+// the home.
 func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
 	mylist := NewMylist()
 	mylist.configDir = t.TempDir()
@@ -430,10 +433,10 @@ func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
 		t.Fatalf("the sidebar item was not found: %v, %v", item, ok)
 	}
 	tester.RightClickAt(item.X+item.W/2, item.Y+item.H/2)
-	if got := tester.Menu(); len(got) != 1 || got[0] != "ピン留め" {
-		t.Fatalf("sidebar menu = %q; want [ピン留め]", got)
+	if _, ok := tester.Find("ピン留めを外す"); !ok {
+		t.Fatalf("sidebar menu did not open: %q", tester.Texts())
 	}
-	if err := tester.ChooseMenuItem("ピン留め"); err != nil {
+	if err := tester.Click("ピン留めを外す"); err != nil {
 		t.Fatal(err)
 	}
 	if len(app.saved) != 0 {
@@ -444,6 +447,112 @@ func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
 	}
 	if !tester.HasText("リストはありません") {
 		t.Fatalf("the empty library says nothing: %q", tester.Texts())
+	}
+}
+
+// TestNativeUIListMenuOpensAtPointer checks the card's menu opens where the
+// pointer right-clicked rather than below the card, and moves in from the
+// window's edge.
+func TestNativeUIListMenuOpensAtPointer(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.sidebarOpen = false
+	app.ownMylists = []OwnMylist{
+		{ID: "71043760", Name: "位置のカード", ItemCount: 2, IsPublic: true},
+		{ID: "71043761", Name: "別のカード", ItemCount: 2, IsPublic: true},
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	card, ok := tester.Find("位置のカード")
+	if !ok {
+		t.Fatalf("the card was not found: %q", tester.Texts())
+	}
+	near := func(got, want float32) bool {
+		return got > want-1 && got < want+1
+	}
+	x, y := card.X+16, card.Y+card.H-16
+	tester.RightClickAt(x, y)
+	panel, ok := tester.Find("リストのメニュー")
+	if !ok {
+		t.Fatalf("the menu did not open: %q", tester.Texts())
+	}
+	if !near(panel.X, x) || !near(panel.Y, y) {
+		t.Fatalf("the menu opened at %v, %v, want the click at %v, %v", panel.X, panel.Y, x, y)
+	}
+
+	// Right-clicking another card moves the menu with it.
+	other, ok := tester.Find("別のカード")
+	if !ok {
+		t.Fatalf("the second card was not found: %q", tester.Texts())
+	}
+	tester.RightClickAt(other.X+16, other.Y+16)
+	if app.menuEntry.ID != "71043761" {
+		t.Fatalf("the menu still belongs to %q", app.menuEntry.ID)
+	}
+	panel, ok = tester.Find("リストのメニュー")
+	if !ok || !near(panel.X, other.X+16) || !near(panel.Y, other.Y+16) {
+		t.Fatalf("the menu did not move to the second card: %v, %v", panel, ok)
+	}
+	tester.Key(0, ui.KeyEscape)
+	if _, ok := tester.Find("リストのメニュー"); ok {
+		t.Fatal("Escape did not close the menu")
+	}
+
+	// A click at the card's right edge in a narrow window leaves no room:
+	// the menu stays inside it.
+	narrow := ui.NewTester(app.view, 380, 760)
+	card, ok = narrow.Find("位置のカード")
+	if !ok {
+		t.Fatalf("the card was not found in the narrow window: %q", narrow.Texts())
+	}
+	tester = narrow
+	tester.RightClickAt(card.X+card.W-4, card.Y+card.H-16)
+	panel, ok = tester.Find("リストのメニュー")
+	if !ok {
+		t.Fatalf("the menu did not open in the narrow window: %q", tester.Texts())
+	}
+	if panel.X+panel.W > 380 {
+		t.Fatalf("the menu leaves the window: %v", panel)
+	}
+}
+
+// TestNativeUIListMenuKeyboard checks the card's menu opens from the
+// keyboard — the menu key and Shift+F10 — and its item works from there.
+func TestNativeUIListMenuKeyboard(t *testing.T) {
+	mylist := NewMylist()
+	mylist.configDir = t.TempDir()
+	app := newNativeApp(mylist)
+	app.sidebarOpen = false
+	app.saved = []SavedMylist{{ID: "555", Name: "キーボードのピン", TotalItemCount: 2,
+		Items: []MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}}}}
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	focused := false
+	for i := 0; i < 40 && !focused; i++ {
+		tester.Key(0, ui.KeyTab)
+		focused = tester.Focused("キーボードのピン")
+	}
+	if !focused {
+		t.Fatal("Tab did not reach the card")
+	}
+	tester.Key(0, ui.KeyContextMenu)
+	if _, ok := tester.Find("ピン留めを外す"); !ok {
+		t.Fatalf("the menu key did not open the menu: %q", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEscape)
+	if _, ok := tester.Find("ピン留めを外す"); ok {
+		t.Fatal("Escape did not close the menu")
+	}
+	tester.Key(ui.Shift, ui.KeyF10)
+	if _, ok := tester.Find("ピン留めを外す"); !ok {
+		t.Fatalf("Shift+F10 did not open the menu: %q", tester.Texts())
+	}
+	tester.Key(0, ui.KeyTab)
+	if !tester.Focused("ピン留めを外す") {
+		t.Fatal("Tab did not move the focus into the menu")
+	}
+	tester.Key(0, ui.KeyEnter)
+	if len(app.saved) != 0 {
+		t.Fatalf("Enter did not unpin the list: %+v", app.saved)
 	}
 }
 
