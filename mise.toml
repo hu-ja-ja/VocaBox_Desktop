@@ -3,6 +3,10 @@ go = "1.27.1"
 # The GNU target carries the MinGW-w64 C runtime and rust-lld, so the helper
 # builds without MSVC or a separate MinGW install.
 rust = { version = "1.97.1-x86_64-pc-windows-gnu", mr_boxington = true }
+# The notices generator: cargo-about reads the helper's crates, go-licenses
+# the app's modules.
+"cargo:cargo-about" = "0.9.1"
+"go:github.com/google/go-licenses/v2" = "2.0.1"
 
 [tasks.helper]
 run = 'cargo build --release --manifest-path helper/Cargo.toml && copy /y helper\target\release\AmsHelper.exe resources\AmsHelper.exe'
@@ -14,3 +18,11 @@ run = "go tool mygo dev"
 [tasks.build]
 depends = ["helper"]
 run = "go tool mygo build"
+
+# Writes THIRD_PARTY_NOTICES.md from the app's Go modules, the helper's Rust
+# crates and the Lucide icons; notices-check reports a stale file instead.
+[tasks.notices]
+run = "go run ./tools/notices"
+
+[tasks."notices-check"]
+run = "go run ./tools/notices -check"

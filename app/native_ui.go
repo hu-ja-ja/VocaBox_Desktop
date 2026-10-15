@@ -159,6 +159,17 @@ type nativeApp struct {
 	confirmLogout bool
 	// railAccountOpen drives the account menu of the rail's avatar.
 	railAccountOpen bool
+	// settingResume and settingTray are the example rows of the settings
+	// page, until the preferences behind them exist.
+	settingResume bool
+	settingTray   bool
+	// licenseOpen holds the licence rows of the settings left open, by the
+	// work they name; licenseOpenDialog shows the dialog the app's own
+	// licence opens, licenseTitle its heading and licenseBody its text.
+	licenseOpen       map[string]bool
+	licenseOpenDialog bool
+	licenseTitle      string
+	licenseBody       string
 	page            *MylistPage
 	nextPage        int
 	hasMore         bool
@@ -255,6 +266,10 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 		queueMenuRow: -1,
 		queueFollow:  -2,
 		queueChoice:  -1,
+		// One example row shows on and the other off, so the settings page
+		// shows both states of a toggle.
+		settingResume: true,
+		licenseOpen:   map[string]bool{},
 	}
 	// The body saving runs in the background, one mylist at a time.
 	go app.fillWorker()
@@ -289,6 +304,7 @@ func (app *nativeApp) view(c *ui.Context) {
 	ui.Modal(c, &app.combining, func() { app.combineDialog(c) })
 	ui.Modal(c, &app.confirmLogout, func() { app.logoutDialog(c) })
 	ui.Modal(c, &app.confirmDelete, func() { app.deleteDialog(c) })
+	ui.Modal(c, &app.licenseOpenDialog, func() { app.licenseDialog(c) })
 	// A menu whose mylist left the screen, as after a refresh, does not stay
 	// open on the element that took its place.
 	if app.menuOpen && !app.menuBuilt {
@@ -303,13 +319,21 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 		Children(func() {
 			ui.Row(c).FillWidth().Height(48).AlignItems(ui.Center).Gap(12).Children(func() {
 				app.sidebarToggle(c, false)
-				ui.Row(c).Grow(1).Justify(ui.Center).AlignItems(ui.Center).Gap(12).Children(func() {
+				lockup := ui.ButtonBase(c).Label(locales.NavSettings()).Tooltip(locales.NavSettings()).
+					Grow(1).Justify(ui.Center).Gap(12)
+				if lockup.Hovered() {
+					lockup.Background(app.theme.SurfaceHover).Radius(10)
+				}
+				lockup.Children(func() {
 					app.brandMark(c)
 					ui.Column(c).Gap(2).Children(func() {
 						ui.Text(c, "VocaBox").FontSize(25).Bold()
 						ui.Text(c, "NICONICO MUSIC").FontSize(10).FontWeight(700).LetterSpacing(1.2).TextColor(app.theme.TextMuted)
 					})
 				})
+				if lockup.Clicked() {
+					app.navigate(settingsPath)
+				}
 			})
 
 			ui.Divider(c)
@@ -444,7 +468,14 @@ func (app *nativeApp) sidebarRail(c *ui.Context) {
 			})
 			ui.Row(c).FillWidth().Justify(ui.Start).Children(func() {
 				ui.Box(c).Width(12).Shrink(0)
-				app.brandMark(c)
+				mark := ui.ButtonBase(c).Label(locales.NavSettings()).Tooltip(locales.NavSettings()).Size(36, 36)
+				if mark.Hovered() {
+					mark.Background(app.theme.SurfaceHover).Radius(10)
+				}
+				mark.Children(func() { app.brandMark(c) })
+				if mark.Clicked() {
+					app.navigate(settingsPath)
+				}
 			})
 			ui.Divider(c)
 			// The same destinations as the open sidebar's list, the pinned
@@ -472,7 +503,7 @@ func (app *nativeApp) railHome(c *ui.Context) {
 	}
 	item.Children(func() { ui.Icon(c, iconHome).FontSize(20) })
 	if item.Clicked() {
-		app.railNavigate(homePath)
+		app.navigate(homePath)
 	}
 }
 
@@ -491,7 +522,7 @@ func (app *nativeApp) railMylist(c *ui.Context, entry mylistEntry) {
 	}
 	app.mylistMenu(c, item, entry)
 	if item.Clicked() {
-		app.railNavigate(mylistPath(entry.ID))
+		app.navigate(mylistPath(entry.ID))
 	}
 }
 
@@ -514,10 +545,10 @@ func (app *nativeApp) railTile(c *ui.Context, items []MylistItem) {
 	})
 }
 
-// railNavigate goes to a destination chosen on the rail, leaving the queue
-// screen for it even the destination already showing, as the open sidebar's
-// items do.
-func (app *nativeApp) railNavigate(path string) {
+// navigate goes to a destination chosen by the logo, the rail's home or a
+// rail mylist, leaving the queue screen for it even the destination already
+// showing.
+func (app *nativeApp) navigate(path string) {
 	app.menuOpen = false
 	app.queueOpen = false
 	app.loadingID = ""

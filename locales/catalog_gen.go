@@ -61,6 +61,136 @@ func (msgs Messages) NavCombined() string {
 	return Catalog.Format(msgs.locale, "navCombined", nil)
 }
 
+// NavSettings says "設定"
+// in the language the app shows.
+func NavSettings() string { return In(i18n.Locale()).NavSettings() }
+
+// NavSettings says "設定"
+// in the language of msgs.
+func (msgs Messages) NavSettings() string {
+	return Catalog.Format(msgs.locale, "navSettings", nil)
+}
+
+// SettingsSubtitle says "アプリの設定"
+// in the language the app shows.
+func SettingsSubtitle() string { return In(i18n.Locale()).SettingsSubtitle() }
+
+// SettingsSubtitle says "アプリの設定"
+// in the language of msgs.
+func (msgs Messages) SettingsSubtitle() string {
+	return Catalog.Format(msgs.locale, "settingsSubtitle", nil)
+}
+
+// SettingsResumeTitle says "起動時に前回の曲を再開"
+// in the language the app shows.
+func SettingsResumeTitle() string { return In(i18n.Locale()).SettingsResumeTitle() }
+
+// SettingsResumeTitle says "起動時に前回の曲を再開"
+// in the language of msgs.
+func (msgs Messages) SettingsResumeTitle() string {
+	return Catalog.Format(msgs.locale, "settingsResumeTitle", nil)
+}
+
+// SettingsResumeBody says "終了時に再生していた曲から始めます"
+// in the language the app shows.
+func SettingsResumeBody() string { return In(i18n.Locale()).SettingsResumeBody() }
+
+// SettingsResumeBody says "終了時に再生していた曲から始めます"
+// in the language of msgs.
+func (msgs Messages) SettingsResumeBody() string {
+	return Catalog.Format(msgs.locale, "settingsResumeBody", nil)
+}
+
+// SettingsTrayTitle says "トレイに残して再生を続ける"
+// in the language the app shows.
+func SettingsTrayTitle() string { return In(i18n.Locale()).SettingsTrayTitle() }
+
+// SettingsTrayTitle says "トレイに残して再生を続ける"
+// in the language of msgs.
+func (msgs Messages) SettingsTrayTitle() string {
+	return Catalog.Format(msgs.locale, "settingsTrayTitle", nil)
+}
+
+// SettingsTrayBody says "ウィンドウを閉じても再生を止めません"
+// in the language the app shows.
+func SettingsTrayBody() string { return In(i18n.Locale()).SettingsTrayBody() }
+
+// SettingsTrayBody says "ウィンドウを閉じても再生を止めません"
+// in the language of msgs.
+func (msgs Messages) SettingsTrayBody() string {
+	return Catalog.Format(msgs.locale, "settingsTrayBody", nil)
+}
+
+// SettingsLicense says "MPL-2.0 License (Mozilla Public License Version 2.0)"
+// in the language the app shows.
+func SettingsLicense() string { return In(i18n.Locale()).SettingsLicense() }
+
+// SettingsLicense says "MPL-2.0 License (Mozilla Public License Version 2.0)"
+// in the language of msgs.
+func (msgs Messages) SettingsLicense() string {
+	return Catalog.Format(msgs.locale, "settingsLicense", nil)
+}
+
+// SettingsRepository says "リポジトリ"
+// in the language the app shows.
+func SettingsRepository() string { return In(i18n.Locale()).SettingsRepository() }
+
+// SettingsRepository says "リポジトリ"
+// in the language of msgs.
+func (msgs Messages) SettingsRepository() string {
+	return Catalog.Format(msgs.locale, "settingsRepository", nil)
+}
+
+// SettingsThirdPartyLicense says "サードパーティライセンス"
+// in the language the app shows.
+func SettingsThirdPartyLicense() string { return In(i18n.Locale()).SettingsThirdPartyLicense() }
+
+// SettingsThirdPartyLicense says "サードパーティライセンス"
+// in the language of msgs.
+func (msgs Messages) SettingsThirdPartyLicense() string {
+	return Catalog.Format(msgs.locale, "settingsThirdPartyLicense", nil)
+}
+
+// SettingsThirdPartyLicenseBody says "同梱している Go モジュールと Rust クレートのライセンスです"
+// in the language the app shows.
+func SettingsThirdPartyLicenseBody() string { return In(i18n.Locale()).SettingsThirdPartyLicenseBody() }
+
+// SettingsThirdPartyLicenseBody says "同梱している Go モジュールと Rust クレートのライセンスです"
+// in the language of msgs.
+func (msgs Messages) SettingsThirdPartyLicenseBody() string {
+	return Catalog.Format(msgs.locale, "settingsThirdPartyLicenseBody", nil)
+}
+
+// ActionView says "表示"
+// in the language the app shows.
+func ActionView() string { return In(i18n.Locale()).ActionView() }
+
+// ActionView says "表示"
+// in the language of msgs.
+func (msgs Messages) ActionView() string {
+	return Catalog.Format(msgs.locale, "actionView", nil)
+}
+
+// ActionViewOf says "{name}を表示"
+// in the language the app shows.
+func ActionViewOf(name string) string { return In(i18n.Locale()).ActionViewOf(name) }
+
+// ActionViewOf says "{name}を表示"
+// in the language of msgs.
+func (msgs Messages) ActionViewOf(name string) string {
+	return Catalog.Format(msgs.locale, "actionViewOf", map[string]any{"name": name})
+}
+
+// ActionClose says "閉じる"
+// in the language the app shows.
+func ActionClose() string { return In(i18n.Locale()).ActionClose() }
+
+// ActionClose says "閉じる"
+// in the language of msgs.
+func (msgs Messages) ActionClose() string {
+	return Catalog.Format(msgs.locale, "actionClose", nil)
+}
+
 // HomeSubtitle says "聴きたいマイリストを選んで再生"
 // in the language the app shows.
 func HomeSubtitle() string { return In(i18n.Locale()).HomeSubtitle() }

@@ -15,6 +15,9 @@ func (app *nativeApp) content(c *ui.Context) {
 		case r.Match(homePath):
 			r.Title(locales.NavHome())
 			app.homeView(c)
+		case r.Match(settingsPath):
+			r.Title(locales.NavSettings())
+			app.settingsView(c)
 		case r.Match("/mylist/{id}"):
 			app.mylistView(c, r)
 		default:

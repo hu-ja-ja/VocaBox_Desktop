@@ -66,6 +66,9 @@ var logOutSVG []byte
 //go:embed icons/layers-2.svg
 var layersSVG []byte
 
+//go:embed icons/github.svg
+var githubSVG []byte
+
 var (
 	iconPlay        = ui.MustParseSVG(playSVG)
 	iconPause       = ui.MustParseSVG(pauseSVG)
@@ -86,4 +89,5 @@ var (
 	iconLogIn       = ui.MustParseSVG(logInSVG)
 	iconLogOut      = ui.MustParseSVG(logOutSVG)
 	iconLayers      = ui.MustParseSVG(layersSVG)
+	iconGitHub      = ui.MustParseSVG(githubSVG)
 )

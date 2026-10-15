@@ -1,0 +1,11 @@
+accepted = [
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+]
+
+# AmsHelper is this app's own crate: its licence is the app's, stated in the
+# header of the notices.
+[private]
+ignore = true

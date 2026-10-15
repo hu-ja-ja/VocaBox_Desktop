@@ -64,4 +64,4 @@ VOCABOX_E2E=1 go test ./app -run TestPlaybackE2E   # 実回線/実再生の確�
 
 ## ライセンス
 
-[Mozilla Public License 2.0](LICENSE)。第三者製ソフトウェアは [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 参照。
+[Mozilla Public License 2.0](LICENSE)。サードパーティライセンスはアプリ内の設定から確認できます。[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) は同内容の生成物（`mise run notices` で再生成、`mise run notices-check` で差分を検査）。

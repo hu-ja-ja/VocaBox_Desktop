@@ -10,6 +10,9 @@ import (
 // homePath routes to the home; the route of a mylist is mylistPath of its ID.
 const homePath = "/"
 
+// settingsPath routes to the settings, which the logo opens.
+const settingsPath = "/settings"
+
 // mylistPath is the route showing the mylist the ID names.
 func mylistPath(id string) string { return "/mylist/" + id }
 
