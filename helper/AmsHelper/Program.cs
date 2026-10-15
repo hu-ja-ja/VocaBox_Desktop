@@ -37,6 +37,10 @@ internal static class Program
     // stdin command loop and the async manifest continuation.
     private static readonly object stateLock = new();
     private static AdaptiveMediaSource? _current;
+    // _source wraps _current for the player: nulling Player.Source detaches
+    // it without freeing the media stack's buffers, so a replaced track must
+    // dispose it explicitly or its buffers leak.
+    private static MediaSource? _source;
     private static int _generation;
     private static bool _wantPlay;
     // gen is the app's name of the track load the current source belongs to,
@@ -205,7 +209,8 @@ internal static class Program
             }
             _gen = command.Gen;
             _current = result.MediaSource;
-            Player.Source = MediaSource.CreateFromAdaptiveMediaSource(_current);
+            _source = MediaSource.CreateFromAdaptiveMediaSource(_current);
+            Player.Source = _source;
             // A track installed for a pause, or paused while its manifest
             // downloaded, stays paused: the UI's play state and the app's
             // wantPlaying must agree.
@@ -221,9 +226,17 @@ internal static class Program
         _generation++;
         _gen = 0;
         _wantPlay = false;
+        Player.Pause();
         Player.Source = null;
+        _source?.Dispose();
+        _source = null;
         _current?.Dispose();
         _current = null;
+        // The buffers are native and their wrappers are small: the runtime
+        // only collects a replaced track when it happens to see a reason to,
+        // so one is asked for here, where a track is replaced.
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
     }
 
     // ApplyCookies puts the app's cookie header on every request of the media

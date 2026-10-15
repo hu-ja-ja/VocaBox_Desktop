@@ -36,7 +36,9 @@ func TestPlaybackE2E(t *testing.T) {
 	}
 	defer helper.shutdown()
 
-	if err := helper.send(helperCommand{Cmd: "play", URL: sources.URIs[0], Cookie: sources.Cookie, UA: sources.UserAgent}); err != nil {
+	// The app starts a track by sending play with play true; without it the
+	// helper installs the track paused.
+	if err := helper.send(helperCommand{Cmd: "play", URL: sources.URIs[0], Cookie: sources.Cookie, UA: sources.UserAgent, Play: true}); err != nil {
 		t.Fatal(err)
 	}
 	opened := waitHelperEvent(t, events, "opened", 30*time.Second)
@@ -68,6 +70,16 @@ func TestPlaybackE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitHelperPosition(t, helper, events, paused+500, 10*time.Second)
+
+	// Switching tracks replaces the source playing: the replaced track's
+	// media objects are disposed, and the one replacing it opens in their
+	// place (the leak a switch used to leave).
+	if err := helper.send(helperCommand{Cmd: "play", URL: sources.URIs[0], Cookie: sources.Cookie, UA: sources.UserAgent, Gen: 2, Play: true}); err != nil {
+		t.Fatal(err)
+	}
+	if switched := waitHelperEvent(t, events, "opened", 30*time.Second); switched.Gen != 2 {
+		t.Fatalf("opened gen = %d; want 2", switched.Gen)
+	}
 
 	if err := helper.send(helperCommand{Cmd: "quit"}); err != nil {
 		t.Fatal(err)

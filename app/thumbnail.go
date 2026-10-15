@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"golang.org/x/image/draw"
 )
 
 const (
@@ -31,8 +34,13 @@ const (
 	thumbCooldown    = 30 * time.Second
 	// maxThumbsInMemory caps the decoded pictures kept in memory; at the cap
 	// the whole map is dropped and pictures reload from the disk cache as rows
-	// ask again.
-	maxThumbsInMemory = 300
+	// ask again. Pictures are halved as they are decoded (decodeThumbnail),
+	// so a screenful of rows and the home's cards are the room a cache needs.
+	maxThumbsInMemory = 80
+	// thumbDecodeHalfW is the width from which a picture is halved while it
+	// is decoded: a .M picture is 320×180, and half of it still covers a
+	// 45 DIP row at 200% scaling without scaling the picture up.
+	thumbDecodeHalfW = 320
 	// Picture sizes: a row and the player bar fix the height, and the width
 	// follows each picture's own aspect ratio.
 	thumbRowHeight = 45
@@ -404,6 +412,24 @@ func (app *nativeApp) fillThumbnail(item MylistItem) {
 	}()
 }
 
+// decodeThumbnail decodes a picture for the memory cache, halving an
+// oversized one as it does: the picture's own size is what the cache keeps,
+// however small a row shows it, and half of the CDN's .M picture is all a
+// row or the player bar draws. The CDN's generated pictures carry no EXIF
+// orientation, so plain image.Decode serves.
+func decodeThumbnail(body []byte) (*ui.Bitmap, error) {
+	img, _, err := image.Decode(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if b := img.Bounds(); b.Dx() >= thumbDecodeHalfW {
+		half := image.NewRGBA(image.Rect(0, 0, max(1, b.Dx()/2), max(1, b.Dy()/2)))
+		draw.CatmullRom.Scale(half, half.Bounds(), img, b, draw.Src, nil)
+		img = half
+	}
+	return ui.NewBitmap(img), nil
+}
+
 // requestThumbnail loads item's picture in the background: the memory
 // cache, the disk cache, then the CDN. Loads of one video collapse into one
 // goroutine, and a failure is remembered until the mylist is loaded anew.
@@ -429,7 +455,7 @@ func (app *nativeApp) requestThumbnail(item MylistItem) {
 		}
 		app.window.Update(func() {
 			delete(app.thumbBusy, watchID)
-			bitmap, err := ui.DecodeBitmap(body)
+			bitmap, err := decodeThumbnail(body)
 			if err != nil || !thumbSizeOK(bitmap) {
 				app.thumbFail[watchID] = true
 				return
