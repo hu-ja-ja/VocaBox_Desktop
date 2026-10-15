@@ -88,8 +88,17 @@ func (app *nativeApp) mylistHeader(c *ui.Context) {
 			if button := ui.Button(c, "更新").Disabled(app.saving || app.loading); button.Clicked() {
 				app.refreshSaved(*entry)
 			}
-			if button := ui.Button(c, "ピン留めを外す").Disabled(app.saving); button.Clicked() {
-				app.removeSaved(*entry)
+			if entry.Pinned {
+				if button := ui.Button(c, "ピン留めを外す").Disabled(app.saving); button.Clicked() {
+					app.unpin(entry.ID)
+				}
+			} else if button := ui.PrimaryButton(c, "ピン留め").Disabled(app.saving); button.Clicked() {
+				app.pin(entry.ID)
+			}
+			if !entry.Mine {
+				if button := ui.Button(c, "削除").Disabled(app.saving); button.Clicked() {
+					app.askDelete(savedToEntry(*entry))
+				}
 			}
 		} else if button := ui.PrimaryButton(c, "ピン留め").Disabled(app.saving || app.loading); button.Clicked() {
 			app.saveCurrent()

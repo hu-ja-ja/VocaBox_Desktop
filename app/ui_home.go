@@ -30,6 +30,9 @@ type mylistEntry struct {
 	// its owner sees it.
 	Pinned  bool
 	Private bool
+	// Mine is the mylist being one of the signed-in account's own; only a
+	// mylist of somebody else's can be deleted.
+	Mine bool
 }
 
 // homeView shows the home's cards: each carries the pictures of its first
@@ -39,13 +42,13 @@ func (app *nativeApp) homeView(c *ui.Context) {
 		ui.Column(c).Gap(5).Children(func() {
 			ui.Text(c, "ホーム").FontSize(27).Bold()
 			sub := "聴きたいマイリストを選んで再生"
-			if len(app.saved) == 0 && len(app.ownMylists) == 0 {
+			if len(app.saved) == 0 {
 				sub = "マイリストは「+」から読み込めます"
 			}
 			ui.Text(c, sub).FontSize(13).TextColor(app.theme.TextMuted)
 		})
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Row(c).Wrap().Gap(16).FillWidth().Children(func() {
+			ui.Column(c).FillWidth().Gap(18).Children(func() {
 				app.homeCards(c)
 			})
 		})
@@ -53,58 +56,68 @@ func (app *nativeApp) homeView(c *ui.Context) {
 	})
 }
 
-// homeCards lays the home's cards out — the shared mylist order of
-// mylistEntries, then the import card — each card carrying its pictures and
-// marks.
+// homeCards lays the home's cards out: the pinned mylists come first, then
+// the rest of the account's own; the mylists read in from a URL follow under
+// their heading, and the import card comes last.
 func (app *nativeApp) homeCards(c *ui.Context) {
-	for _, entry := range app.mylistEntries() {
-		app.mylistCard(c, entry)
+	pinned, own, read := app.mylistGroups()
+	if main := append(pinned, own...); len(main) > 0 {
+		app.homeCardsRow(c, main)
+	}
+	if len(read) > 0 {
+		app.homeSection(c, "読み込んだマイリスト", read)
 	}
 	app.importCard(c)
 }
 
-// mylistEntries returns the mylists to show, in the one order the home and the
-// sidebar share: the pinned ones first — a pinned own mylist with the
-// account's live name and size — then the account's other mylists.
-func (app *nativeApp) mylistEntries() []mylistEntry {
-	pinned := make(map[string]bool, len(app.saved))
-	for i := range app.saved {
-		pinned[app.saved[i].ID] = true
-	}
-	entries := make([]mylistEntry, 0, len(app.saved)+len(app.ownMylists))
-	for i := range app.saved {
-		entry := app.saved[i]
-		e := mylistEntry{
-			ID: entry.ID, Name: entry.Name, Meta: savedMeta(entry),
-			Items: entry.Items, Pinned: true,
+// homeCardsRow lays one group of cards out in a wrapping row.
+func (app *nativeApp) homeCardsRow(c *ui.Context, entries []mylistEntry) {
+	ui.Row(c).Wrap().Gap(16).FillWidth().Children(func() {
+		for _, entry := range entries {
+			app.mylistCard(c, entry)
 		}
-		if own, ok := app.ownMylist(entry.ID); ok {
-			e.Name, e.Meta = own.Name, countMeta(own.ItemCount)
-			e.Items, e.Private = own.Items, !own.IsPublic
-		}
-		entries = append(entries, e)
-	}
-	for i := range app.ownMylists {
-		own := app.ownMylists[i]
-		if pinned[own.ID] {
-			continue
-		}
-		entries = append(entries, mylistEntry{
-			ID: own.ID, Name: own.Name, Meta: countMeta(own.ItemCount),
-			Items: own.Items, Private: !own.IsPublic,
-		})
-	}
-	return entries
+	})
 }
 
-// ownMylist returns the account's mylist with the ID, when it has one.
-func (app *nativeApp) ownMylist(id string) (OwnMylist, bool) {
-	for i := range app.ownMylists {
-		if app.ownMylists[i].ID == id {
-			return app.ownMylists[i], true
+// homeSection is one group of cards under its heading.
+func (app *nativeApp) homeSection(c *ui.Context, title string, entries []mylistEntry) {
+	ui.Column(c).FillWidth().Gap(12).Children(func() {
+		ui.Text(c, title).FontSize(15).Bold()
+		app.homeCardsRow(c, entries)
+	})
+}
+
+// mylistGroups returns the mylists in the one order the home and the sidebar
+// share: the pinned ones, the account's own, then the ones read in from a URL.
+func (app *nativeApp) mylistGroups() (pinned, own, read []mylistEntry) {
+	for i := range app.saved {
+		entry := savedToEntry(app.saved[i])
+		switch {
+		case entry.Pinned:
+			pinned = append(pinned, entry)
+		case entry.Mine:
+			own = append(own, entry)
+		default:
+			read = append(read, entry)
 		}
 	}
-	return OwnMylist{}, false
+	return pinned, own, read
+}
+
+// mylistEntries returns the mylists in the shared order, for the sidebar.
+func (app *nativeApp) mylistEntries() []mylistEntry {
+	pinned, own, read := app.mylistGroups()
+	entries := append(pinned, own...)
+	return append(entries, read...)
+}
+
+// savedToEntry maps one saved index line to the card and sidebar view of it.
+func savedToEntry(entry SavedIndexEntry) mylistEntry {
+	return mylistEntry{
+		ID: entry.ID, Name: entry.Name, Meta: savedMeta(entry),
+		Items: entry.Sample, Pinned: entry.Pinned, Private: entry.Private,
+		Mine: entry.Mine,
+	}
 }
 
 // importCard shows the last card of the home: one big tile with a plus,
@@ -242,7 +255,7 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 			if entry.Pinned {
 				app.unpin(entry.ID)
 			} else {
-				app.saveEntry(entry.ID, entry.Name)
+				app.pin(entry.ID)
 			}
 		}
 		play := app.menuItem(c, iconPlay, "再生")
@@ -253,7 +266,54 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 		if shuffle.Clicked() {
 			app.playMylist(entry, true)
 		}
+		// The account's own mylists live on niconico: only a mylist read in
+		// from a URL can be deleted from this PC.
+		if !entry.Mine {
+			remove := app.menuItem(c, iconTrash, "削除")
+			if remove.Clicked() {
+				app.menuOpen = false
+				app.askDelete(entry)
+			}
+		}
 	})
+}
+
+// askDelete asks before a saved mylist of somebody else's is deleted from
+// this PC.
+func (app *nativeApp) askDelete(entry mylistEntry) {
+	app.deleteEntry = entry
+	app.confirmDelete = true
+}
+
+// deleteDialog asks before the saved copy is deleted; the mylist on niconico
+// is never touched.
+func (app *nativeApp) deleteDialog(c *ui.Context) {
+	ui.Column(c).Width(360).Gap(14).Children(func() {
+		ui.Text(c, "保存したマイリストを削除しますか？").FontSize(20).Bold()
+		ui.Text(c, app.deleteEntry.Name).FontSize(13).SingleLine().Ellipsis("…")
+		ui.Text(c, "このPCに保存した内容を削除します。ニコニコ動画のマイリストは消えません。").FontSize(12).TextColor(app.theme.TextMuted)
+		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
+			if button := ui.Button(c, "キャンセル"); button.Clicked() {
+				app.confirmDelete = false
+			}
+			if button := ui.PrimaryButton(c, "削除する"); button.Clicked() {
+				app.confirmDelete = false
+				app.deleteSaved(app.deleteEntry)
+			}
+		})
+	})
+}
+
+// deleteSaved removes the saved copy of a mylist from this PC: its index line
+// and its body.
+func (app *nativeApp) deleteSaved(entry mylistEntry) {
+	saved, err := app.mylist.RemoveSaved(entry.ID)
+	if err != nil {
+		app.setError(err)
+		return
+	}
+	app.saved = saved
+	app.setStatus("保存したマイリストを削除しました。")
 }
 
 // countMeta labels a mylist with its size.
@@ -317,11 +377,11 @@ func (app *nativeApp) cardTile(c *ui.Context, item MylistItem) {
 	ui.Box(c).AspectRatio(1).Radius(6).Background(app.theme.SurfaceHover)
 }
 
-// savedMeta labels a pinned card: its owner when known, and its size.
-func savedMeta(entry SavedMylist) string {
+// savedMeta labels a saved card: its owner when known, and its size.
+func savedMeta(entry SavedIndexEntry) string {
 	total := entry.TotalItemCount
 	if total == 0 {
-		total = len(entry.Items)
+		total = len(entry.Sample)
 	}
 	if entry.Owner != "" {
 		return entry.Owner + "  ·  " + countMeta(total)

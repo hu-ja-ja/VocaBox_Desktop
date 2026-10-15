@@ -40,5 +40,5 @@ func (s windowStateStore) SaveWindowStates(states map[string]mygo.WindowState) e
 	if err != nil {
 		return err
 	}
-	return writeJSONFile(path, states, "ウィンドウの状態を書き込めませんでした")
+	return writeJSONFile(path, states, maxWindowStateBody, "ウィンドウの状態を書き込めませんでした")
 }

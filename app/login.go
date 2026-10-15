@@ -143,8 +143,9 @@ func (app *nativeApp) completeLogin(window *mygo.Window, header string) {
 }
 
 // loadOwnMylists fetches the signed-in account's mylists, private ones
-// included, in the background; the home shows them once they arrive. A
-// failure leaves the home as it is, so it is only worth a line on the log.
+// included, in the background, and merges them into the saved index; the
+// home shows them once they arrive. A failure leaves the home as it is, so
+// it is only worth a line on the log.
 func (app *nativeApp) loadOwnMylists() {
 	go func() {
 		own, err := app.mylist.ListOwn()
@@ -152,11 +153,22 @@ func (app *nativeApp) loadOwnMylists() {
 			log.Printf("mylists: %v", err)
 			return
 		}
+		if _, err := app.mylist.SyncOwn(own); err != nil {
+			log.Printf("mylists: %v", err)
+			return
+		}
 		app.update(func() {
 			if !app.loggedIn {
 				return
 			}
-			app.ownMylists = own
+			app.reloadSaved()
+			// Every own mylist gets a saved body, so the home opens offline;
+			// the ones already saved are skipped by saveBody.
+			for _, entry := range app.saved {
+				if entry.Mine {
+					app.saveBody(entry.ID)
+				}
+			}
 		})
 	}()
 }
@@ -248,7 +260,6 @@ func (app *nativeApp) clearSession() {
 	}
 	app.loggedIn = false
 	app.accountName, app.accountIcon = "", nil
-	app.ownMylists = nil
 }
 
 // update runs fn on the UI thread; without a window, as in tests, it runs

@@ -9,11 +9,61 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 )
+
+// savedApp returns an app over a temp config dir: nothing a saved-mylist
+// test does may touch the real one.
+func savedApp(t *testing.T) *nativeApp {
+	t.Helper()
+	return newNativeApp(&Mylist{configDir: t.TempDir()})
+}
+
+// syncTestOwn merges the account's mylists into the app's index, as the
+// sign-in does.
+func syncTestOwn(t *testing.T, app *nativeApp, own ...OwnMylist) {
+	t.Helper()
+	saved, err := app.mylist.SyncOwn(own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.saved = saved
+}
+
+// indexSaved records a saved mylist on the app, as a save or an open leaves
+// it: items != nil also writes the body, the way the background saving does.
+func indexSaved(t *testing.T, app *nativeApp, entry SavedIndexEntry, items []MylistItem) {
+	t.Helper()
+	total := entry.TotalItemCount
+	if total == 0 {
+		total = len(items)
+	}
+	page := MylistPage{ID: entry.ID, Name: entry.Name, Owner: entry.Owner, TotalItemCount: total, Items: items}
+	if _, err := app.mylist.TrackMylist(page); err != nil {
+		t.Fatal(err)
+	}
+	if items != nil {
+		body := SavedMylist{ID: entry.ID, Name: entry.Name, Owner: entry.Owner, TotalItemCount: total, Items: items}
+		if err := app.mylist.writeBody(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if entry.Pinned {
+		if _, err := app.mylist.SetPinned(entry.ID, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved, err := app.mylist.ListSaved()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.saved = saved
+}
 
 func TestNativeUITogglesSidebar(t *testing.T) {
 	app := newNativeApp(NewMylist())
@@ -60,18 +110,14 @@ func TestNativeUITogglesSidebar(t *testing.T) {
 }
 
 func TestNativeUIOpensSavedSnapshot(t *testing.T) {
-	app := newNativeApp(NewMylist())
-	app.saved = []SavedMylist{{
-		ID:   "123",
-		Name: "作業用マイリスト",
-		Items: []MylistItem{{
-			WatchID:   "sm9",
-			Title:     "サンプル曲",
-			Uploader:  "投稿者",
-			Duration:  90,
-			Available: true,
-		}},
-	}}
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "123", Name: "作業用マイリスト"}, []MylistItem{{
+		WatchID:   "sm9",
+		Title:     "サンプル曲",
+		Uploader:  "投稿者",
+		Duration:  90,
+		Available: true,
+	}})
 
 	tester := ui.NewTester(app.view, 1120, 760)
 	if !tester.HasText("VocaBox") {
@@ -216,31 +262,30 @@ func TestNativeUIHomeImportsFromCard(t *testing.T) {
 }
 
 // TestNativeUIHomePinsFirst checks the home's cards: the pinned mylists come
-// first with their pin mark, a pinned own mylist shows once with the account's
-// live name and size, a private mylist carries the lock mark, the account's
-// other mylists follow, the import card stays last, and signing out keeps
-// the pinned local copies.
+// first with their pin mark, a private mylist carries the lock mark, the
+// account's other mylists follow, the import card stays last, and signing out
+// keeps the saved local copies, the account's own ones included.
 func TestNativeUIHomePinsFirst(t *testing.T) {
-	mylist := NewMylist()
-	mylist.configDir = t.TempDir()
-	app := newNativeApp(mylist)
+	app := savedApp(t)
 	// The sidebar shows its own pin marks for the same mylists, so close it
 	// and let the test look at the cards alone.
 	app.sidebarOpen = false
 	app.loggedIn = true
-	app.ownMylists = []OwnMylist{
-		{ID: "71043760", Name: "自分の非公開マイリスト", ItemCount: 2,
+	// The account's own mylists as the sign-in sync leaves them, the private
+	// one pinned.
+	syncTestOwn(t, app,
+		OwnMylist{ID: "71043760", Name: "自分の非公開マイリスト", ItemCount: 2,
 			Items: []MylistItem{{WatchID: "sm1", Title: "一曲目", Available: true}}},
-		{ID: "71043761", Name: "自分の公開マイリスト", ItemCount: 0, IsPublic: true},
+		OwnMylist{ID: "71043761", Name: "自分の公開マイリスト", ItemCount: 0, IsPublic: true},
+	)
+	if saved, err := app.mylist.SetPinned("71043760", true); err != nil {
+		t.Fatal(err)
+	} else {
+		app.saved = saved
 	}
-	app.saved = []SavedMylist{
-		// The pinned own mylist: the live account form must win over the
-		// snapshot's stale size.
-		{ID: "71043760", Name: "自分の非公開マイリスト", TotalItemCount: 9,
-			Items: []MylistItem{{WatchID: "sm1", Title: "古い一曲目", Available: true}}},
-		{ID: "555", Name: "ピン留めした公開マイリスト", TotalItemCount: 3,
-			Items: []MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}}},
-	}
+	// A pinned mylist of somebody else's, saved earlier.
+	indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "ピン留めした公開マイリスト", TotalItemCount: 3, Pinned: true},
+		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	for _, text := range []string{"全2曲", "全3曲", "全0曲"} {
@@ -272,14 +317,10 @@ func TestNativeUIHomePinsFirst(t *testing.T) {
 	if lock.Y <= pin.Y {
 		t.Fatalf("the private badge is not below the pin: pin=%v lock=%v", pin, lock)
 	}
-	if tester.HasText("全9曲") {
-		t.Fatalf("the pinned own mylist shows its stale snapshot size: %q", tester.Texts())
-	}
-	if tester.HasText("保存済み") {
-		t.Fatalf("the old saved heading is still shown: %q", tester.Texts())
-	}
 
-	// Pinned first, the account's other mylists after them, import last.
+	// Pinned first, the account's other mylists after them, import last; the
+	// pinned ones are only put at the front, without a section of their own,
+	// and nothing was read in from a URL here.
 	texts := tester.Texts()
 	index := func(s string) int {
 		for i, text := range texts {
@@ -289,32 +330,36 @@ func TestNativeUIHomePinsFirst(t *testing.T) {
 		}
 		return -1
 	}
+	if index("ピン留めしたマイリスト") >= 0 || index("自分のマイリスト") >= 0 {
+		t.Fatalf("the pinned and own mylists are still split into sections: %q", texts)
+	}
+	if tester.HasText("読み込んだマイリスト") {
+		t.Fatalf("an empty group is shown: %q", texts)
+	}
 	if !(index("全2曲") < index("全0曲") && index("全3曲") < index("全0曲") &&
 		index("全0曲") < index("マイリストを読み込む")) {
 		t.Fatalf("home order is wrong: %q", texts)
 	}
 
-	// Signing out drops the live mylists and keeps the pinned local copies.
+	// Signing out keeps every saved mylist, the account's own ones included:
+	// the bodies are local.
 	app.clearSession()
 	tester.Frame()
-	if !tester.HasText("ピン留めした公開マイリスト") || !tester.HasText("全9曲") {
-		t.Fatalf("logout dropped the pinned mylists: %q", tester.Texts())
-	}
-	if tester.HasText("自分の公開マイリスト") {
-		t.Fatalf("logout kept the live account mylists: %q", tester.Texts())
+	for _, name := range []string{"自分の非公開マイリスト", "自分の公開マイリスト", "ピン留めした公開マイリスト"} {
+		if !tester.HasText(name) {
+			t.Fatalf("logout dropped the saved mylist %q: %q", name, tester.Texts())
+		}
 	}
 }
 
 // TestNativeUIHomeUnpinsFromMenu checks the card's right-click menu: a
-// pinned card offers ピン留めを外す, and choosing it unpins the mylist and
-// drops the card.
+// pinned card offers ピン留めを外す, and choosing it unpins the mylist while
+// its saved copy stays.
 func TestNativeUIHomeUnpinsFromMenu(t *testing.T) {
-	mylist := NewMylist()
-	mylist.configDir = t.TempDir()
-	app := newNativeApp(mylist)
+	app := savedApp(t)
 	app.sidebarOpen = false
-	app.saved = []SavedMylist{{ID: "555", Name: "ピン留めした公開マイリスト", TotalItemCount: 3,
-		Items: []MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}}}}
+	indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "ピン留めした公開マイリスト", TotalItemCount: 3, Pinned: true},
+		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	if err := tester.RightClick("ピン留めした公開マイリスト"); err != nil {
@@ -326,11 +371,14 @@ func TestNativeUIHomeUnpinsFromMenu(t *testing.T) {
 	if err := tester.Click("ピン留めを外す"); err != nil {
 		t.Fatal(err)
 	}
-	if len(app.saved) != 0 {
-		t.Fatalf("the mylist stays pinned: %+v", app.saved)
+	if len(app.saved) != 1 || app.saved[0].Pinned {
+		t.Fatalf("the mylist must stay saved unpinned: %+v", app.saved)
 	}
-	if tester.HasText("ピン留めした公開マイリスト") {
-		t.Fatalf("the card stays after unpinning: %q", tester.Texts())
+	if !tester.HasText("ピン留めした公開マイリスト") {
+		t.Fatalf("unpinning dropped the saved card: %q", tester.Texts())
+	}
+	if _, ok := tester.Find("ピン留め"); ok {
+		t.Fatalf("the pin badge stayed: %q", tester.Texts())
 	}
 }
 
@@ -338,19 +386,30 @@ func TestNativeUIHomeUnpinsFromMenu(t *testing.T) {
 // offers ピン留め, and choosing it starts the pin.
 func TestNativeUIHomePinsFromMenu(t *testing.T) {
 	// The fetch holds until the test ends, so the assertion sees the pin
-	// still starting rather than racing the fetch.
+	// still starting rather than racing the fetch; the release refuses it, so
+	// the abandoned save leaves nothing behind for the cleanup.
 	hold := make(chan struct{})
+	var fail atomic.Bool
+	var release sync.Once
+	releaseHold := func() { release.Do(func() { close(hold) }) }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-hold
+		if fail.Load() {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		_, _ = w.Write([]byte(savedFixture))
 	}))
 	t.Cleanup(srv.Close)
-	t.Cleanup(func() { close(hold) })
+	t.Cleanup(func() {
+		fail.Store(true)
+		releaseHold()
+	})
 	mylist := &Mylist{client: srv.Client(), baseURL: srv.URL, configDir: t.TempDir()}
 
 	app := newNativeApp(mylist)
 	app.sidebarOpen = false
-	app.ownMylists = []OwnMylist{{ID: "71043760", Name: "自分の公開マイリスト", ItemCount: 2, IsPublic: true}}
+	syncTestOwn(t, app, OwnMylist{ID: "71043760", Name: "自分の公開マイリスト", ItemCount: 2, IsPublic: true})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	if err := tester.RightClick("自分の公開マイリスト"); err != nil {
@@ -367,19 +426,144 @@ func TestNativeUIHomePinsFromMenu(t *testing.T) {
 	}
 }
 
+// TestNativeUIHomeGroupsAndDeletes checks the home's groups — the pinned
+// mylists, the account's own, the ones read in from a URL — and that a mylist
+// read in can be deleted from its card's menu after a confirmation, while an
+// own mylist offers no delete.
+func TestNativeUIHomeGroupsAndDeletes(t *testing.T) {
+	app := savedApp(t)
+	app.sidebarOpen = false
+	syncTestOwn(t, app, OwnMylist{ID: "71043760", Name: "自分のリストA", ItemCount: 2, IsPublic: true})
+	indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "ピン留めした読み込み", TotalItemCount: 3, Pinned: true}, nil)
+	indexSaved(t, app, SavedIndexEntry{ID: "556", Name: "読み込み済みの他人リスト", TotalItemCount: 1},
+		[]MylistItem{{WatchID: "sm7", Title: "読み込み曲", Available: true}})
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	texts := tester.Texts()
+	indexOf := func(s string) int {
+		for i, text := range texts {
+			if text == s {
+				return i
+			}
+		}
+		return -1
+	}
+	// Pinning only moves a mylist to the front: no section of its own. The
+	// mylists read in from a URL keep their own group after the account's own.
+	if indexOf("ピン留めしたマイリスト") >= 0 || indexOf("自分のマイリスト") >= 0 {
+		t.Fatalf("the pinned and own mylists are still split into sections: %q", texts)
+	}
+	if !(indexOf("ピン留めした読み込み") < indexOf("自分のリストA")) {
+		t.Fatalf("the pinned mylist does not come first: %q", texts)
+	}
+	if readAt := indexOf("読み込んだマイリスト"); readAt < 0 || readAt < indexOf("自分のリストA") {
+		t.Fatalf("the read-in group is missing or out of order: %q", texts)
+	}
+
+	// rightClickCard scrolls the home until the card is on screen, then
+	// right-clicks its middle: the later groups sit below the fold.
+	rightClickCard := func(name string) {
+		t.Helper()
+		for i := 0; i < 12; i++ {
+			if r, ok := tester.Find(name); ok && r.W > 0 && r.Y > 90 && r.Y+r.H < 730 {
+				tester.RightClickAt(r.X+r.W/2, r.Y+r.H/2)
+				return
+			}
+			tester.Scroll(700, 400, 0, 200)
+		}
+		t.Fatalf("the card %q never came on screen: %q", name, tester.Texts())
+	}
+
+	// The account's own mylists are not ours to delete: no 削除 in the menu.
+	rightClickCard("自分のリストA")
+	if _, ok := tester.Find("マイリストのメニュー"); !ok {
+		t.Fatalf("the card menu did not open: %q", tester.Texts())
+	}
+	if _, ok := tester.Find("削除"); ok {
+		t.Fatalf("an own mylist offers to be deleted: %q", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEscape)
+
+	// A mylist read in can be deleted, but only after asking.
+	rightClickCard("読み込み済みの他人リスト")
+	if _, ok := tester.Find("削除"); !ok {
+		t.Fatalf("a mylist read in cannot be deleted: %q", tester.Texts())
+	}
+	if err := tester.Click("削除"); err != nil {
+		t.Fatal(err)
+	}
+	if !app.confirmDelete || !tester.HasText("保存したマイリストを削除しますか？") {
+		t.Fatalf("the delete did not ask first: %q", tester.Texts())
+	}
+	if err := tester.Click("キャンセル"); err != nil {
+		t.Fatal(err)
+	}
+	if app.confirmDelete || len(app.saved) != 3 {
+		t.Fatalf("cancelling the dialog changed the saved mylists: %+v", app.saved)
+	}
+
+	rightClickCard("読み込み済みの他人リスト")
+	if err := tester.Click("削除"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tester.Click("削除する"); err != nil {
+		t.Fatal(err)
+	}
+	if len(app.saved) != 2 || app.saved[0].ID != "71043760" {
+		t.Fatalf("the deleted mylist stays: %+v", app.saved)
+	}
+	if app.mylist.HasSavedBody("556") {
+		t.Error("the deleted mylist keeps its body")
+	}
+	if tester.HasText("読み込み済みの他人リスト") {
+		t.Fatalf("the deleted card stays on the home: %q", tester.Texts())
+	}
+}
+
+// TestNativeUIMylistHeaderDeletesReadInMylist checks the mylist screen's own
+// 削除 button: a mylist read in carries one, and the confirmation deletes the
+// saved copy.
+func TestNativeUIMylistHeaderDeletesReadInMylist(t *testing.T) {
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "556", Name: "ヘッダーの読み込み", TotalItemCount: 1},
+		[]MylistItem{{WatchID: "sm7", Title: "読み込み曲", Available: true}})
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	if err := tester.Click("ヘッダーの読み込み"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tester.Find("削除"); !ok {
+		t.Fatalf("the mylist screen has no delete: %q", tester.Texts())
+	}
+	if err := tester.Click("削除"); err != nil {
+		t.Fatal(err)
+	}
+	if !tester.HasText("保存したマイリストを削除しますか？") {
+		t.Fatalf("the delete did not ask first: %q", tester.Texts())
+	}
+	if err := tester.Click("削除する"); err != nil {
+		t.Fatal(err)
+	}
+	if len(app.saved) != 0 {
+		t.Fatalf("the delete did not take: %+v", app.saved)
+	}
+}
+
 // TestNativeUISidebarMylistsLikeHome checks the sidebar's mylists use the
 // home's order: the pinned mylists first with the account's live name, the
 // account's other mylists after them, each pinnable from its menu.
 func TestNativeUISidebarMylistsLikeHome(t *testing.T) {
-	mylist := NewMylist()
-	mylist.configDir = t.TempDir()
-	app := newNativeApp(mylist)
+	app := savedApp(t)
 	app.loggedIn = true
-	app.ownMylists = []OwnMylist{
-		{ID: "71043760", Name: "自分の非公開マイリスト", ItemCount: 2},
-		{ID: "71043761", Name: "自分の公開マイリスト", ItemCount: 12, IsPublic: true},
+	syncTestOwn(t, app,
+		OwnMylist{ID: "71043760", Name: "自分の非公開マイリスト", ItemCount: 2},
+		OwnMylist{ID: "71043761", Name: "自分の公開マイリスト", ItemCount: 12, IsPublic: true},
+	)
+	if saved, err := app.mylist.SetPinned("71043760", true); err != nil {
+		t.Fatal(err)
+	} else {
+		app.saved = saved
 	}
-	app.saved = []SavedMylist{{ID: "71043760", Name: "古い名前", TotalItemCount: 9}}
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	pinned, ok := tester.Find("自分の非公開マイリスト")
@@ -426,14 +610,12 @@ func TestNativeUISidebarMylistsLikeHome(t *testing.T) {
 }
 
 // TestNativeUISidebarUnpinsFromMenu checks the sidebar's right-click menu:
-// choosing ピン留めを外す unpins the mylist, dropping it from the sidebar and
-// the home.
+// choosing ピン留めを外す unpins the mylist, keeping its saved copy in the
+// sidebar and the home.
 func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
-	mylist := NewMylist()
-	mylist.configDir = t.TempDir()
-	app := newNativeApp(mylist)
-	app.saved = []SavedMylist{{ID: "555", Name: "サイドバーのピン", TotalItemCount: 3,
-		Items: []MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}}}}
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "サイドバーのピン", TotalItemCount: 3, Pinned: true},
+		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	item, ok := tester.Find("サイドバーのピン")
@@ -447,14 +629,14 @@ func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
 	if err := tester.Click("ピン留めを外す"); err != nil {
 		t.Fatal(err)
 	}
-	if len(app.saved) != 0 {
-		t.Fatalf("the mylist stays pinned: %+v", app.saved)
+	if len(app.saved) != 1 || app.saved[0].Pinned {
+		t.Fatalf("the mylist must stay saved unpinned: %+v", app.saved)
 	}
-	if tester.HasText("サイドバーのピン") {
-		t.Fatalf("the unpinned mylist still shows: %q", tester.Texts())
+	if !tester.HasText("サイドバーのピン") {
+		t.Fatalf("the unpinned mylist dropped out of the sidebar: %q", tester.Texts())
 	}
-	if !tester.HasText("マイリストはありません") {
-		t.Fatalf("the empty sidebar says nothing: %q", tester.Texts())
+	if _, ok := tester.Find("ピン留め"); ok {
+		t.Fatalf("the sidebar pin mark stayed: %q", tester.Texts())
 	}
 }
 
@@ -462,11 +644,9 @@ func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
 // rail carries the way home and to the pinned mylists, and choosing one
 // opens it and leaves the queue screen for it.
 func TestNativeUIRailNavigates(t *testing.T) {
-	mylist := NewMylist()
-	mylist.configDir = t.TempDir()
-	app := newNativeApp(mylist)
-	app.saved = []SavedMylist{{ID: "111", Name: "レールのピン",
-		Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}}}
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "レールのピン", Pinned: true},
+		[]MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}})
 	app.sidebarOpen = false
 	tester := ui.NewTester(app.view, 1120, 760)
 
@@ -499,7 +679,7 @@ func TestNativeUIRailNavigates(t *testing.T) {
 	}
 
 	// The rail tile carries the same right-click menu as the sidebar's item:
-	// unpinning from it drops the tile.
+	// unpinning from it drops the tile while the saved copy stays.
 	item, _ = tester.Find("レールのピン（ピン留め）")
 	tester.RightClickAt(item.X+item.W/2, item.Y+item.H/2)
 	if _, ok := tester.Find("ピン留めを外す"); !ok {
@@ -508,8 +688,11 @@ func TestNativeUIRailNavigates(t *testing.T) {
 	if err := tester.Click("ピン留めを外す"); err != nil {
 		t.Fatal(err)
 	}
-	if len(app.saved) != 0 || tester.HasText("レールのピン") {
-		t.Fatalf("the unpinned mylist still shows on the rail: %+v", app.saved)
+	if len(app.saved) != 1 || app.saved[0].Pinned {
+		t.Fatalf("the mylist must stay saved unpinned: %+v", app.saved)
+	}
+	if _, ok := tester.Find("レールのピン（ピン留め）"); ok {
+		t.Fatalf("the unpinned mylist still shows on the rail: %q", tester.Texts())
 	}
 }
 
@@ -555,12 +738,12 @@ func TestNativeUIRailAccount(t *testing.T) {
 // pointer right-clicked rather than below the card, and moves in from the
 // window's edge.
 func TestNativeUIMylistMenuOpensAtPointer(t *testing.T) {
-	app := newNativeApp(NewMylist())
+	app := savedApp(t)
 	app.sidebarOpen = false
-	app.ownMylists = []OwnMylist{
-		{ID: "71043760", Name: "位置のカード", ItemCount: 2, IsPublic: true},
-		{ID: "71043761", Name: "別のカード", ItemCount: 2, IsPublic: true},
-	}
+	syncTestOwn(t, app,
+		OwnMylist{ID: "71043760", Name: "位置のカード", ItemCount: 2, IsPublic: true},
+		OwnMylist{ID: "71043761", Name: "別のカード", ItemCount: 2, IsPublic: true},
+	)
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	card, ok := tester.Find("位置のカード")
@@ -619,12 +802,10 @@ func TestNativeUIMylistMenuOpensAtPointer(t *testing.T) {
 // TestNativeUIMylistMenuKeyboard checks the card's menu opens from the
 // keyboard — the menu key and Shift+F10 — and its item works from there.
 func TestNativeUIMylistMenuKeyboard(t *testing.T) {
-	mylist := NewMylist()
-	mylist.configDir = t.TempDir()
-	app := newNativeApp(mylist)
+	app := savedApp(t)
 	app.sidebarOpen = false
-	app.saved = []SavedMylist{{ID: "555", Name: "キーボードのピン", TotalItemCount: 2,
-		Items: []MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}}}}
+	indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "キーボードのピン", TotalItemCount: 2, Pinned: true},
+		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	focused := false
@@ -652,7 +833,7 @@ func TestNativeUIMylistMenuKeyboard(t *testing.T) {
 		t.Fatal("Tab did not move the focus into the menu")
 	}
 	tester.Key(0, ui.KeyEnter)
-	if len(app.saved) != 0 {
+	if len(app.saved) != 1 || app.saved[0].Pinned {
 		t.Fatalf("Enter did not unpin the mylist: %+v", app.saved)
 	}
 }
@@ -663,14 +844,14 @@ func TestNativeUIMylistMenuKeyboard(t *testing.T) {
 // the play begins on the click.
 func TestNativeUIMylistMenuPlays(t *testing.T) {
 	newCard := func() *nativeApp {
-		app := newNativeApp(NewMylist())
+		app := savedApp(t)
 		app.sidebarOpen = false
-		app.saved = []SavedMylist{{ID: "555", Name: "再生するマイリスト", TotalItemCount: 3,
-			Items: []MylistItem{
+		indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "再生するマイリスト", TotalItemCount: 3},
+			[]MylistItem{
 				{WatchID: "sm1", Title: "一曲目", Available: true},
 				{WatchID: "sm2", Title: "二曲目", Available: true},
 				{WatchID: "sm3", Title: "三曲目", Available: true},
-			}}}
+			})
 		return app
 	}
 
@@ -719,16 +900,29 @@ func TestNativeUIMylistMenuPlays(t *testing.T) {
 	// shown keeps the route on the new mylist, so the next frame does not
 	// cancel the load.
 	hold := make(chan struct{})
+	var fail atomic.Bool
+	var release sync.Once
+	releaseHold := func() { release.Do(func() { close(hold) }) }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-hold
+		// Once the test is done the server refuses: the load the test left
+		// pending stops without leaving files behind for the cleanup.
+		if fail.Load() {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		_, _ = w.Write([]byte(savedFixture))
 	}))
 	t.Cleanup(srv.Close)
-	t.Cleanup(func() { close(hold) })
+	t.Cleanup(func() {
+		fail.Store(true)
+		releaseHold()
+	})
 	app = newNativeApp(&Mylist{client: srv.Client(), baseURL: srv.URL, configDir: t.TempDir()})
 	app.player.Playing = true
-	app.saved = []SavedMylist{{ID: "111", Name: "表示中のマイリスト", Items: []MylistItem{{WatchID: "sm9", Title: "表示曲", Available: true}}}}
-	app.ownMylists = []OwnMylist{{ID: "27411728", Name: "未ピンのマイリスト", ItemCount: 2, IsPublic: true}}
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "表示中のマイリスト"},
+		[]MylistItem{{WatchID: "sm9", Title: "表示曲", Available: true}})
+	syncTestOwn(t, app, OwnMylist{ID: "27411728", Name: "未ピンのマイリスト", ItemCount: 2, IsPublic: true})
 	tester = ui.NewTester(app.view, 1120, 760)
 	if err := tester.Click("表示中のマイリスト"); err != nil {
 		t.Fatal(err)
@@ -769,11 +963,11 @@ func lastCommand(commands []PlayerCommand, action string) (PlayerCommand, bool) 
 // TestNativeUIKeepsPlayingTrackAcrossMylists checks that opening another mylist
 // neither stops the track playing nor hands the queue to the shown mylist.
 func TestNativeUIKeepsPlayingTrackAcrossMylists(t *testing.T) {
-	app := newNativeApp(NewMylist())
-	app.saved = []SavedMylist{
-		{ID: "111", Name: "マイリストA", Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}},
-		{ID: "222", Name: "マイリストB", Items: []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}}},
-	}
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "マイリストA"},
+		[]MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}})
+	indexSaved(t, app, SavedIndexEntry{ID: "222", Name: "マイリストB"},
+		[]MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}})
 	tester := ui.NewTester(app.view, 1120, 760)
 	if err := tester.Click("マイリストA"); err != nil {
 		t.Fatal(err)
@@ -834,7 +1028,8 @@ func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 		{WatchID: "sm2", Title: "二曲目", Available: true},
 		{WatchID: "sm3", Title: "三曲目", Available: true},
 	}
-	app.saved = []SavedMylist{{ID: "123", Name: "作業用キュー", Items: items}}
+	app.saved = []SavedIndexEntry{{ID: "123", Name: "作業用キュー", TotalItemCount: 3,
+		Sample: items}}
 	app.player = playerState{
 		WatchID: "sm2", MylistID: "123", Name: "作業用キュー", Title: "二曲目",
 		Ready: true, Playing: true, Volume: 1,
@@ -1061,12 +1256,12 @@ func TestQueueItemsComeFromTheReport(t *testing.T) {
 // no playback state: opening a mylist keeps its top in view however far down
 // the track playing sits.
 func TestNativeUIMylistDoesNotFollowPlayback(t *testing.T) {
-	app := newNativeApp(NewMylist())
+	app := savedApp(t)
 	items := make([]MylistItem, 100)
 	for i := range items {
 		items[i] = MylistItem{WatchID: fmt.Sprintf("sm%d", i+1), Title: fmt.Sprintf("曲%d", i+1), Available: true}
 	}
-	app.saved = []SavedMylist{{ID: "123", Name: "作業用マイリスト", Items: items}}
+	indexSaved(t, app, SavedIndexEntry{ID: "123", Name: "作業用マイリスト"}, items)
 
 	tester := ui.NewTester(app.view, 1120, 760)
 	if err := tester.Click("作業用マイリスト"); err != nil {
@@ -1083,11 +1278,11 @@ func TestNativeUIMylistDoesNotFollowPlayback(t *testing.T) {
 // sidebar leaves the queue screen for it, as choosing home does, even the
 // mylist already showing, whose click changes no route of its own.
 func TestNativeUISidebarMylistLeavesQueueScreen(t *testing.T) {
-	app := newNativeApp(NewMylist())
-	app.saved = []SavedMylist{
-		{ID: "111", Name: "マイリストA", Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}},
-		{ID: "222", Name: "マイリストB", Items: []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}}},
-	}
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "マイリストA"},
+		[]MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}})
+	indexSaved(t, app, SavedIndexEntry{ID: "222", Name: "マイリストB"},
+		[]MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}})
 	tester := ui.NewTester(app.view, 1120, 760)
 	if err := tester.Click("マイリストA"); err != nil {
 		t.Fatal(err)
@@ -1159,16 +1354,12 @@ func TestNativeUIQueueFollowsTheTrackPlaying(t *testing.T) {
 }
 
 func TestNativeUITrackClickPlaysIt(t *testing.T) {
-	app := newNativeApp(NewMylist())
-	app.saved = []SavedMylist{{
-		ID:   "123",
-		Name: "作業用クリック",
-		Items: []MylistItem{{
-			WatchID:   "sm9",
-			Title:     "サンプル曲",
-			Available: true,
-		}},
-	}}
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "123", Name: "作業用クリック"}, []MylistItem{{
+		WatchID:   "sm9",
+		Title:     "サンプル曲",
+		Available: true,
+	}})
 
 	tester := ui.NewTester(app.view, 1120, 760)
 	if err := tester.Click("作業用クリック"); err != nil {
@@ -1243,22 +1434,18 @@ func TestNativeUIPlayerBarFitsMinimumWidth(t *testing.T) {
 }
 
 func TestNativeUIHomeOpensMylistCards(t *testing.T) {
-	app := newNativeApp(NewMylist())
+	app := savedApp(t)
 	// With the sidebar closed the card is the only element named after the
 	// mylist, so a click targets the card.
 	app.sidebarOpen = false
-	app.saved = []SavedMylist{{
-		ID:             "123",
-		Name:           "作業用ホーム",
-		TotalItemCount: 6,
-		Items: []MylistItem{
+	indexSaved(t, app, SavedIndexEntry{ID: "123", Name: "作業用ホーム", TotalItemCount: 6},
+		[]MylistItem{
 			{WatchID: "sm1", Title: "一曲目", Available: true},
 			{WatchID: "sm2", Title: "二曲目", Available: true},
 			{WatchID: "sm3", Title: "三曲目", Available: true},
 			{WatchID: "sm4", Title: "四曲目", Available: true},
 			{WatchID: "sm5", Title: "五曲目", Available: true},
-		},
-	}}
+		})
 
 	tester := ui.NewTester(app.view, 1120, 760)
 	if !tester.HasText("ホーム") || !tester.HasText("作業用ホーム") || !tester.HasText("全6曲") {
@@ -1338,28 +1525,18 @@ func TestThumbSlotHoldsTitlesInLine(t *testing.T) {
 }
 
 func TestNativeUIThumbnailPlaceholderNeedsWindow(t *testing.T) {
-	app := newNativeApp(NewMylist())
-	app.saved = []SavedMylist{
-		{
-			ID:   "123",
-			Name: "作業用サムネ",
-			Items: []MylistItem{{
-				WatchID:   "sm27718606",
-				Title:     "サンプル曲",
-				Available: true,
-				ThumbURL:  "https://nicovideo.cdn.nimg.jp/thumbnails/27718606/27718606",
-			}},
-		},
-		{
-			ID:   "456",
-			Name: "別のサムネ",
-			Items: []MylistItem{{
-				WatchID:   "sm9",
-				Title:     "別の曲",
-				Available: true,
-			}},
-		},
-	}
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "123", Name: "作業用サムネ"}, []MylistItem{{
+		WatchID:   "sm27718606",
+		Title:     "サンプル曲",
+		Available: true,
+		ThumbURL:  "https://nicovideo.cdn.nimg.jp/thumbnails/27718606/27718606",
+	}})
+	indexSaved(t, app, SavedIndexEntry{ID: "456", Name: "別のサムネ"}, []MylistItem{{
+		WatchID:   "sm9",
+		Title:     "別の曲",
+		Available: true,
+	}})
 
 	tester := ui.NewTester(app.view, 1120, 760)
 	if err := tester.Click("作業用サムネ"); err != nil {

@@ -77,8 +77,9 @@ type Mylist struct {
 	// guest. Nil means no session source, as in tests that build a Mylist
 	// directly and in the guest-only stages.
 	session func(rawURL string) string
-	// configDir overrides the user config directory holding mylists.json.
-	// Empty means os.UserConfigDir()/VocaBox. Tests set a temp dir.
+	// configDir overrides the user config directory holding the mylists
+	// directory and the other state files. Empty means
+	// os.UserConfigDir()/VocaBox. Tests set a temp dir.
 	configDir string
 	// thumbHost overrides the host thumbnail pictures are fetched from.
 	// Tests point it at their server; empty means the real CDN.

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"errors"
+	"log"
 	"math/rand"
+	"os"
 	"strings"
 	"time"
 
@@ -92,12 +95,12 @@ type nativeApp struct {
 	// between them.
 	router *ui.Router
 
-	// saved holds the pinned mylists' local snapshots; they show first on the
-	// home.
-	saved []SavedMylist
-	// ownMylists is the signed-in account's mylists, private ones included,
-	// fetched for the home; nil while signed out and until they arrive.
-	ownMylists  []OwnMylist
+	// saved is the saved mylists index; the home and the sidebar show it, and
+	// each mylist's body loads from disk when the mylist opens.
+	saved []SavedIndexEntry
+	// fill holds the mylists whose saved bodies the background worker still
+	// has to fetch, one at a time.
+	fill        *savedFill
 	sidebarOpen bool
 	// queueOpen shows the queue in place of the home and mylist pages.
 	queueOpen bool
@@ -125,6 +128,11 @@ type nativeApp struct {
 	// importing shows the dialog the home's import card opens.
 	importing bool
 	input     string
+	// confirmDelete shows the dialog that asks before a saved mylist of
+	// somebody else's is deleted from this PC; deleteEntry is the mylist it
+	// would delete.
+	confirmDelete bool
+	deleteEntry   mylistEntry
 	// confirmLogout shows the dialog the way out opens — the sidebar's
 	// account row and the rail's account menu — asking before the session
 	// is forgotten.
@@ -207,7 +215,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	router := ui.NewRouter(homePath)
 	// Pages show at once: the mylist a page waits for does not load twice.
 	router.Transition = ui.TransitionNone
-	return &nativeApp{
+	app := &nativeApp{
 		mylist:       mylist,
 		session:      sessionStore{mylist: mylist},
 		router:       router,
@@ -217,10 +225,14 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 		thumbs:       map[string]*ui.Bitmap{},
 		thumbBusy:    map[string]bool{},
 		thumbFail:    map[string]bool{},
+		fill:         newSavedFill(),
 		queueMenuRow: -1,
 		queueFollow:  -2,
 		queueChoice:  -1,
 	}
+	// The body saving runs in the background, one mylist at a time.
+	go app.fillWorker()
+	return app
 }
 
 func (app *nativeApp) view(c *ui.Context) {
@@ -249,6 +261,7 @@ func (app *nativeApp) view(c *ui.Context) {
 	})
 	ui.Modal(c, &app.importing, func() { app.importDialog(c) })
 	ui.Modal(c, &app.confirmLogout, func() { app.logoutDialog(c) })
+	ui.Modal(c, &app.confirmDelete, func() { app.deleteDialog(c) })
 	// A menu whose mylist left the screen, as after a refresh, does not stay
 	// open on the element that took its place.
 	if app.menuOpen && !app.menuBuilt {
@@ -574,15 +587,16 @@ func (app *nativeApp) statusLine(c *ui.Context) {
 	ui.Text(c, app.status).FontSize(12).TextColor(color)
 }
 
-func (app *nativeApp) currentSaved() *SavedMylist {
+// currentSaved returns the index line of the mylist shown, when there is one.
+func (app *nativeApp) currentSaved() *SavedIndexEntry {
 	if app.page == nil {
 		return nil
 	}
 	return app.savedEntry(app.page.ID)
 }
 
-// savedEntry returns the pinned snapshot with the ID, when there is one.
-func (app *nativeApp) savedEntry(id string) *SavedMylist {
+// savedEntry returns the saved index line with the ID, when there is one.
+func (app *nativeApp) savedEntry(id string) *SavedIndexEntry {
 	for i := range app.saved {
 		if app.saved[i].ID == id {
 			return &app.saved[i]
@@ -591,12 +605,34 @@ func (app *nativeApp) savedEntry(id string) *SavedMylist {
 	return nil
 }
 
-// unpin drops the local snapshot of the pinned mylist id; one of the
-// account's own mylists returns to its live place on the home.
+// unpin takes a mylist off the top of the home, keeping its saved body.
 func (app *nativeApp) unpin(id string) {
-	if entry := app.savedEntry(id); entry != nil {
-		app.removeSaved(*entry)
+	saved, err := app.mylist.SetPinned(id, false)
+	if err != nil {
+		app.setError(err)
+		return
 	}
+	app.saved = saved
+	app.setStatus("ピン留めを外しました。")
+}
+
+// pin pins a saved mylist, writing only the index; one whose body is not
+// saved yet is fetched and saved first.
+func (app *nativeApp) pin(id string) {
+	if app.saving {
+		return
+	}
+	if app.mylist.HasSavedBody(id) {
+		saved, err := app.mylist.SetPinned(id, true)
+		if err != nil {
+			app.setError(err)
+			return
+		}
+		app.saved = saved
+		app.setStatus("ピン留めしました。")
+		return
+	}
+	app.saveMylist(id)
 }
 
 // openMylist shows the mylist the ID names: the one loaded, the pinned copy, else
@@ -668,8 +704,8 @@ func (app *nativeApp) startPendingMylist(id string, items []MylistItem) {
 	app.startLoadedMylist(items, shuffle)
 }
 
-// adoptSavedPage loads a pinned snapshot into the shown mylist page and
-// hands its entries to the player.
+// adoptSavedPage loads a saved body into the shown mylist page and hands its
+// entries to the player.
 func (app *nativeApp) adoptSavedPage(entry SavedMylist) {
 	total := entry.TotalItemCount
 	if total == 0 {
@@ -691,23 +727,42 @@ func (app *nativeApp) adoptSavedPage(entry SavedMylist) {
 	app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
 }
 
-// openSaved shows the pinned snapshot of the mylist id names, reporting
-// whether there is one; the route is already the page shown.
-func (app *nativeApp) openSaved(id string) bool {
-	for _, entry := range app.saved {
-		if entry.ID != id {
-			continue
-		}
-		app.loadToken++
-		app.loading = false
-		app.pendingAdvance = false
-		app.setStatus("ピン留めした内容から表示中（更新するまで通信しません）")
-		app.playerError = ""
-		app.adoptSavedPage(entry)
-		app.startPendingMylist(entry.ID, entry.Items)
-		return true
+// adoptShownBody hands the saved body of the mylist to the shown page and
+// the player when that is the mylist on screen.
+func (app *nativeApp) adoptShownBody(id string) {
+	if app.page == nil || app.page.ID != id {
+		return
 	}
-	return false
+	body, err := app.mylist.LoadSavedBody(id)
+	if err != nil {
+		return
+	}
+	app.adoptSavedPage(body)
+}
+
+// openSaved shows the saved body of the mylist id names, reporting whether
+// there is one; the route is already the page shown.
+func (app *nativeApp) openSaved(id string) bool {
+	if app.savedEntry(id) == nil {
+		return false
+	}
+	body, err := app.mylist.LoadSavedBody(id)
+	if err != nil {
+		// No body yet — the saving has not reached this mylist — or one
+		// that cannot be read: the API answers instead.
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("mylists: %v", err)
+		}
+		return false
+	}
+	app.loadToken++
+	app.loading = false
+	app.pendingAdvance = false
+	app.setStatus("保存した内容から表示中（更新するまで通信しません）")
+	app.playerError = ""
+	app.adoptSavedPage(body)
+	app.startPendingMylist(body.ID, body.Items)
+	return true
 }
 
 // fetchMylist loads page 1 of the mylist the input names, an ID or a URL, into
@@ -748,6 +803,15 @@ func (app *nativeApp) fetchMylist(input string) {
 			if route := mylistPath(page.ID); app.router.Path() != route {
 				app.router.Push(route)
 			}
+			// The opened mylist belongs on the home from here on, and its
+			// body is saved in the background, so opening it later needs no
+			// network.
+			if saved, err := app.mylist.TrackMylist(page); err != nil {
+				log.Printf("mylists: %v", err)
+			} else {
+				app.saved = saved
+			}
+			app.saveBody(page.ID)
 			app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
 			app.startPendingMylist(page.ID, page.Items)
 		})
@@ -819,25 +883,25 @@ func (app *nativeApp) selectTrack(item MylistItem) {
 	app.sendPlayer(PlayerCommand{Action: "select", WatchID: item.WatchID})
 }
 
+// saveCurrent pins the shown mylist, fetching and saving it when its body is
+// not saved yet.
 func (app *nativeApp) saveCurrent() {
 	if app.page == nil || app.saving {
 		return
 	}
-	app.saveEntry(app.page.ID, app.page.Name)
+	app.saveMylist(app.page.ID)
 }
 
-func (app *nativeApp) refreshSaved(entry SavedMylist) {
-	app.saveEntry(entry.ID, entry.Name)
-}
-
-func (app *nativeApp) saveEntry(id, name string) {
+// saveMylist fetches every page of the mylist, saves its body, and pins it;
+// the shown page adopts the saved body as soon as it is written.
+func (app *nativeApp) saveMylist(id string) {
 	if app.saving {
 		return
 	}
 	app.saving = true
-	app.setStatus("マイリストを更新しています…")
+	app.setStatus("マイリストを保存しています…")
 	go func() {
-		saved, err := app.mylist.SaveMylist(id, name)
+		saved, err := app.mylist.SaveMylist(id)
 		app.update(func() {
 			app.saving = false
 			if err != nil {
@@ -845,24 +909,43 @@ func (app *nativeApp) saveEntry(id, name string) {
 				return
 			}
 			app.saved = saved
-			for _, entry := range saved {
-				if entry.ID == id && app.page != nil && app.page.ID == id {
-					app.adoptSavedPage(entry)
-				}
-			}
+			app.adoptShownBody(id)
 			app.setStatus("ピン留めしました。")
 		})
 	}()
 }
 
-func (app *nativeApp) removeSaved(entry SavedMylist) {
-	saved, err := app.mylist.RemoveSaved(entry.ID)
+// refreshSaved replaces the saved body of the mylist from the API.
+func (app *nativeApp) refreshSaved(entry SavedIndexEntry) {
+	if app.saving {
+		return
+	}
+	app.saving = true
+	app.setStatus("マイリストを更新しています…")
+	go func() {
+		saved, err := app.mylist.RefreshMylist(entry.ID)
+		app.update(func() {
+			app.saving = false
+			if err != nil {
+				app.setError(err)
+				return
+			}
+			app.saved = saved
+			app.adoptShownBody(entry.ID)
+			app.setStatus("更新しました。")
+		})
+	}()
+}
+
+// reloadSaved reloads the saved index into the view; callers are in a UI
+// update, so the view ends up with the disk's latest.
+func (app *nativeApp) reloadSaved() {
+	saved, err := app.mylist.ListSaved()
 	if err != nil {
-		app.setError(err)
+		log.Printf("mylists: %v", err)
 		return
 	}
 	app.saved = saved
-	app.setStatus("ピン留めを外しました。")
 }
 
 // sendPlayer hands one command to the playback engine; in tests, without an

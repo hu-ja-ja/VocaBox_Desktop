@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -342,7 +343,7 @@ func TestListOwnRequiresLogin(t *testing.T) {
 	}
 }
 
-// savedFixture is a one-page mylist used by the saved-snapshot tests.
+// savedFixture is a one-page mylist used by the saved-body tests.
 const savedFixture = `{"meta":{"status":200},"data":{"mylist":{` +
 	`"name":"保存マイリスト","description":"保存説明","isPublic":true,` +
 	`"owner":{"name":"保存者"},` +
@@ -365,71 +366,127 @@ func newSavedService(t *testing.T, body string) (*Mylist, *int32) {
 }
 
 func TestSavedMylists(t *testing.T) {
-	m, _ := newSavedService(t, savedFixture)
+	m, hits := newSavedService(t, savedFixture)
 
-	// Missing file means none saved yet.
+	// Missing index means none saved yet.
 	got, err := m.ListSaved()
 	if err != nil || len(got) != 0 {
 		t.Fatalf("ListSaved() = %v, %v; want [], nil", got, err)
 	}
 
-	// Invalid IDs and blank names are rejected before any request.
-	if _, err := m.SaveMylist("not a mylist", "x"); err == nil {
+	// Invalid IDs are rejected before any request.
+	if _, err := m.SaveMylist("not a mylist"); err == nil {
 		t.Error("SaveMylist(bad input) = nil error; want an error")
 	}
-	if _, err := m.SaveMylist("27411728", "  "); err == nil {
-		t.Error("SaveMylist(blank name) = nil error; want an error")
+	if n := atomic.LoadInt32(hits); n != 0 {
+		t.Errorf("invalid input made %d requests; want none", n)
 	}
 
-	// Save two, then upsert one by URL without duplicating.
-	if _, err := m.SaveMylist("27411728", "マイリストA"); err != nil {
+	// Save two, then upsert one by URL without duplicating; a save pins.
+	if _, err := m.SaveMylist("27411728"); err != nil {
 		t.Fatalf("SaveMylist = %v; want nil", err)
 	}
-	if _, err := m.SaveMylist("https://www.nicovideo.jp/mylist/100", "マイリストB"); err != nil {
+	if _, err := m.SaveMylist("https://www.nicovideo.jp/mylist/100"); err != nil {
 		t.Fatalf("SaveMylist = %v; want nil", err)
 	}
-	got, err = m.SaveMylist("https://nico.ms/mylist/27411728", "マイリストA更新")
+	got, err = m.SaveMylist("https://nico.ms/mylist/27411728")
 	if err != nil {
 		t.Fatalf("SaveMylist upsert = %v; want nil", err)
 	}
-	if len(got) != 2 || got[0].ID != "27411728" || got[0].Name != "マイリストA更新" ||
-		got[1].ID != "100" || got[1].Name != "マイリストB" {
-		t.Fatalf("upserted mylist = %+v; want 2 records, updated name, no duplicates", got)
+	if len(got) != 2 || got[0].ID != "27411728" || got[1].ID != "100" {
+		t.Fatalf("upserted index = %+v; want 27411728 then 100, no duplicates", got)
+	}
+	if !got[0].Pinned || !got[1].Pinned {
+		t.Errorf("a save must pin: %+v", got)
 	}
 
-	// The stored record holds the fetched contents, not just the reference.
-	snap := got[0]
-	if snap.Owner != "保存者" || snap.Description != "保存説明" || snap.TotalItemCount != 2 || len(snap.Items) != 2 {
-		t.Fatalf("stored snapshot = %+v; want fetched contents", snap)
+	// The index carries what a card draws; the body holds the list.
+	entry := got[0]
+	if entry.Name != "保存マイリスト" || entry.Owner != "保存者" || entry.TotalItemCount != 2 || len(entry.Sample) != 2 {
+		t.Fatalf("index line = %+v; want the fetched header and sample", entry)
 	}
-	if snap.Items[0].Title != "曲A" || snap.Items[1].Available {
-		t.Errorf("stored items = %+v; want fetched contents", snap.Items)
+	body, err := m.LoadSavedBody("27411728")
+	if err != nil {
+		t.Fatalf("LoadSavedBody = %v; want nil", err)
+	}
+	if body.Name != "保存マイリスト" || body.Description != "保存説明" || body.TotalItemCount != 2 || len(body.Items) != 2 {
+		t.Fatalf("stored body = %+v; want fetched contents", body)
+	}
+	if body.Items[0].Title != "曲A" || body.Items[1].Available {
+		t.Errorf("stored items = %+v; want fetched contents", body.Items)
 	}
 
-	// A fresh service over the same dir lists the same records, contents intact.
+	// A fresh service over the same dir reads the same index and bodies; a
+	// mylist without one reports os.ErrNotExist.
 	same := &Mylist{configDir: m.configDir}
 	got, err = same.ListSaved()
-	if err != nil || len(got) != 2 || len(got[0].Items) != 2 {
-		t.Fatalf("ListSaved() = %+v, %v; want 2 records with 2 items, nil", got, err)
+	if err != nil || len(got) != 2 || len(got[0].Sample) != 2 {
+		t.Fatalf("ListSaved() = %+v, %v; want 2 records with samples, nil", got, err)
+	}
+	if body, err := same.LoadSavedBody("100"); err != nil || len(body.Items) != 2 {
+		t.Fatalf("LoadSavedBody(100) = %+v, %v; want the body", body, err)
+	}
+	if _, err := same.LoadSavedBody("999"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("LoadSavedBody(unknown) = %v; want os.ErrNotExist", err)
 	}
 
-	// Remove drops only the local snapshot; unknown IDs are idempotent.
+	// Pinning and unpinning write the index only: no request, body kept.
+	before := atomic.LoadInt32(hits)
+	got, err = m.SetPinned("100", false)
+	if err != nil || got[1].Pinned {
+		t.Fatalf("SetPinned(false) = %+v, %v; want the pin off", got, err)
+	}
+	if n := atomic.LoadInt32(hits); n != before {
+		t.Errorf("SetPinned made %d requests; want none", n-before)
+	}
+	if !m.HasSavedBody("100") {
+		t.Error("unpinning must keep the saved body")
+	}
+	if got, err = m.SetPinned("100", true); err != nil || !got[1].Pinned {
+		t.Fatalf("SetPinned(true) = %+v, %v; want the pin on", got, err)
+	}
+
+	// Refresh replaces the body and keeps the pin.
+	got, err = m.RefreshMylist("100")
+	if err != nil || !got[1].Pinned {
+		t.Fatalf("RefreshMylist = %+v, %v; want the pin kept", got, err)
+	}
+
+	// TrackMylist records an opened mylist without fetching it: a new one
+	// is added unpinned, an existing one keeps its pin.
+	got, err = m.TrackMylist(MylistPage{ID: "200", Name: "読み込んだ", TotalItemCount: 1,
+		Items: []MylistItem{{WatchID: "sm9", Title: "読み込み曲"}}})
+	if err != nil {
+		t.Fatalf("TrackMylist = %v; want nil", err)
+	}
+	if len(got) != 3 || got[2].ID != "200" || got[2].Pinned || got[2].Name != "読み込んだ" {
+		t.Fatalf("tracked index = %+v; want 200 added unpinned", got)
+	}
+	got, _ = m.TrackMylist(MylistPage{ID: "100", Name: "更新された名前", TotalItemCount: 3})
+	if !got[1].Pinned || got[1].Name != "更新された名前" {
+		t.Errorf("TrackMylist must keep the pin and take the new name: %+v", got[1])
+	}
+
+	// Remove deletes the index line and the body; unknown IDs are idempotent.
 	got, err = m.RemoveSaved("100")
-	if err != nil || len(got) != 1 || got[0].ID != "27411728" {
-		t.Fatalf("RemoveSaved() = %v, %v; want [27411728], nil", got, err)
+	if err != nil || len(got) != 2 || got[0].ID != "27411728" {
+		t.Fatalf("RemoveSaved() = %v, %v; want [27411728 200], nil", got, err)
+	}
+	if m.HasSavedBody("100") {
+		t.Error("RemoveSaved must delete the body")
 	}
 	got, err = m.RemoveSaved("999")
-	if err != nil || len(got) != 1 {
+	if err != nil || len(got) != 2 {
 		t.Fatalf("RemoveSaved(unknown) = %v, %v; want unchanged, nil", got, err)
 	}
 
 	// Concurrent saves on one instance keep both entries.
 	var wg sync.WaitGroup
-	for _, id := range []string{"200", "300"} {
+	for _, id := range []string{"300", "400"} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := m.SaveMylist(id, "並行"+id); err != nil {
+			if _, err := m.SaveMylist(id); err != nil {
 				t.Errorf("concurrent SaveMylist(%s) = %v; want nil", id, err)
 			}
 		}()
@@ -443,14 +500,14 @@ func TestSavedMylists(t *testing.T) {
 	for _, s := range got {
 		ids[s.ID] = true
 	}
-	if !ids["200"] || !ids["300"] {
-		t.Errorf("after concurrent saves, ids = %v; want both 200 and 300", ids)
+	if !ids["300"] || !ids["400"] {
+		t.Errorf("after concurrent saves, ids = %v; want both 300 and 400", ids)
 	}
 
-	// Malformed JSON is reported, never silently overwritten.
+	// Malformed index JSON is reported, never silently overwritten.
 	bad := &Mylist{configDir: t.TempDir()}
-	badPath := filepath.Join(bad.configDir, "mylists.json")
-	if err := os.MkdirAll(bad.configDir, 0o755); err != nil {
+	badPath := filepath.Join(bad.configDir, "mylists", "index.json")
+	if err := os.MkdirAll(filepath.Dir(badPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(badPath, []byte("{oops"), 0o644); err != nil {
@@ -465,17 +522,100 @@ func TestSavedMylists(t *testing.T) {
 	}
 }
 
+// TestListSavedReadsOnlyTheIndex checks that listing needs no body: the
+// bodies are read when their mylist opens.
+func TestListSavedReadsOnlyTheIndex(t *testing.T) {
+	m, _ := newSavedService(t, savedFixture)
+	if _, err := m.SaveMylist("27411728"); err != nil {
+		t.Fatal(err)
+	}
+	path, err := m.bodyPath("27411728")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.ListSaved()
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ListSaved() with the body gone = %+v, %v; want the index line", got, err)
+	}
+	if _, err := m.LoadSavedBody("27411728"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("LoadSavedBody with the body gone = %v; want os.ErrNotExist", err)
+	}
+}
+
+// TestSyncOwnMergesAndPrunes checks the merge of the account's mylists into
+// the index: live metadata lands, a list the account dropped loses its cache
+// unless it is pinned.
+func TestSyncOwnMergesAndPrunes(t *testing.T) {
+	m, _ := newSavedService(t, savedFixture)
+	own := []OwnMylist{
+		{ID: "111", Name: "自分の公開", IsPublic: true, ItemCount: 2,
+			Items: []MylistItem{{WatchID: "sma", Title: "自分の曲"}}},
+		{ID: "222", Name: "自分の非公開", IsPublic: false, ItemCount: 1},
+	}
+	got, err := m.SyncOwn(own)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("SyncOwn(own) = %+v, %v; want both lists", got, err)
+	}
+	if !got[0].Mine || got[0].Private || got[0].Name != "自分の公開" || got[0].TotalItemCount != 2 {
+		t.Errorf("merged own line = %+v; want live name, count, and privacy", got[0])
+	}
+	if !got[1].Mine || !got[1].Private {
+		t.Errorf("private own line = %+v; want Mine and Private", got[1])
+	}
+	if len(got[0].Sample) != 1 || got[0].Sample[0].WatchID != "sma" {
+		t.Errorf("own sample = %+v; want the account's sample entries", got[0].Sample)
+	}
+
+	// Save and pin one body; the other stays a cache without a body. Then
+	// the account drops both and gains a new list.
+	if _, err := m.SaveMylist("111"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.RefreshMylist("222"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = m.SyncOwn([]OwnMylist{{ID: "333", Name: "新しいリスト", IsPublic: true, ItemCount: 5}})
+	if err != nil {
+		t.Fatalf("SyncOwn(dropped) = %v; want nil", err)
+	}
+	byID := map[string]SavedIndexEntry{}
+	for _, entry := range got {
+		byID[entry.ID] = entry
+	}
+	if entry, ok := byID["111"]; !ok || !entry.Pinned || !entry.Mine {
+		t.Errorf("pinned own mylist must stay: %+v", byID["111"])
+	}
+	if !m.HasSavedBody("111") {
+		t.Error("the pinned mylist's body must stay")
+	}
+	if _, ok := byID["222"]; ok {
+		t.Errorf("an unpinned mylist the account dropped must go: %+v", byID["222"])
+	}
+	if m.HasSavedBody("222") {
+		t.Error("a dropped cache must lose its body")
+	}
+	if entry, ok := byID["333"]; !ok || !entry.Mine || entry.Pinned {
+		t.Errorf("the new own mylist must be added unpinned: %+v", byID["333"])
+	}
+}
+
 func TestSaveMylistFetchError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(srv.Close)
 	m := &Mylist{client: srv.Client(), baseURL: srv.URL, configDir: t.TempDir()}
-	if _, err := m.SaveMylist("27411728", "マイリスト"); err == nil {
+	if _, err := m.SaveMylist("27411728"); err == nil {
 		t.Error("SaveMylist(bad fetch) = nil error; want an error")
 	}
 	if got, err := m.ListSaved(); err != nil || len(got) != 0 {
 		t.Errorf("a failed save must not persist: %v, %v", got, err)
+	}
+	if m.HasSavedBody("27411728") {
+		t.Error("a failed save must not leave a body")
 	}
 }
 
