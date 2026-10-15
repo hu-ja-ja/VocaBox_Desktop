@@ -7,7 +7,7 @@ stdin/stdout の JSON lines で制御する。クラッシュ分離と、Go に 
 ## ビルド
 
 ```powershell
-bun run helper   # リポジトリ root で。dotnet publish -c Release -o resources
+mise run helper   # リポジトリ root で。dotnet publish -c Release -o resources
 ```
 
 .NET SDK 10 + MSVC（PublishAot）。出力は `resources/AmsHelper.exe`（単体・ランタイム不要・約5MB）。

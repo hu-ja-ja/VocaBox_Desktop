@@ -64,14 +64,14 @@ func TestHelperCommandWireShape(t *testing.T) {
 
 // TestAmsHelperRunsTheProtocol is a smoke test of the built helper binary:
 // it starts, answers position, and quits cleanly. It is skipped until
-// `bun run helper` has produced resources/AmsHelper.exe.
+// `mise run helper` has produced resources/AmsHelper.exe.
 func TestAmsHelperRunsTheProtocol(t *testing.T) {
 	path, err := filepath.Abs(filepath.Join("..", "resources", "AmsHelper.exe"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Skip("AmsHelper.exe is not built; run `bun run helper`")
+		t.Skip("AmsHelper.exe is not built; run `mise run helper`")
 	}
 	events := make(chan helperEvent, 16)
 	exited := make(chan error, 1)

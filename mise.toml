@@ -1,0 +1,14 @@
+[tools]
+go = "1.27.1"
+dotnet = "10.0.303"
+
+[tasks.helper]
+run = "dotnet publish helper/AmsHelper -c Release -o resources"
+
+[tasks.dev]
+depends = ["helper"]
+run = "go tool mygo dev"
+
+[tasks.build]
+depends = ["helper"]
+run = "go tool mygo build"

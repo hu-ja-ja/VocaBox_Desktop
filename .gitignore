@@ -32,14 +32,13 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Bun / MyGo
-node_modules/
+# MyGo
 /dist/
 /build/
 /.mygo/
 mygo_windows_*.syso
 
-# AmsHelper build output (bun run helper)
+# AmsHelper build output (mise run helper)
 /helper/*/bin/
 /helper/*/obj/
 

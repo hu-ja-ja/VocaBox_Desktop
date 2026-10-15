@@ -20,7 +20,7 @@ func TestPlaybackE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Skip("AmsHelper.exe is not built; run `bun run helper`")
+		t.Skip("AmsHelper.exe is not built; run `mise run helper`")
 	}
 	sources, err := NewNico().Prepare("sm1097445")
 	if err != nil {
