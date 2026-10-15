@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // playback is the app's player: it keeps the queue, acquires what a track
@@ -324,7 +325,7 @@ func (p *playback) sendPlay() {
 		p.lastProc = p.proc
 	}
 	if p.variant >= len(p.uris) {
-		p.fail(errors.New("この動画には再生できる音源がありません"))
+		p.fail(errors.New(locales.ErrNoAudio()))
 		return
 	}
 	if err := p.proc.send(helperCommand{
@@ -335,7 +336,7 @@ func (p *playback) sendPlay() {
 		Gen:    p.gen,
 		Play:   p.wantPlaying,
 	}); err != nil {
-		p.fail(errors.New("プレイヤーに接続できませんでした"))
+		p.fail(errors.New(locales.ErrPlayerConnect()))
 		return
 	}
 	_ = p.proc.send(helperCommand{Cmd: "volume", Value: p.app.player.Volume})
@@ -369,11 +370,11 @@ func (p *playback) spawnHelper(onEvent func(helperEvent), onExit func(error)) (h
 func helperExecutable() (string, error) {
 	dir, err := mygo.App.Path(mygo.PathResources)
 	if err != nil {
-		return "", errors.New("再生に必要なプレイヤーが見つかりませんでした")
+		return "", errors.New(locales.ErrPlayerMissing())
 	}
 	path := filepath.Join(dir, "AmsHelper.exe")
 	if _, err := os.Stat(path); err != nil {
-		return "", errors.New("再生に必要なプレイヤー（AmsHelper.exe）が見つかりませんでした")
+		return "", errors.New(locales.ErrPlayerMissingHelper())
 	}
 	return path, nil
 }
@@ -465,13 +466,13 @@ func (p *playback) bandFailed(event helperEvent) {
 func playbackErrorMessage(event helperEvent) error {
 	switch event.Code {
 	case "NetworkError", "ManifestDownloadFailure":
-		return errors.New("音源を読み込めませんでした（通信エラー）")
+		return errors.New(locales.ErrTrackLoadNetwork())
 	case "SourceNotSupported", "DecodingError", "SourceFailed":
-		return errors.New("この動画は再生できませんでした（未対応の音源）")
+		return errors.New(locales.ErrTrackUnsupported())
 	case "Aborted":
-		return errors.New("再生が中断されました")
+		return errors.New(locales.ErrPlaybackInterrupted())
 	default:
-		return errors.New("再生を開始できませんでした")
+		return errors.New(locales.ErrPlaybackStart())
 	}
 }
 
@@ -490,7 +491,7 @@ func (p *playback) helperExited(error) {
 			return
 		}
 		if p.restarted {
-			p.fail(errors.New("プレイヤーが応答しなくなりました"))
+			p.fail(errors.New(locales.ErrPlayerHang()))
 			return
 		}
 		p.restarted = true

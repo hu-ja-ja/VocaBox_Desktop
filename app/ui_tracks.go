@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // content builds the page the router shows: the home, or a mylist.
@@ -12,7 +13,7 @@ func (app *nativeApp) content(c *ui.Context) {
 	app.router.View(c, func(r *ui.Route) {
 		switch {
 		case r.Match(homePath):
-			r.Title("ホーム")
+			r.Title(locales.NavHome())
 			app.homeView(c)
 		case r.Match("/mylist/{id}"):
 			app.mylistView(c, r)
@@ -29,10 +30,10 @@ func (app *nativeApp) mylistView(c *ui.Context, r *ui.Route) {
 	id := r.Param("id")
 	app.openMylist(id)
 	if app.page == nil || app.page.ID != id {
-		r.Title("読み込み中")
+		r.Title(locales.MylistLoadingTitle())
 		ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Children(func() {
 			if app.status == "" {
-				ui.Text(c, "マイリストを読み込んでいます…").FontSize(13).TextColor(app.theme.TextMuted)
+				ui.Text(c, locales.StatusLoadingMylist()).FontSize(13).TextColor(app.theme.TextMuted)
 			} else {
 				app.statusLine(c)
 			}
@@ -52,16 +53,16 @@ func (app *nativeApp) mylistPage(c *ui.Context) {
 			BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border).Children(func() {
 			ui.Text(c, "#").Width(28).FontSize(12).TextColor(app.theme.TextMuted)
 			ui.Box(c).Width(thumbSlotWidth(thumbRowHeight, 0)).Shrink(0)
-			ui.Text(c, "曲名 / 投稿者").FontSize(12).TextColor(app.theme.TextMuted)
+			ui.Text(c, locales.TracksColumnTitle()).FontSize(12).TextColor(app.theme.TextMuted)
 			ui.Spacer(c).Grow(1)
-			ui.Text(c, "時間").Width(54).FontSize(12).TextAlign(ui.End).TextColor(app.theme.TextMuted)
+			ui.Text(c, locales.TracksColumnTime()).Width(54).FontSize(12).TextAlign(ui.End).TextColor(app.theme.TextMuted)
 		})
 		app.trackRows(c)
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 			app.statusLine(c)
 			ui.Spacer(c).Grow(1)
 			if app.hasMore {
-				button := ui.Button(c, "続きを読み込む").Disabled(app.loading)
+				button := ui.Button(c, locales.LoadMore()).Disabled(app.loading)
 				if button.Clicked() {
 					app.loadMore()
 				}
@@ -80,7 +81,7 @@ func (app *nativeApp) mylistHeader(c *ui.Context) {
 			}
 			ui.Text(c, meta).FontSize(13).TextColor(app.theme.TextMuted)
 			if entry := app.currentSaved(); entry != nil && entry.IsCombined() {
-				ui.Text(c, "結合元: "+app.combinedMemberNames(entry.Members)).FontSize(12).
+				ui.Text(c, locales.CombinedSources(app.combinedMemberNames(entry.Members))).FontSize(12).
 					MaxLines(2).TextColor(app.theme.TextMuted)
 			}
 			if app.page.Description != "" {
@@ -93,23 +94,23 @@ func (app *nativeApp) mylistHeader(c *ui.Context) {
 			// copy for a refresh, and its tracks come from its members'
 			// saved copies.
 			if !entry.IsCombined() {
-				if button := ui.Button(c, "更新").Disabled(app.saving || app.loading); button.Clicked() {
+				if button := ui.Button(c, locales.ActionRefresh()).Disabled(app.saving || app.loading); button.Clicked() {
 					app.refreshSaved(*entry)
 				}
 			}
 			if entry.Pinned {
-				if button := ui.Button(c, "ピン留めを外す").Disabled(app.saving); button.Clicked() {
+				if button := ui.Button(c, locales.ActionUnpin()).Disabled(app.saving); button.Clicked() {
 					app.unpin(entry.ID)
 				}
-			} else if button := ui.PrimaryButton(c, "ピン留め").Disabled(app.saving); button.Clicked() {
+			} else if button := ui.PrimaryButton(c, locales.ActionPin()).Disabled(app.saving); button.Clicked() {
 				app.pin(entry.ID)
 			}
 			if !entry.Mine {
-				if button := ui.Button(c, "削除").Disabled(app.saving); button.Clicked() {
+				if button := ui.Button(c, locales.ActionDelete()).Disabled(app.saving); button.Clicked() {
 					app.askDelete(savedToEntry(*entry))
 				}
 			}
-		} else if button := ui.PrimaryButton(c, "ピン留め").Disabled(app.saving || app.loading); button.Clicked() {
+		} else if button := ui.PrimaryButton(c, locales.ActionPin()).Disabled(app.saving || app.loading); button.Clicked() {
 			app.saveCurrent()
 		}
 	})
@@ -157,7 +158,7 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 	}).Grow(1)
 	if len(app.page.Items) == 0 {
 		list.Children(func() {
-			ui.Text(c, "このマイリストに曲はありません").Padding(20).TextColor(app.theme.TextMuted)
+			ui.Text(c, locales.TracksEmpty()).Padding(20).TextColor(app.theme.TextMuted)
 		})
 	}
 }
@@ -177,7 +178,7 @@ func (app *nativeApp) queueView(c *ui.Context) {
 func (app *nativeApp) queuePanel(c *ui.Context) {
 	ui.Column(c).Grow(1).FillHeight().Gap(4).Padding(18, 26, 12).Children(func() {
 		ui.Column(c).Gap(3).Children(func() {
-			ui.Text(c, "再生キュー").FontSize(21).Bold().SingleLine().Ellipsis("…")
+			ui.Text(c, locales.PlayerQueue()).FontSize(21).Bold().SingleLine().Ellipsis("…")
 			ui.Text(c, app.queueMeta()).FontSize(12).TextColor(app.theme.TextMuted)
 		})
 		app.queueRows(c)
@@ -191,9 +192,9 @@ func (app *nativeApp) queueMeta() string {
 	if app.player.Name != "" {
 		parts = append(parts, app.player.Name)
 	}
-	parts = append(parts, fmt.Sprintf("%d曲", len(app.player.Order)))
+	parts = append(parts, locales.QueueSongCount(len(app.player.Order)))
 	if app.player.Shuffle {
-		parts = append(parts, "シャッフル")
+		parts = append(parts, locales.PlayerShuffle())
 	}
 	return strings.Join(parts, "  ·  ")
 }
@@ -205,7 +206,7 @@ func (app *nativeApp) queueRows(c *ui.Context) {
 	rows := app.queueItems()
 	if len(rows) == 0 {
 		ui.Column(c).Grow(1).Center().Children(func() {
-			ui.Text(c, "キューは空です").FontSize(13).TextColor(app.theme.TextMuted)
+			ui.Text(c, locales.QueueEmpty()).FontSize(13).TextColor(app.theme.TextMuted)
 		})
 		return
 	}
@@ -290,7 +291,7 @@ func (app *nativeApp) followQueue(n int) {
 // queueMenu shows the menu button of a row with the menu it opens: only on
 // the row the pointer is over, as the three dots a queue row carries.
 func (app *nativeApp) queueMenu(c *ui.Context, item MylistItem, i int, hovered bool) {
-	button := ui.Button(c, "").Label("曲のメニュー").Tooltip("曲のメニュー").Padding(4, 7).Radius(6)
+	button := ui.Button(c, "").Label(locales.TrackMenu()).Tooltip(locales.TrackMenu()).Padding(4, 7).Radius(6)
 	if !hovered {
 		button.Invisible()
 	}
@@ -309,7 +310,7 @@ func (app *nativeApp) queueMenu(c *ui.Context, item MylistItem, i int, hovered b
 		return
 	}
 	ui.Popover(c, button, &app.queueMenuOpen, func() {
-		remove := app.menuItem(c, iconTrash, "キューから削除")
+		remove := app.menuItem(c, iconTrash, locales.QueueRemove())
 		if remove.Clicked() {
 			app.removeFromQueue(item)
 		}
@@ -333,7 +334,7 @@ func trackLabel(item MylistItem) string {
 	if item.Title != "" {
 		return item.Title
 	}
-	return "取得できません（" + item.WatchID + "）"
+	return locales.TrackUnavailable(item.WatchID)
 }
 
 // queueItems returns the queue's entries in the order it plays: the player's

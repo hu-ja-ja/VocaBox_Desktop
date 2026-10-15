@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"image"
 	"io"
 	"net/http"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 	"golang.org/x/image/draw"
 )
 
@@ -52,11 +52,11 @@ const (
 
 // errThumbPaused reports the CDN rate limiting: the limiter has paused every
 // fetch, and the caller should stop rather than try another URL.
-var errThumbPaused = errors.New("ニコニコが混み合っています。しばらくしてからもう一度お試しください")
+var errThumbPaused = errors.New(locales.ErrNicoBusy())
 
 // errThumbMissing reports the CDN has no picture at a URL, as an older video
 // has no .M size: the caller may move on to the URL's smaller sibling.
-var errThumbMissing = errors.New("サムネイルが見つかりません")
+var errThumbMissing = errors.New(locales.ErrThumbMissing())
 
 // thumbnailLimiter bounds how fast pictures are fetched: at most the slot
 // count run at once, each start at least interval after the last, and a
@@ -140,7 +140,7 @@ func (m *Mylist) Thumbnail(watchID, thumbURL string) ([]byte, error) {
 		}
 	}
 	if lastErr == nil {
-		lastErr = errors.New("サムネイルがありません")
+		lastErr = errors.New(locales.ErrThumbNone())
 	}
 	return nil, lastErr
 }
@@ -241,11 +241,11 @@ func (m *Mylist) thumbHostAllowed(host string) bool {
 func (m *Mylist) fetchThumbnail(rawURL string) ([]byte, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Scheme != "https" || !m.thumbHostAllowed(u.Host) {
-		return nil, errors.New("サムネイルの取得先が不正です")
+		return nil, errors.New(locales.ErrThumbBadHost())
 	}
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, errors.New("サムネイルの取得に失敗しました")
+		return nil, errors.New(locales.ErrThumbFetch())
 	}
 	req.Header.Set("User-Agent", mylistUserAgent)
 	if m.thumbLimiter != nil {
@@ -254,7 +254,7 @@ func (m *Mylist) fetchThumbnail(rawURL string) ([]byte, error) {
 	}
 	resp, err := m.client.Do(req)
 	if err != nil {
-		return nil, errors.New("サムネイルの取得に失敗しました（通信エラー）")
+		return nil, errors.New(locales.ErrThumbNetwork())
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
@@ -267,17 +267,17 @@ func (m *Mylist) fetchThumbnail(rawURL string) ([]byte, error) {
 		return nil, errThumbMissing
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("サムネイルの取得に失敗しました（HTTP %d）", resp.StatusCode)
+		return nil, errors.New(locales.ErrThumbHTTP(resp.StatusCode))
 	}
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "image/") {
-		return nil, errors.New("サムネイルの応答が画像ではありません")
+		return nil, errors.New(locales.ErrThumbNotImage())
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxThumbBody+1))
 	if err != nil || len(body) == 0 {
-		return nil, errors.New("サムネイルの取得に失敗しました")
+		return nil, errors.New(locales.ErrThumbFetch())
 	}
 	if len(body) > maxThumbBody {
-		return nil, errors.New("サムネイルの応答が大きすぎます")
+		return nil, errors.New(locales.ErrThumbTooLarge())
 	}
 	return body, nil
 }

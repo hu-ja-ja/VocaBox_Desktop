@@ -1,6 +1,10 @@
 package main
 
-import "github.com/egoist/mygo"
+import (
+	"github.com/egoist/mygo"
+
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
+)
 
 // maxWindowStateBody bounds the window-state file.
 const maxWindowStateBody = 64 << 10
@@ -26,7 +30,7 @@ func (s windowStateStore) LoadWindowStates() (map[string]mygo.WindowState, error
 		return nil, err
 	}
 	var states map[string]mygo.WindowState
-	ok, err := readJSONFile(path, maxWindowStateBody, &states, "ウィンドウの状態を読み込めませんでした", "ウィンドウの状態の記録が壊れています")
+	ok, err := readJSONFile(path, maxWindowStateBody, &states, locales.ErrWindowStateRead(), locales.ErrWindowStateCorrupt())
 	if !ok || err != nil {
 		return nil, err
 	}
@@ -40,5 +44,5 @@ func (s windowStateStore) SaveWindowStates(states map[string]mygo.WindowState) e
 	if err != nil {
 		return err
 	}
-	return writeJSONFile(path, states, maxWindowStateBody, "ウィンドウの状態を書き込めませんでした")
+	return writeJSONFile(path, states, maxWindowStateBody, locales.ErrWindowStateWrite())
 }

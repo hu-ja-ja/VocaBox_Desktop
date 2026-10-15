@@ -1,0 +1,215 @@
+{
+  "@@locale": "ja",
+  "navHome": "ホーム",
+  "navMylists": "マイリスト",
+  "navCombined": "結合マイリスト",
+  "homeSubtitle": "聴きたいマイリストを選んで再生",
+  "homeSubtitleEmpty": "マイリストは「+」から読み込めます",
+  "homeReadTitle": "読み込んだマイリスト",
+  "importTitle": "マイリストを読み込む",
+  "importCardHint": "URLまたはIDから",
+  "importBody": "ニコニコ動画のマイリストのURLまたはIDを入力してください。",
+  "importPlaceholder": "URL または ID",
+  "importFieldLabel": "マイリストのURLまたはID",
+  "importOpen": "開く",
+  "actionCancel": "キャンセル",
+  "actionPin": "ピン留め",
+  "actionUnpin": "ピン留めを外す",
+  "actionDelete": "削除",
+  "actionDeleteConfirm": "削除する",
+  "actionPlay": "再生",
+  "actionPause": "一時停止",
+  "actionPlayShuffle": "シャッフル再生",
+  "actionRefresh": "更新",
+  "actionCreate": "決定",
+  "actionLogout": "ログアウト",
+  "actionLogoutConfirm": "ログアウトする",
+  "actionQuit": "終了",
+  "badgeCombined": "結合",
+  "badgePrivate": "非公開",
+  "pinnedName": "{name}（ピン留め）",
+  "listSeparator": "、",
+  "playerSeek": "再生位置",
+  "playerPickTrack": "再生する曲を選んでください",
+  "playerShuffle": "シャッフル",
+  "playerRepeat": "ループ",
+  "playerVolume": "音量",
+  "playerPrevious": "前へ",
+  "playerNext": "次へ",
+  "playerQueue": "再生キュー",
+  "playerMute": "ミュート",
+  "playerUnmute": "ミュート解除",
+  "queueEmpty": "キューは空です",
+  "queueSongCount": "{count, plural, other {#曲}}",
+  "@queueSongCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "queueRemove": "キューから削除",
+  "trackMenu": "曲のメニュー",
+  "trackUnavailable": "取得できません（{id}）",
+  "tracksColumnTitle": "曲名 / 投稿者",
+  "tracksColumnTime": "時間",
+  "tracksEmpty": "このマイリストに曲はありません",
+  "loadMore": "続きを読み込む",
+  "mylistLoadingTitle": "読み込み中",
+  "mylistMenu": "マイリストのメニュー",
+  "combinedSources": "結合元: {names}",
+  "sidebarClose": "サイドバーを閉じる",
+  "sidebarOpen": "サイドバーを開く",
+  "sidebarEmpty": "マイリストはありません",
+  "account": "アカウント",
+  "accountMenu": "アカウントのメニュー",
+  "signedIn": "ログイン中",
+  "signedInAs": "{name}でログイン中",
+  "loginWithNiconico": "ニコニコにログイン",
+  "loginOpening": "ログイン画面を開いています…",
+  "logoutTitle": "ログアウトしますか？",
+  "logoutBody": "保存したログイン情報を削除します。",
+  "combineTitle": "結合マイリストを作成",
+  "combineBody": "選んだマイリストをまたいで再生できるようになります。",
+  "combineNameLabel": "見出し",
+  "combineDefaultName": "結合リスト",
+  "combineNotSaved": "保存待ち",
+  "deleteTitle": "保存したマイリストを削除しますか？",
+  "deleteBody": "このPCに保存した内容を削除します。ニコニコ動画のマイリストは消えません。",
+  "songCountTotal": "{count, plural, other {全#曲}}",
+  "@songCountTotal": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "combinedMeta": "{count, plural, other {#個のマイリスト}}  ·  {songs}",
+  "@combinedMeta": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "songs": { "type": "String" }
+    }
+  },
+  "trayIdle": "再生していません",
+  "trayIdleHint": "マイリストから曲を選んで再生してください",
+  "trayShowWindow": "ウィンドウを表示",
+  "trayQuitTooltip": "VocaBox を終了",
+  "statusPinned": "ピン留めしました。",
+  "statusUnpinned": "ピン留めを外しました。",
+  "statusFromSaved": "保存した内容から表示中（更新するまで通信しません）",
+  "statusLoadingMylist": "マイリストを読み込んでいます…",
+  "statusLoadingMore": "続きを読み込んでいます…",
+  "statusSavingMylist": "マイリストを保存しています…",
+  "statusRefreshingMylist": "マイリストを更新しています…",
+  "statusRefreshed": "更新しました。",
+  "statusDeleted": "保存したマイリストを削除しました。",
+  "statusCombinedCreated": "結合マイリスト「{name}」を作成しました。",
+  "statusLoggedIn": "ログインしました。",
+  "statusLoggedOut": "ログアウトしました。",
+  "errMylistInput": "マイリストのIDまたはURLの形式が正しくありません",
+  "errMylistInputEmpty": "マイリストのIDまたはURLを入力してください",
+  "errMylistURL": "対応していないURLです（nicovideo.jp / nico.ms のマイリストのみ）",
+  "errMylistFetch": "マイリストの取得に失敗しました",
+  "errMylistFetchNetwork": "マイリストの取得に失敗しました（通信エラー）",
+  "errMylistFetchHTTP": "マイリストの取得に失敗しました（HTTP {status}）",
+  "@errMylistFetchHTTP": {
+    "placeholders": {
+      "status": { "type": "int" }
+    }
+  },
+  "errMylistFetchStatus": "マイリストの取得に失敗しました（status {status}）",
+  "@errMylistFetchStatus": {
+    "placeholders": {
+      "status": { "type": "int" }
+    }
+  },
+  "errMylistParse": "マイリストの応答を読み取れませんでした",
+  "errMylistTooLarge": "マイリストの応答が大きすぎます",
+  "errMylistNotFound": "マイリストが見つかりません（非公開マイリストはログインすると読み込めます）",
+  "errMylistPrivate": "マイリストを表示できません（非公開マイリストはログインすると読み込めます）",
+  "errNicoBusy": "ニコニコが混み合っています。しばらくしてからもう一度お試しください",
+  "errNotLoggedIn": "ログインしていません",
+  "errSessionExpired": "ログインの有効期限が切れました。もう一度ログインしてください",
+  "errSessionInvalid": "ログイン情報が正しくありません",
+  "errSessionEmpty": "ログイン情報が空です",
+  "errSessionSave": "ログイン情報を保存できませんでした",
+  "errSessionRead": "ログイン情報を読み込めませんでした",
+  "errSessionDelete": "ログイン情報を削除できませんでした",
+  "errLoginWindow": "ログイン画面を開けませんでした",
+  "errLoginVerify": "ログイン情報を確認できませんでした。もう一度お試しください。",
+  "errAccountFetch": "アカウント情報を取得できませんでした",
+  "errAccountFetchStatus": "アカウント情報を取得できませんでした（status {status}）",
+  "@errAccountFetchStatus": {
+    "placeholders": {
+      "status": { "type": "int" }
+    }
+  },
+  "errWatchFetch": "動画の情報を取得できませんでした",
+  "errWatchFetchStatus": "動画の情報を取得できませんでした（status {status} {code}）",
+  "@errWatchFetchStatus": {
+    "placeholders": {
+      "status": { "type": "int" },
+      "code": { "type": "String" }
+    }
+  },
+  "errNoAudio": "この動画には再生できる音源がありません",
+  "errAudioSourceMissing": "この動画の音源の取得先が見つかりませんでした",
+  "errAudioFetch": "この動画の音源を取得できませんでした",
+  "errAudioFetchStatus": "この動画の音源を取得できませんでした（status {status} {code}）",
+  "@errAudioFetchStatus": {
+    "placeholders": {
+      "status": { "type": "int" },
+      "code": { "type": "String" }
+    }
+  },
+  "errAudioSourceFetch": "音源の取得に失敗しました",
+  "errAudioSourceNetwork": "音源の取得に失敗しました（通信エラー）",
+  "errAudioSourceHTTP": "音源の取得に失敗しました（HTTP {status}）",
+  "@errAudioSourceHTTP": {
+    "placeholders": {
+      "status": { "type": "int" }
+    }
+  },
+  "errNicoNetwork": "ニコニコに接続できませんでした（通信エラー）",
+  "errNicoParse": "ニコニコの応答を読み取れませんでした",
+  "errNicoAPIHTTP": "ニコニコのAPIが失敗しました（HTTP {status}）",
+  "@errNicoAPIHTTP": {
+    "placeholders": {
+      "status": { "type": "int" }
+    }
+  },
+  "errThumbMissing": "サムネイルが見つかりません",
+  "errThumbNone": "サムネイルがありません",
+  "errThumbBadHost": "サムネイルの取得先が不正です",
+  "errThumbFetch": "サムネイルの取得に失敗しました",
+  "errThumbNetwork": "サムネイルの取得に失敗しました（通信エラー）",
+  "errThumbHTTP": "サムネイルの取得に失敗しました（HTTP {status}）",
+  "@errThumbHTTP": {
+    "placeholders": {
+      "status": { "type": "int" }
+    }
+  },
+  "errThumbNotImage": "サムネイルの応答が画像ではありません",
+  "errThumbTooLarge": "サムネイルの応答が大きすぎます",
+  "errPlayerConnect": "プレイヤーに接続できませんでした",
+  "errPlayerMissing": "再生に必要なプレイヤーが見つかりませんでした",
+  "errPlayerMissingHelper": "再生に必要なプレイヤー（AmsHelper.exe）が見つかりませんでした",
+  "errPlayerHang": "プレイヤーが応答しなくなりました",
+  "errTrackLoadNetwork": "音源を読み込めませんでした（通信エラー）",
+  "errTrackUnsupported": "この動画は再生できませんでした（未対応の音源）",
+  "errPlaybackInterrupted": "再生が中断されました",
+  "errPlaybackStart": "再生を開始できませんでした",
+  "errSettingsRead": "設定を読み込めませんでした",
+  "errSettingsCorrupt": "設定の記録が壊れています",
+  "errSettingsWrite": "設定を書き込めませんでした",
+  "errSavedRead": "保存したマイリストを読み込めませんでした",
+  "errSavedCorrupt": "保存したマイリストの記録が壊れています",
+  "errSavedWrite": "保存したマイリストを書き込めませんでした",
+  "errMylistWrite": "マイリストを書き込めませんでした",
+  "errConfigDir": "保存先フォルダーを取得できませんでした",
+  "errConfigDirCreate": "保存先フォルダーを作成できませんでした",
+  "errWindowStateRead": "ウィンドウの状態を読み込めませんでした",
+  "errWindowStateCorrupt": "ウィンドウの状態の記録が壊れています",
+  "errWindowStateWrite": "ウィンドウの状態を書き込めませんでした",
+  "errCombinedName": "見出しを入力してください",
+  "errCombinedMembers": "結合するマイリストを選んでください",
+  "errCombinedIneligible": "結合できないマイリストが選ばれています",
+  "errCombinedNotSaved": "「{name}」は保存がまだなので結合できません"
+}

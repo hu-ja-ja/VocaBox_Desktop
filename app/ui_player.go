@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // seekSettleMS is how near the player's reported position must come to the
@@ -42,7 +43,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				app.seekValue = app.player.PositionMS
 			}
 			ui.Text(c, formatMillis(app.seekValue)).Width(42).FontSize(11).TextColor(app.theme.TextMuted)
-			seek := ui.Slider(c, &app.seekValue, 0, max).Label("再生位置").Grow(1).Disabled(!app.player.Ready)
+			seek := ui.Slider(c, &app.seekValue, 0, max).Label(locales.PlayerSeek()).Grow(1).Disabled(!app.player.Ready)
 			// The bar seeks once, when the pointer lets go or the keys move
 			// it: seeking on every frame of the drag stutters the player and
 			// leaves playback to be restarted. Dragged keeps the hold past
@@ -73,11 +74,11 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 					})
 				} else {
 					ui.Box(c).Size(thumbSlotWidth(thumbBarHeight, 0), thumbBarHeight).Shrink(0)
-					ui.Text(c, "再生する曲を選んでください").FontSize(13).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
+					ui.Text(c, locales.PlayerPickTrack()).FontSize(13).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
 				}
 			})
 
-			shuffle := ui.Toggle(c, &app.player.Shuffle, "").Label("シャッフル").Tooltip("シャッフル").Children(func() {
+			shuffle := ui.Toggle(c, &app.player.Shuffle, "").Label(locales.PlayerShuffle()).Tooltip(locales.PlayerShuffle()).Children(func() {
 				ui.Icon(c, iconShuffle).FontSize(18)
 			})
 			if shuffle.Changed() {
@@ -87,7 +88,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				app.queueFollowTrack = ""
 			}
 			app.transportButtons(c)
-			repeat := ui.Toggle(c, &app.player.Repeat, "").Label("ループ").Tooltip("ループ").Children(func() {
+			repeat := ui.Toggle(c, &app.player.Repeat, "").Label(locales.PlayerRepeat()).Tooltip(locales.PlayerRepeat()).Children(func() {
 				ui.Icon(c, iconRepeat).FontSize(18)
 			})
 			if repeat.Changed() {
@@ -119,7 +120,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				if mute.Clicked() {
 					app.toggleMute()
 				}
-				volumeSlider := ui.Slider(c, &app.volumeValue, 0, 1).Label("音量").Width(110)
+				volumeSlider := ui.Slider(c, &app.volumeValue, 0, 1).Label(locales.PlayerVolume()).Width(110)
 				// A drag tells the player in volumeSendStep steps rather than
 				// on every pointer frame, which floods the page with commands
 				// and the window with the reports they bring; letting go sends
@@ -149,7 +150,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				app.volumeHeld = held
 			})
 
-			queue := ui.Button(c, "").Label("再生キュー").Tooltip("再生キュー").Padding(6, 9).BorderWidth(0)
+			queue := ui.Button(c, "").Label(locales.PlayerQueue()).Tooltip(locales.PlayerQueue()).Padding(6, 9).BorderWidth(0)
 			if app.queueOpen {
 				queue.Background(app.theme.SurfacePressed)
 			}
@@ -174,16 +175,16 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 func (app *nativeApp) transportButtons(c *ui.Context) {
 	// The player restarts the track first while it is past its opening, so
 	// the button needs no can-previous state.
-	previous := ui.Button(c, "").Label("前へ").Tooltip("前へ").Children(func() {
+	previous := ui.Button(c, "").Label(locales.PlayerPrevious()).Tooltip(locales.PlayerPrevious()).Children(func() {
 		ui.Icon(c, iconSkipBack).FontSize(18)
 	}).Disabled(app.player.WatchID == "")
 	if previous.Clicked() {
 		app.sendPlayer(PlayerCommand{Action: "previous"})
 	}
-	playLabel := "再生"
+	playLabel := locales.ActionPlay()
 	playIcon := iconPlay
 	if app.player.Playing {
-		playLabel = "一時停止"
+		playLabel = locales.ActionPause()
 		playIcon = iconPause
 	}
 	play := ui.PrimaryButton(c, "").Label(playLabel).Tooltip(playLabel).Children(func() {
@@ -192,7 +193,7 @@ func (app *nativeApp) transportButtons(c *ui.Context) {
 	if play.Clicked() {
 		app.togglePlay()
 	}
-	next := ui.Button(c, "").Label("次へ").Tooltip("次へ").Children(func() {
+	next := ui.Button(c, "").Label(locales.PlayerNext()).Tooltip(locales.PlayerNext()).Children(func() {
 		ui.Icon(c, iconSkipForward).FontSize(18)
 	}).Disabled(!app.canNext())
 	if next.Clicked() {

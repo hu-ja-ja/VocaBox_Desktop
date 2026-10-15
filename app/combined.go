@@ -2,10 +2,11 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // combinedIDPrefix names the combined lists made on this PC. Their IDs never
@@ -31,10 +32,10 @@ func (e SavedIndexEntry) IsCombined() bool { return len(e.Members) > 0 }
 func (m *Mylist) CreateCombined(name string, members []string) ([]SavedIndexEntry, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, errors.New("見出しを入力してください")
+		return nil, errors.New(locales.ErrCombinedName())
 	}
 	if len(members) == 0 {
-		return nil, errors.New("結合するマイリストを選んでください")
+		return nil, errors.New(locales.ErrCombinedMembers())
 	}
 	index, err := m.ListSaved()
 	if err != nil {
@@ -43,10 +44,10 @@ func (m *Mylist) CreateCombined(name string, members []string) ([]SavedIndexEntr
 	for _, id := range members {
 		at, ok := indexAt(index, id)
 		if !ok || index[at].IsCombined() {
-			return nil, errors.New("結合できないマイリストが選ばれています")
+			return nil, errors.New(locales.ErrCombinedIneligible())
 		}
 		if !m.HasSavedBody(id) {
-			return nil, fmt.Errorf("「%s」は保存がまだなので結合できません", pageDisplayName(id, index[at].Name))
+			return nil, errors.New(locales.ErrCombinedNotSaved(pageDisplayName(id, index[at].Name)))
 		}
 	}
 	entry := SavedIndexEntry{ID: combinedID(), Name: name, Members: append([]string(nil), members...)}

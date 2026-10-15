@@ -10,6 +10,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // PlayerCommand carries one player control or queue change from the UI to
@@ -321,9 +322,9 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 			entries := append(append(pinned, own...), read...)
 			homeClicked, mylistClicked := false, false
 			sidebar := ui.Sidebar(c, &page, func() {
-				item := ui.SidebarItem(c, homePath, nil, "ホーム")
+				item := ui.SidebarItem(c, homePath, nil, locales.NavHome())
 				homeClicked = item.Clicked()
-				ui.SidebarSection(c, "マイリスト", nil, func() {
+				ui.SidebarSection(c, locales.NavMylists(), nil, func() {
 					for _, entry := range entries {
 						if app.sidebarMylistItem(c, entry) {
 							mylistClicked = true
@@ -331,7 +332,7 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 					}
 				})
 				if len(combined) > 0 {
-					ui.SidebarSection(c, "結合マイリスト", nil, func() {
+					ui.SidebarSection(c, locales.NavCombined(), nil, func() {
 						for _, entry := range combined {
 							if app.sidebarMylistItem(c, entry) {
 								mylistClicked = true
@@ -347,7 +348,7 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 				app.router.Push(page)
 			}
 			if len(entries) == 0 && len(combined) == 0 {
-				ui.Text(c, "マイリストはありません").FontSize(12).TextColor(app.theme.TextMuted)
+				ui.Text(c, locales.SidebarEmpty()).FontSize(12).TextColor(app.theme.TextMuted)
 			}
 			app.accountRow(c)
 		})
@@ -380,21 +381,21 @@ func (app *nativeApp) accountRow(c *ui.Context) {
 	if app.loggedIn {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			app.accountAvatar(c)
-			label := "ログイン中"
+			label := locales.SignedIn()
 			if app.accountName != "" {
-				label = app.accountName + "でログイン中"
+				label = locales.SignedInAs(app.accountName)
 			}
 			ui.Text(c, label).FontSize(12).TextColor(app.theme.TextMuted).
 				SingleLine().Ellipsis("…").Grow(1).Basis(0).MinWidth(0)
-			if button := ui.Button(c, "ログアウト").Padding(6, 9); button.Clicked() {
+			if button := ui.Button(c, locales.ActionLogout()).Padding(6, 9); button.Clicked() {
 				app.confirmLogout = true
 			}
 		})
 		return
 	}
-	label := "ニコニコにログイン"
+	label := locales.LoginWithNiconico()
 	if app.loginWindow != nil {
-		label = "ログイン画面を開いています…"
+		label = locales.LoginOpening()
 	}
 	if button := ui.Button(c, label).FillWidth().Disabled(app.loginWindow != nil); button.Clicked() {
 		app.openLogin()
@@ -405,13 +406,13 @@ func (app *nativeApp) accountRow(c *ui.Context) {
 // sidebar's way out does not sign the user out.
 func (app *nativeApp) logoutDialog(c *ui.Context) {
 	ui.Column(c).Width(320).Gap(14).Children(func() {
-		ui.Text(c, "ログアウトしますか？").FontSize(20).Bold()
-		ui.Text(c, "保存したログイン情報を削除します。").FontSize(12).TextColor(app.theme.TextMuted)
+		ui.Text(c, locales.LogoutTitle()).FontSize(20).Bold()
+		ui.Text(c, locales.LogoutBody()).FontSize(12).TextColor(app.theme.TextMuted)
 		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
-			if button := ui.Button(c, "キャンセル"); button.Clicked() {
+			if button := ui.Button(c, locales.ActionCancel()); button.Clicked() {
 				app.confirmLogout = false
 			}
-			if button := ui.PrimaryButton(c, "ログアウトする"); button.Clicked() {
+			if button := ui.PrimaryButton(c, locales.ActionLogoutConfirm()); button.Clicked() {
 				app.confirmLogout = false
 				app.logout()
 			}
@@ -464,7 +465,7 @@ func (app *nativeApp) sidebarRail(c *ui.Context) {
 
 // railHome is the rail's way back to the home, lit while the home shows.
 func (app *nativeApp) railHome(c *ui.Context) {
-	item := ui.Button(c, "").Label("ホーム").Tooltip("ホーム").
+	item := ui.Button(c, "").Label(locales.NavHome()).Tooltip(locales.NavHome()).
 		Size(36, 36).Padding(0).BorderWidth(0).Radius(10)
 	if app.router.Path() == homePath {
 		item.Background(app.theme.SurfacePressed)
@@ -479,7 +480,7 @@ func (app *nativeApp) railHome(c *ui.Context) {
 // to it and its menu; the tooltip names it, and the label marks it as the
 // pinned shortcut, apart from the same mylist's name on the home.
 func (app *nativeApp) railMylist(c *ui.Context, entry mylistEntry) {
-	item := ui.Button(c, "").Label(entry.Name+"（ピン留め）").Tooltip(entry.Name).
+	item := ui.Button(c, "").Label(locales.PinnedName(entry.Name)).Tooltip(entry.Name).
 		Size(36, 36).Padding(0).BorderWidth(0).Radius(10)
 	if app.router.Path() == mylistPath(entry.ID) {
 		item.Background(app.theme.SurfacePressed)
@@ -535,7 +536,7 @@ func (app *nativeApp) railAccount(c *ui.Context) {
 			app.railAvatar(c)
 			return
 		}
-		label := "ニコニコにログイン"
+		label := locales.LoginWithNiconico()
 		button := ui.Button(c, "").Label(label).Tooltip(label).
 			Size(36, 36).Padding(0).BorderWidth(0).Radius(10).Disabled(app.loginWindow != nil)
 		button.Children(func() { ui.Icon(c, iconLogIn).FontSize(18) })
@@ -550,9 +551,9 @@ func (app *nativeApp) railAccount(c *ui.Context) {
 func (app *nativeApp) railAvatar(c *ui.Context) {
 	tip := app.accountName
 	if tip == "" {
-		tip = "アカウント"
+		tip = locales.Account()
 	}
-	button := ui.Button(c, "").Label("アカウント").Tooltip(tip).
+	button := ui.Button(c, "").Label(locales.Account()).Tooltip(tip).
 		Size(36, 36).Padding(0).BorderWidth(0).Radius(10)
 	button.Children(func() { app.accountAvatar(c) })
 	if button.Clicked() {
@@ -567,14 +568,14 @@ func (app *nativeApp) railAccountMenu(c *ui.Context, anchor ui.Element) {
 	ui.PopoverBase(c, anchor, &app.railAccountOpen, func(panel ui.Element) {
 		panel.Padding(4).Radius(app.theme.Radius+2).Background(app.theme.Background).
 			Border(1, app.theme.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).
-			Role(ui.RoleMenu).Label("アカウントのメニュー")
+			Role(ui.RoleMenu).Label(locales.AccountMenu())
 		name := app.accountName
 		if name == "" {
-			name = "ログイン中"
+			name = locales.SignedIn()
 		}
 		ui.Text(c, name).FontSize(12).TextColor(app.theme.TextMuted).
 			Padding(6, 8).MaxWidth(200).SingleLine().Ellipsis("…")
-		item := app.menuItem(c, iconLogOut, "ログアウト")
+		item := app.menuItem(c, iconLogOut, locales.ActionLogout())
 		if item.Clicked() {
 			app.railAccountOpen = false
 			app.confirmLogout = true
@@ -593,9 +594,9 @@ func (app *nativeApp) brandMark(c *ui.Context) {
 // sidebarToggle shows an icon button opening or closing the sidebar; the
 // label follows the current state for assistive technology.
 func (app *nativeApp) sidebarToggle(c *ui.Context, opening bool) {
-	label := "サイドバーを閉じる"
+	label := locales.SidebarClose()
 	if opening {
-		label = "サイドバーを開く"
+		label = locales.SidebarOpen()
 	}
 	button := ui.Button(c, "").Label(label).Tooltip(label).BorderWidth(0).Padding(6, 9).Children(func() {
 		ui.Icon(c, iconMenu).FontSize(18)
@@ -677,9 +678,9 @@ func (app *nativeApp) setPinned(id string, pinned bool) {
 	}
 	app.saved = saved
 	if pinned {
-		app.setStatus("ピン留めしました。")
+		app.setStatus(locales.StatusPinned())
 	} else {
-		app.setStatus("ピン留めを外しました。")
+		app.setStatus(locales.StatusUnpinned())
 	}
 }
 
@@ -823,7 +824,7 @@ func (app *nativeApp) openSaved(id string) bool {
 	app.loadToken++
 	app.loading = false
 	app.pendingAdvance = false
-	app.setStatus("保存した内容から表示中（更新するまで通信しません）")
+	app.setStatus(locales.StatusFromSaved())
 	app.playerError = ""
 	app.adoptSavedPage(body)
 	app.startPendingMylist(body.ID, body.Items)
@@ -843,7 +844,7 @@ func (app *nativeApp) fetchMylist(input string) {
 	app.pendingAdvance = false
 	app.page = nil
 	app.hasMore = false
-	app.setStatus("マイリストを読み込んでいます…")
+	app.setStatus(locales.StatusLoadingMylist())
 	app.playerError = ""
 	go func() {
 		page, err := app.mylist.GetPage(input, 1)
@@ -890,7 +891,7 @@ func (app *nativeApp) loadMore() {
 	}
 	pageID, pageNo, token := app.page.ID, app.nextPage, app.loadToken
 	app.loading = true
-	app.setStatus("続きを読み込んでいます…")
+	app.setStatus(locales.StatusLoadingMore())
 	go func() {
 		page, err := app.mylist.GetPage(pageID, pageNo)
 		app.update(func() {
@@ -973,7 +974,7 @@ func (app *nativeApp) saveMylist(id string) {
 		return
 	}
 	app.saving = true
-	app.setStatus("マイリストを保存しています…")
+	app.setStatus(locales.StatusSavingMylist())
 	go func() {
 		saved, err := app.mylist.SaveMylist(id)
 		app.update(func() {
@@ -984,7 +985,7 @@ func (app *nativeApp) saveMylist(id string) {
 			}
 			app.saved = saved
 			app.adoptShownBody(id)
-			app.setStatus("ピン留めしました。")
+			app.setStatus(locales.StatusPinned())
 		})
 	}()
 }
@@ -995,7 +996,7 @@ func (app *nativeApp) refreshSaved(entry SavedIndexEntry) {
 		return
 	}
 	app.saving = true
-	app.setStatus("マイリストを更新しています…")
+	app.setStatus(locales.StatusRefreshingMylist())
 	go func() {
 		saved, err := app.mylist.RefreshMylist(entry.ID)
 		app.update(func() {
@@ -1006,7 +1007,7 @@ func (app *nativeApp) refreshSaved(entry SavedIndexEntry) {
 			}
 			app.saved = saved
 			app.adoptShownBody(entry.ID)
-			app.setStatus("更新しました。")
+			app.setStatus(locales.StatusRefreshed())
 		})
 	}()
 }

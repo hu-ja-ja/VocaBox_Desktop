@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // SavedMylist is one saved mylist body: the mylist's ID, display name,
@@ -86,7 +88,7 @@ func (m *Mylist) LoadSettings() (Settings, error) {
 		return Settings{}, err
 	}
 	settings := defaultSettings()
-	if _, err := readJSONFile(path, maxSettingsBody, &settings, "設定を読み込めませんでした", "設定の記録が壊れています"); err != nil {
+	if _, err := readJSONFile(path, maxSettingsBody, &settings, locales.ErrSettingsRead(), locales.ErrSettingsCorrupt()); err != nil {
 		return Settings{}, err
 	}
 	return settings, nil
@@ -99,7 +101,7 @@ func (m *Mylist) SaveSettings(settings Settings) error {
 	if err != nil {
 		return err
 	}
-	return writeJSONFile(path, settings, maxSettingsBody, "設定を書き込めませんでした")
+	return writeJSONFile(path, settings, maxSettingsBody, locales.ErrSettingsWrite())
 }
 
 // ListSaved returns the saved mylists index, oldest first. A missing index
@@ -446,7 +448,7 @@ func (m *Mylist) configPath(name string) (string, error) {
 	if dir == "" {
 		base, err := os.UserConfigDir()
 		if err != nil {
-			return "", errors.New("保存先フォルダーを取得できませんでした")
+			return "", errors.New(locales.ErrConfigDir())
 		}
 		dir = filepath.Join(base, "VocaBox")
 	}
@@ -461,7 +463,7 @@ func (m *Mylist) readIndex() ([]SavedIndexEntry, error) {
 		return nil, err
 	}
 	var index []SavedIndexEntry
-	if _, err := readJSONFile(path, maxIndexBody, &index, "保存したマイリストを読み込めませんでした", "保存したマイリストの記録が壊れています"); err != nil {
+	if _, err := readJSONFile(path, maxIndexBody, &index, locales.ErrSavedRead(), locales.ErrSavedCorrupt()); err != nil {
 		return nil, err
 	}
 	if index == nil {
@@ -475,7 +477,7 @@ func (m *Mylist) writeIndex(index []SavedIndexEntry) error {
 	if err != nil {
 		return err
 	}
-	return writeJSONFile(path, index, maxIndexBody, "保存したマイリストを書き込めませんでした")
+	return writeJSONFile(path, index, maxIndexBody, locales.ErrSavedWrite())
 }
 
 func (m *Mylist) readBody(id string) (SavedMylist, error) {
@@ -484,7 +486,7 @@ func (m *Mylist) readBody(id string) (SavedMylist, error) {
 		return SavedMylist{}, err
 	}
 	var body SavedMylist
-	present, err := readJSONFile(path, maxListBody, &body, "保存したマイリストを読み込めませんでした", "保存したマイリストの記録が壊れています")
+	present, err := readJSONFile(path, maxListBody, &body, locales.ErrSavedRead(), locales.ErrSavedCorrupt())
 	if err != nil {
 		return SavedMylist{}, err
 	}
@@ -499,7 +501,7 @@ func (m *Mylist) writeBody(body SavedMylist) error {
 	if err != nil {
 		return err
 	}
-	return writeJSONFileCompact(path, body, maxListBody, "マイリストを書き込めませんでした")
+	return writeJSONFileCompact(path, body, maxListBody, locales.ErrMylistWrite())
 }
 
 // readBoundedFile reads at most maxBytes from path; a missing file returns
@@ -566,7 +568,7 @@ func writeJSONFileCompact(path string, src any, maxBytes int, writeErr string) e
 func writeFileAtomic(path string, body []byte, perm os.FileMode, writeErr string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return errors.New("保存先フォルダーを作成できませんでした")
+		return errors.New(locales.ErrConfigDirCreate())
 	}
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
 	if err != nil {

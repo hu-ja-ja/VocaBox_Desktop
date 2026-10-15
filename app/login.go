@@ -10,6 +10,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // The sign-in flow opens niconico's own login page in a web view: the
@@ -52,14 +53,14 @@ func (app *nativeApp) openLogin() {
 		return
 	}
 	window := mygo.NewWindow(mygo.WindowOptions{
-		Title:         "ニコニコにログイン",
+		Title:         locales.LoginWithNiconico(),
 		URL:           loginURL,
 		Width:         480,
 		Height:        780,
 		DisableResize: true,
 	})
 	if window.IsDestroyed() {
-		app.setError(errors.New("ログイン画面を開けませんでした"))
+		app.setError(errors.New(locales.ErrLoginWindow()))
 		return
 	}
 	app.loginWindow = window
@@ -125,7 +126,7 @@ func (app *nativeApp) completeLogin(window *mygo.Window, header string) {
 	if errors.Is(verifyErr, errSessionExpired) {
 		// niconico refused the session at once: nothing was signed in.
 		app.clearSession()
-		app.finishLogin(window, "ログイン情報を確認できませんでした。もう一度お試しください。", true)
+		app.finishLogin(window, locales.ErrLoginVerify(), true)
 		return
 	}
 	if verifyErr != nil {
@@ -137,7 +138,7 @@ func (app *nativeApp) completeLogin(window *mygo.Window, header string) {
 		app.finishLogin(window, err.Error(), true)
 		return
 	}
-	app.finishLogin(window, "ログインしました。", false)
+	app.finishLogin(window, locales.StatusLoggedIn(), false)
 	app.loadAccount()
 	app.loadOwnMylists()
 }
@@ -240,7 +241,7 @@ func (app *nativeApp) finishLogin(window *mygo.Window, status string, failed boo
 // logout forgets the session the user signed in with.
 func (app *nativeApp) logout() {
 	app.clearSession()
-	app.setStatus("ログアウトしました。")
+	app.setStatus(locales.StatusLoggedOut())
 }
 
 // sessionExpired forgets a session niconico no longer accepts, so the next

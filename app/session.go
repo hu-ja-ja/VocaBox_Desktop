@@ -6,6 +6,8 @@ import (
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // maxSessionBody bounds the session file, which holds one Cookie header.
@@ -28,17 +30,17 @@ func (s sessionStore) path() (string, error) {
 func (s sessionStore) Save(cookies string) error {
 	cookies = strings.TrimSpace(cookies)
 	if cookies == "" {
-		return errors.New("ログイン情報が空です")
+		return errors.New(locales.ErrSessionEmpty())
 	}
 	blob, err := dpapiProtect([]byte(cookies))
 	if err != nil {
-		return errors.New("ログイン情報を保存できませんでした")
+		return errors.New(locales.ErrSessionSave())
 	}
 	path, err := s.path()
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, blob, 0o600, "ログイン情報を保存できませんでした")
+	return writeFileAtomic(path, blob, 0o600, locales.ErrSessionSave())
 }
 
 // Load returns the stored Cookie header, "" when none is saved.
@@ -52,11 +54,11 @@ func (s sessionStore) Load() (string, error) {
 		return "", nil
 	}
 	if err != nil || len(blob) == 0 {
-		return "", errors.New("ログイン情報を読み込めませんでした")
+		return "", errors.New(locales.ErrSessionRead())
 	}
 	body, err := dpapiUnprotect(blob)
 	if err != nil {
-		return "", errors.New("ログイン情報を読み込めませんでした")
+		return "", errors.New(locales.ErrSessionRead())
 	}
 	return string(body), nil
 }
@@ -68,7 +70,7 @@ func (s sessionStore) Clear() error {
 		return err
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return errors.New("ログイン情報を削除できませんでした")
+		return errors.New(locales.ErrSessionDelete())
 	}
 	return nil
 }

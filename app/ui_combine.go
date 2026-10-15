@@ -4,11 +4,8 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
-
-// combinedDefaultName is the heading a new combined list is offered until the
-// user types one.
-const combinedDefaultName = "結合リスト"
 
 // openCombineDialog shows the dialog creating a combined list, with the
 // mylist the menu was opened on already chosen. The chosen set of a dialog
@@ -19,7 +16,7 @@ func (app *nativeApp) openCombineDialog(id string) {
 	if entry := app.savedEntry(id); entry != nil && !entry.IsCombined() && app.mylist.HasSavedBody(id) {
 		*app.combineCheck(id) = true
 	}
-	app.combineName = combinedDefaultName
+	app.combineName = locales.CombineDefaultName()
 	app.combining = true
 }
 
@@ -27,18 +24,18 @@ func (app *nativeApp) openCombineDialog(id string) {
 // list carries on the home, and the saved mylists to play as one.
 func (app *nativeApp) combineDialog(c *ui.Context) {
 	ui.Column(c).Width(420).Gap(14).Children(func() {
-		ui.Text(c, "結合マイリストを作成").FontSize(20).Bold()
-		ui.Text(c, "選んだマイリストをまたいで再生できるようになります。").FontSize(12).TextColor(app.theme.TextMuted)
+		ui.Text(c, locales.CombineTitle()).FontSize(20).Bold()
+		ui.Text(c, locales.CombineBody()).FontSize(12).TextColor(app.theme.TextMuted)
 		ui.Column(c).Gap(8).FillWidth().Children(func() {
-			ui.Text(c, "見出し").FontSize(12).TextColor(app.theme.TextMuted)
-			field := ui.TextInput(c, &app.combineName).Placeholder(combinedDefaultName).AutoFocus().
-				Label("見出し").FillWidth()
+			ui.Text(c, locales.CombineNameLabel()).FontSize(12).TextColor(app.theme.TextMuted)
+			field := ui.TextInput(c, &app.combineName).Placeholder(locales.CombineDefaultName()).AutoFocus().
+				Label(locales.CombineNameLabel()).FillWidth()
 			if field.Submitted() && app.combineReady() {
 				app.createCombined()
 			}
 		})
 		ui.Column(c).Gap(8).FillWidth().Children(func() {
-			ui.Text(c, "マイリスト").FontSize(12).TextColor(app.theme.TextMuted)
+			ui.Text(c, locales.NavMylists()).FontSize(12).TextColor(app.theme.TextMuted)
 			ui.Scroll(c).MaxHeight(300).Children(func() {
 				ui.Column(c).FillWidth().Gap(6).Children(func() {
 					for _, entry := range app.combinableEntries() {
@@ -48,10 +45,10 @@ func (app *nativeApp) combineDialog(c *ui.Context) {
 			})
 		})
 		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
-			if button := ui.Button(c, "キャンセル"); button.Clicked() {
+			if button := ui.Button(c, locales.ActionCancel()); button.Clicked() {
 				app.combining = false
 			}
-			if button := ui.PrimaryButton(c, "決定").Disabled(!app.combineReady()); button.Clicked() {
+			if button := ui.PrimaryButton(c, locales.ActionCreate()).Disabled(!app.combineReady()); button.Clicked() {
 				app.createCombined()
 			}
 		})
@@ -70,7 +67,7 @@ func (app *nativeApp) combineRow(c *ui.Context, entry SavedIndexEntry) {
 		}
 		ui.Spacer(c).Grow(1)
 		if !saved {
-			ui.Text(c, "保存待ち").FontSize(11).TextColor(app.theme.TextMuted)
+			ui.Text(c, locales.CombineNotSaved()).FontSize(11).TextColor(app.theme.TextMuted)
 		}
 		ui.Text(c, countMeta(entry.TotalItemCount)).FontSize(11).TextColor(app.theme.TextMuted)
 	})
@@ -128,7 +125,7 @@ func (app *nativeApp) createCombined() {
 	}
 	app.saved = saved
 	app.combining = false
-	app.setStatus("結合マイリスト「" + name + "」を作成しました。")
+	app.setStatus(locales.StatusCombinedCreated(name))
 }
 
 // combinedMemberNames names the mylists a combined list plays, in order.
@@ -141,7 +138,7 @@ func (app *nativeApp) combinedMemberNames(members []string) string {
 			names = append(names, id)
 		}
 	}
-	return strings.Join(names, "、")
+	return strings.Join(names, locales.ListSeparator())
 }
 
 // openCombined shows a combined list: its members' tracks merged, resolved

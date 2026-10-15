@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // Nico fetches what playing one video needs from niconico's own API: the
@@ -68,7 +70,7 @@ var sessionCookieNames = []string{"user_session", "user_session_secure"}
 
 // errSessionExpired reports that niconico no longer accepts the stored
 // session: the caller forgets it and asks for a new login.
-var errSessionExpired = errors.New("ログインの有効期限が切れました。もう一度ログインしてください")
+var errSessionExpired = errors.New(locales.ErrSessionExpired())
 
 // sessionSeedURL is the URL the session cookies are stored for; their
 // domain is .nicovideo.jp, which covers watch, nvapi and delivery.
@@ -81,7 +83,7 @@ var sessionSeedURL = &neturl.URL{Scheme: "https", Host: "www.nicovideo.jp", Path
 func (n *Nico) SetSession(cookieHeader string) error {
 	cookies := sessionCookies(cookieHeader)
 	if len(cookies) == 0 {
-		return errors.New("ログイン情報が正しくありません")
+		return errors.New(locales.ErrSessionInvalid())
 	}
 	n.client.Jar.SetCookies(sessionSeedURL, cookies)
 	n.mu.Lock()
@@ -146,7 +148,7 @@ const verifyVideoID = "sm9"
 // so it writes no watch history.
 func (n *Nico) VerifySession() error {
 	if !n.LoggedIn() {
-		return errors.New("ログインしていません")
+		return errors.New(locales.ErrNotLoggedIn())
 	}
 	_, err := n.fetchWatch(verifyVideoID, true)
 	return err
@@ -164,11 +166,11 @@ type nicoUser struct {
 // here: only the avatar would show, and playback reports the expiry.
 func (n *Nico) User() (nicoUser, error) {
 	if !n.LoggedIn() {
-		return nicoUser{}, errors.New("ログインしていません")
+		return nicoUser{}, errors.New(locales.ErrNotLoggedIn())
 	}
 	req, err := n.request(http.MethodGet, n.apiBase+"/v1/users/me", nil)
 	if err != nil {
-		return nicoUser{}, errors.New("アカウント情報を取得できませんでした")
+		return nicoUser{}, errors.New(locales.ErrAccountFetch())
 	}
 	var resp struct {
 		Meta struct {
@@ -188,7 +190,7 @@ func (n *Nico) User() (nicoUser, error) {
 		return nicoUser{}, err
 	}
 	if resp.Meta.Status != http.StatusOK {
-		return nicoUser{}, fmt.Errorf("アカウント情報を取得できませんでした（status %d）", resp.Meta.Status)
+		return nicoUser{}, errors.New(locales.ErrAccountFetchStatus(resp.Meta.Status))
 	}
 	icon := resp.Data.User.Icons.Large
 	if icon == "" {
@@ -242,7 +244,7 @@ func (n *Nico) Prepare(videoID string) (playbackSources, error) {
 	audios := bestAudioFormats(watch.Audios)
 	videos := availableVideoIDs(watch.Videos)
 	if len(audios) == 0 || len(videos) == 0 {
-		return playbackSources{}, errors.New("この動画には再生できる音源がありません")
+		return playbackSources{}, errors.New(locales.ErrNoAudio())
 	}
 	master, err := n.contentURL(videoID, watch, videos, audios)
 	if err != nil {
@@ -254,7 +256,7 @@ func (n *Nico) Prepare(videoID string) (playbackSources, error) {
 	}
 	variants := audioVariants(string(body))
 	if len(variants) == 0 {
-		return playbackSources{}, errors.New("この動画の音源の取得先が見つかりませんでした")
+		return playbackSources{}, errors.New(locales.ErrAudioSourceMissing())
 	}
 	uris := make([]string, 0, len(variants))
 	bitrates := make([]int, 0, len(variants))
@@ -320,7 +322,7 @@ func (n *Nico) fetchWatch(videoID string, noSideEffect bool) (nicoWatch, error) 
 	}
 	req, err := n.request(http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nicoWatch{}, errors.New("動画の情報を取得できませんでした")
+		return nicoWatch{}, errors.New(locales.ErrWatchFetch())
 	}
 	var resp struct {
 		Meta struct {
@@ -349,7 +351,7 @@ func (n *Nico) fetchWatch(videoID string, noSideEffect bool) (nicoWatch, error) 
 		if loggedIn && resp.Meta.ErrorCode == "UNAUTHORIZED" {
 			return nicoWatch{}, errSessionExpired
 		}
-		return nicoWatch{}, fmt.Errorf("動画の情報を取得できませんでした（status %d %s）", resp.Meta.Status, resp.Meta.ErrorCode)
+		return nicoWatch{}, errors.New(locales.ErrWatchFetchStatus(resp.Meta.Status, resp.Meta.ErrorCode))
 	}
 	return nicoWatch{
 		Videos:         resp.Data.Media.Domand.Videos,
@@ -369,12 +371,12 @@ func (n *Nico) contentURL(videoID string, watch nicoWatch, videos []string, audi
 	}
 	body, err := json.Marshal(map[string][][2]string{"outputs": outputs})
 	if err != nil {
-		return "", errors.New("この動画の音源を取得できませんでした")
+		return "", errors.New(locales.ErrAudioFetch())
 	}
 	req, err := n.request(http.MethodPost,
 		n.apiBase+"/v1/watch/"+videoID+"/access-rights/hls?actionTrackId="+watch.TrackID, bytes.NewReader(body))
 	if err != nil {
-		return "", errors.New("この動画の音源を取得できませんでした")
+		return "", errors.New(locales.ErrAudioFetch())
 	}
 	req.Header.Set("Accept", "application/json;charset=utf-8")
 	req.Header.Set("Content-Type", "application/json")
@@ -393,7 +395,7 @@ func (n *Nico) contentURL(videoID string, watch nicoWatch, videos []string, audi
 		return "", err
 	}
 	if resp.Data.ContentURL == "" {
-		return "", fmt.Errorf("この動画の音源を取得できませんでした（status %d %s）", resp.Meta.Status, resp.Meta.ErrorCode)
+		return "", errors.New(locales.ErrAudioFetchStatus(resp.Meta.Status, resp.Meta.ErrorCode))
 	}
 	return resp.Data.ContentURL, nil
 }
@@ -465,21 +467,21 @@ func (n *Nico) request(method, rawURL string, body io.Reader) (*http.Request, er
 func (n *Nico) doJSON(req *http.Request, out any) error {
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return errors.New("ニコニコに接続できませんでした（通信エラー）")
+		return errors.New(locales.ErrNicoNetwork())
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxNicoBody+1))
 	if err != nil || len(body) > maxNicoBody {
-		return errors.New("ニコニコの応答を読み取れませんでした")
+		return errors.New(locales.ErrNicoParse())
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		if resp.StatusCode/100 != 2 {
-			return fmt.Errorf("ニコニコのAPIが失敗しました（HTTP %d）", resp.StatusCode)
+			return errors.New(locales.ErrNicoAPIHTTP(resp.StatusCode))
 		}
-		return errors.New("ニコニコの応答を読み取れませんでした")
+		return errors.New(locales.ErrNicoParse())
 	}
 	if resp.StatusCode/100 != 2 && !hasMetaStatus(body) {
-		return fmt.Errorf("ニコニコのAPIが失敗しました（HTTP %d）", resp.StatusCode)
+		return errors.New(locales.ErrNicoAPIHTTP(resp.StatusCode))
 	}
 	return nil
 }
@@ -497,19 +499,19 @@ func hasMetaStatus(body []byte) bool {
 func (n *Nico) get(rawURL string) ([]byte, error) {
 	req, err := n.request(http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, errors.New("音源の取得に失敗しました")
+		return nil, errors.New(locales.ErrAudioSourceFetch())
 	}
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return nil, errors.New("音源の取得に失敗しました（通信エラー）")
+		return nil, errors.New(locales.ErrAudioSourceNetwork())
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxNicoBody+1))
 	if err != nil || len(body) > maxNicoBody {
-		return nil, errors.New("音源の取得に失敗しました")
+		return nil, errors.New(locales.ErrAudioSourceFetch())
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("音源の取得に失敗しました（HTTP %d）", resp.StatusCode)
+		return nil, errors.New(locales.ErrAudioSourceHTTP(resp.StatusCode))
 	}
 	return body, nil
 }

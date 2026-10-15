@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 const (
@@ -36,7 +38,7 @@ const (
 
 // errMylistInput is returned when the input is neither a numeric mylist ID
 // nor a supported mylist URL.
-var errMylistInput = errors.New("マイリストのIDまたはURLの形式が正しくありません")
+var errMylistInput = errors.New(locales.ErrMylistInput())
 
 // MylistItem is one entry of a mylist. Video metadata can be absent
 // (deleted/private video); such items stay listed as unavailable rather than
@@ -178,10 +180,10 @@ func (m *Mylist) fetchBody(rawURL string) ([]byte, error) {
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMylistBody+1))
 	if err != nil {
-		return nil, errors.New("マイリストの取得に失敗しました")
+		return nil, errors.New(locales.ErrMylistFetch())
 	}
 	if len(body) > maxMylistBody {
-		return nil, errors.New("マイリストの応答が大きすぎます")
+		return nil, errors.New(locales.ErrMylistTooLarge())
 	}
 	return body, nil
 }
@@ -194,7 +196,7 @@ func (m *Mylist) mylistRequest(rawURL string) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 		if err != nil {
-			return nil, errors.New("マイリストの取得に失敗しました")
+			return nil, errors.New(locales.ErrMylistFetch())
 		}
 		req.Header.Set("X-Frontend-ID", "6")
 		req.Header.Set("X-Frontend-Version", "0")
@@ -204,7 +206,7 @@ func (m *Mylist) mylistRequest(rawURL string) (*http.Response, error) {
 		}
 		resp, err := m.client.Do(req)
 		if err != nil {
-			return nil, errors.New("マイリストの取得に失敗しました（通信エラー）")
+			return nil, errors.New(locales.ErrMylistFetchNetwork())
 		}
 		busy := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable
 		if !busy || attempt > 0 {
@@ -272,13 +274,13 @@ type mylistStatusError struct{ status int }
 func (e mylistStatusError) Error() string {
 	switch e.status {
 	case http.StatusNotFound:
-		return "マイリストが見つかりません（非公開マイリストはログインすると読み込めます）"
+		return locales.ErrMylistNotFound()
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return "マイリストを表示できません（非公開マイリストはログインすると読み込めます）"
+		return locales.ErrMylistPrivate()
 	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
-		return "ニコニコが混み合っています。しばらくしてからもう一度お試しください"
+		return locales.ErrNicoBusy()
 	}
-	return fmt.Sprintf("マイリストの取得に失敗しました（HTTP %d）", e.status)
+	return locales.ErrMylistFetchHTTP(e.status)
 }
 
 func mylistHTTPError(status int) error { return mylistStatusError{status: status} }
@@ -355,10 +357,10 @@ func nvapiThumbBase(t *nvapiThumbnail) string {
 func mapMylistPage(id string, body []byte) (MylistPage, error) {
 	var res nvapiMylistResponse
 	if err := json.Unmarshal(body, &res); err != nil {
-		return MylistPage{}, errors.New("マイリストの応答を読み取れませんでした")
+		return MylistPage{}, errors.New(locales.ErrMylistParse())
 	}
 	if res.Meta.Status != http.StatusOK {
-		return MylistPage{}, fmt.Errorf("マイリストの取得に失敗しました（status %d）", res.Meta.Status)
+		return MylistPage{}, errors.New(locales.ErrMylistFetchStatus(res.Meta.Status))
 	}
 	ml := res.Data.Mylist
 	out := MylistPage{
@@ -416,10 +418,10 @@ type nvapiOwnMylist struct {
 func mapOwnMylists(body []byte) ([]OwnMylist, error) {
 	var res nvapiOwnMylistsResponse
 	if err := json.Unmarshal(body, &res); err != nil {
-		return nil, errors.New("マイリストの応答を読み取れませんでした")
+		return nil, errors.New(locales.ErrMylistParse())
 	}
 	if res.Meta.Status != http.StatusOK {
-		return nil, fmt.Errorf("マイリストの取得に失敗しました（status %d）", res.Meta.Status)
+		return nil, errors.New(locales.ErrMylistFetchStatus(res.Meta.Status))
 	}
 	out := make([]OwnMylist, 0, len(res.Data.Mylists))
 	for _, ml := range res.Data.Mylists {
@@ -443,7 +445,7 @@ func mapOwnMylists(body []byte) ([]OwnMylist, error) {
 func ParseMylistInput(input string) (string, error) {
 	s := strings.TrimSpace(input)
 	if s == "" {
-		return "", errors.New("マイリストのIDまたはURLを入力してください")
+		return "", errors.New(locales.ErrMylistInputEmpty())
 	}
 	if isDigits(s) {
 		return s, nil
@@ -461,7 +463,7 @@ func ParseMylistInput(input string) (string, error) {
 	case "nico.ms":
 		return mylistIDFromSegments(strings.TrimSuffix(u.Path, "/"), "mylist")
 	default:
-		return "", errors.New("対応していないURLです（nicovideo.jp / nico.ms のマイリストのみ）")
+		return "", errors.New(locales.ErrMylistURL())
 	}
 }
 

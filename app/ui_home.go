@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // homePath routes to the home; the route of a mylist is mylistPath of its ID.
@@ -43,10 +43,10 @@ type mylistEntry struct {
 func (app *nativeApp) homeView(c *ui.Context) {
 	ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Gap(18).Children(func() {
 		ui.Column(c).Gap(5).Children(func() {
-			ui.Text(c, "ホーム").FontSize(27).Bold()
-			sub := "聴きたいマイリストを選んで再生"
+			ui.Text(c, locales.NavHome()).FontSize(27).Bold()
+			sub := locales.HomeSubtitle()
 			if len(app.saved) == 0 {
-				sub = "マイリストは「+」から読み込めます"
+				sub = locales.HomeSubtitleEmpty()
 			}
 			ui.Text(c, sub).FontSize(13).TextColor(app.theme.TextMuted)
 		})
@@ -69,10 +69,10 @@ func (app *nativeApp) homeCards(c *ui.Context) {
 		app.homeCardsRow(c, main)
 	}
 	if len(combined) > 0 {
-		app.homeSection(c, "結合マイリスト", combined)
+		app.homeSection(c, locales.NavCombined(), combined)
 	}
 	if len(read) > 0 {
-		app.homeSection(c, "読み込んだマイリスト", read)
+		app.homeSection(c, locales.HomeReadTitle(), read)
 	}
 	app.importCard(c)
 }
@@ -135,7 +135,7 @@ func savedToEntry(entry SavedIndexEntry) mylistEntry {
 // importCard shows the last card of the home: one big tile with a plus,
 // opening the dialog that reads a mylist in by URL or ID.
 func (app *nativeApp) importCard(c *ui.Context) {
-	card := ui.Button(c, "").Label("マイリストを読み込む").Width(mylistCardWidth).
+	card := ui.Button(c, "").Label(locales.ImportTitle()).Width(mylistCardWidth).
 		Padding(12).Radius(12).Border(1, app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 	if card.Hovered() {
 		card.Background(app.theme.SurfaceHover)
@@ -148,8 +148,8 @@ func (app *nativeApp) importCard(c *ui.Context) {
 				Background(app.theme.SurfaceHover).Border(1, app.theme.Border).Children(func() {
 				ui.Icon(c, iconPlus).FontSize(32).TextColor(app.theme.TextMuted)
 			})
-			ui.Text(c, "マイリストを読み込む").FontSize(14).Bold().SingleLine().Ellipsis("…")
-			ui.Text(c, "URLまたはIDから").FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
+			ui.Text(c, locales.ImportTitle()).FontSize(14).Bold().SingleLine().Ellipsis("…")
+			ui.Text(c, locales.ImportCardHint()).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
 		})
 	})
 	if card.Clicked() {
@@ -161,18 +161,18 @@ func (app *nativeApp) importCard(c *ui.Context) {
 // or ID, and the buttons opening or dismissing it.
 func (app *nativeApp) importDialog(c *ui.Context) {
 	ui.Column(c).Width(380).Gap(14).Children(func() {
-		ui.Text(c, "マイリストを読み込む").FontSize(20).Bold()
-		ui.Text(c, "ニコニコ動画のマイリストのURLまたはIDを入力してください。").FontSize(12).TextColor(app.theme.TextMuted)
-		field := ui.TextInput(c, &app.input).Placeholder("URL または ID").AutoFocus().
-			Label("マイリストのURLまたはID").FillWidth()
+		ui.Text(c, locales.ImportTitle()).FontSize(20).Bold()
+		ui.Text(c, locales.ImportBody()).FontSize(12).TextColor(app.theme.TextMuted)
+		field := ui.TextInput(c, &app.input).Placeholder(locales.ImportPlaceholder()).AutoFocus().
+			Label(locales.ImportFieldLabel()).FillWidth()
 		if field.Submitted() && strings.TrimSpace(app.input) != "" {
 			app.importInput()
 		}
 		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
-			if button := ui.Button(c, "キャンセル"); button.Clicked() {
+			if button := ui.Button(c, locales.ActionCancel()); button.Clicked() {
 				app.importing = false
 			}
-			if button := ui.PrimaryButton(c, "開く").Disabled(strings.TrimSpace(app.input) == ""); button.Clicked() {
+			if button := ui.PrimaryButton(c, locales.ImportOpen()).Disabled(strings.TrimSpace(app.input) == ""); button.Clicked() {
 				app.importInput()
 			}
 		})
@@ -257,12 +257,12 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 		panel.AttachTo(anchor, ui.AnchorTopLeft, ui.AnchorTopLeft).Margin(app.menuY, 0, 0, app.menuX).
 			Padding(4).Radius(app.theme.Radius+2).Background(app.theme.Background).
 			Border(1, app.theme.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).
-			Role(ui.RoleMenu).Label("マイリストのメニュー")
+			Role(ui.RoleMenu).Label(locales.MylistMenu())
 		// A combined list is pinned like any other; its pin keeps only its
 		// index line, as it has no body to save.
-		label := "ピン留め"
+		label := locales.ActionPin()
 		if entry.Pinned {
-			label = "ピン留めを外す"
+			label = locales.ActionUnpin()
 		}
 		item := app.menuItem(c, iconPin, label).Role(ui.RoleMenuItemCheckBox).Checked(entry.Pinned)
 		if item.Clicked() {
@@ -273,17 +273,17 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 				app.pin(entry.ID)
 			}
 		}
-		play := app.menuItem(c, iconPlay, "再生")
+		play := app.menuItem(c, iconPlay, locales.ActionPlay())
 		if play.Clicked() {
 			app.playMylist(entry, false)
 		}
-		shuffle := app.menuItem(c, iconShuffle, "シャッフル再生")
+		shuffle := app.menuItem(c, iconShuffle, locales.ActionPlayShuffle())
 		if shuffle.Clicked() {
 			app.playMylist(entry, true)
 		}
 		if !entry.Combined {
 			// A combined list cannot hold another one.
-			create := app.menuItem(c, iconLayers, "結合マイリストを作成")
+			create := app.menuItem(c, iconLayers, locales.CombineTitle())
 			if create.Clicked() {
 				app.openCombineDialog(entry.ID)
 			}
@@ -291,7 +291,7 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 		// The account's own mylists live on niconico: only a mylist read in
 		// from a URL can be deleted from this PC.
 		if !entry.Mine {
-			remove := app.menuItem(c, iconTrash, "削除")
+			remove := app.menuItem(c, iconTrash, locales.ActionDelete())
 			if remove.Clicked() {
 				app.menuOpen = false
 				app.askDelete(entry)
@@ -311,14 +311,14 @@ func (app *nativeApp) askDelete(entry mylistEntry) {
 // is never touched.
 func (app *nativeApp) deleteDialog(c *ui.Context) {
 	ui.Column(c).Width(360).Gap(14).Children(func() {
-		ui.Text(c, "保存したマイリストを削除しますか？").FontSize(20).Bold()
+		ui.Text(c, locales.DeleteTitle()).FontSize(20).Bold()
 		ui.Text(c, app.deleteEntry.Name).FontSize(13).SingleLine().Ellipsis("…")
-		ui.Text(c, "このPCに保存した内容を削除します。ニコニコ動画のマイリストは消えません。").FontSize(12).TextColor(app.theme.TextMuted)
+		ui.Text(c, locales.DeleteBody()).FontSize(12).TextColor(app.theme.TextMuted)
 		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
-			if button := ui.Button(c, "キャンセル"); button.Clicked() {
+			if button := ui.Button(c, locales.ActionCancel()); button.Clicked() {
 				app.confirmDelete = false
 			}
-			if button := ui.PrimaryButton(c, "削除する"); button.Clicked() {
+			if button := ui.PrimaryButton(c, locales.ActionDeleteConfirm()); button.Clicked() {
 				app.confirmDelete = false
 				app.deleteSaved(app.deleteEntry)
 			}
@@ -335,11 +335,11 @@ func (app *nativeApp) deleteSaved(entry mylistEntry) {
 		return
 	}
 	app.saved = saved
-	app.setStatus("保存したマイリストを削除しました。")
+	app.setStatus(locales.StatusDeleted())
 }
 
 // countMeta labels a mylist with its size.
-func countMeta(count int) string { return fmt.Sprintf("全%d曲", count) }
+func countMeta(count int) string { return locales.SongCountTotal(count) }
 
 // cardBadges marks a card's tile: the pin badge over the tile's top-right
 // corner, the combined mark as a chip over its bottom-left, and the private
@@ -349,10 +349,10 @@ func (app *nativeApp) cardBadges(c *ui.Context, entry mylistEntry) {
 		app.pinBadge(c).Absolute().Top(4).Right(4)
 	}
 	if entry.Combined {
-		app.cardChip(c, iconLayers, "結合").Absolute().Bottom(4).Left(4)
+		app.cardChip(c, iconLayers, locales.BadgeCombined()).Absolute().Bottom(4).Left(4)
 	}
 	if entry.Private {
-		app.cardChip(c, iconLock, "非公開").Absolute().Bottom(4).Right(4)
+		app.cardChip(c, iconLock, locales.BadgePrivate()).Absolute().Bottom(4).Right(4)
 	}
 }
 
@@ -374,7 +374,7 @@ func (app *nativeApp) pinBadge(c *ui.Context) ui.Element {
 	return ui.Box(c).Size(24, 24).Radius(12).Center().
 		Background(app.theme.Background).Border(1, app.theme.Border).
 		Children(func() {
-			ui.Icon(c, iconPin).Label("ピン留め").Tooltip("ピン留め").
+			ui.Icon(c, iconPin).Label(locales.ActionPin()).Tooltip(locales.ActionPin()).
 				FontSize(14).TextColor(ui.Hex("#39c5bb")).Rotate(45)
 		})
 }
@@ -416,7 +416,7 @@ func savedMeta(entry SavedIndexEntry) string {
 		total = len(entry.Sample)
 	}
 	if entry.IsCombined() {
-		return fmt.Sprintf("%d個のマイリスト  ·  %s", len(entry.Members), countMeta(total))
+		return locales.CombinedMeta(len(entry.Members), countMeta(total))
 	}
 	if entry.Owner != "" {
 		return entry.Owner + "  ·  " + countMeta(total)

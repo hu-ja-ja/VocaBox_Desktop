@@ -10,6 +10,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // VocaBox lives on in the notification area once its window closes: playback
@@ -180,8 +181,8 @@ func (app *nativeApp) trayCardIdle(c *ui.Context) {
 			ui.Icon(c, iconQueue).FontSize(20).TextColor(app.theme.TextMuted)
 		})
 		ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(3).Children(func() {
-			ui.Text(c, "再生していません").FontSize(13)
-			ui.Text(c, "マイリストから曲を選んで再生してください").FontSize(11).
+			ui.Text(c, locales.TrayIdle()).FontSize(13)
+			ui.Text(c, locales.TrayIdleHint()).FontSize(11).
 				TextColor(app.theme.TextMuted).SingleLine().Ellipsis("…")
 		})
 	})
@@ -191,16 +192,16 @@ func (app *nativeApp) trayCardIdle(c *ui.Context) {
 // 一時停止 / 次へ, each showing its icon and its name, so the row reads at a
 // glance rather than by its symbols.
 func (app *nativeApp) trayCardTransport(c *ui.Context) {
-	playLabel, playIcon := "再生", iconPlay
+	playLabel, playIcon := locales.ActionPlay(), iconPlay
 	if app.player.Playing {
-		playLabel, playIcon = "一時停止", iconPause
+		playLabel, playIcon = locales.ActionPause(), iconPause
 	}
 	ui.Row(c).FillWidth().Gap(8).Justify(ui.Center).Children(func() {
-		app.trayCardTransportButton(c, false, "前へ", iconSkipBack, app.player.WatchID == "", func() {
+		app.trayCardTransportButton(c, false, locales.PlayerPrevious(), iconSkipBack, app.player.WatchID == "", func() {
 			app.sendPlayer(PlayerCommand{Action: "previous"})
 		})
 		app.trayCardTransportButton(c, true, playLabel, playIcon, !app.player.Ready, app.togglePlay)
-		app.trayCardTransportButton(c, false, "次へ", iconSkipForward, !app.canNext(), app.advance)
+		app.trayCardTransportButton(c, false, locales.PlayerNext(), iconSkipForward, !app.canNext(), app.advance)
 	})
 }
 
@@ -249,7 +250,7 @@ func (app *nativeApp) trayCardActions(c *ui.Context) {
 // trayCardWindow brings the window back, which a card opened from the tray
 // is often in front of.
 func (app *nativeApp) trayCardWindow(c *ui.Context) {
-	button := ui.Button(c, "ウィンドウを表示").Label("ウィンドウを表示").Padding(6, 10)
+	button := ui.Button(c, locales.TrayShowWindow()).Label(locales.TrayShowWindow()).Padding(6, 10)
 	if button.Clicked() {
 		app.showWindow()
 		app.trayCard.Hide()
@@ -259,7 +260,7 @@ func (app *nativeApp) trayCardWindow(c *ui.Context) {
 // trayCardQuit ends the app: with the window only hiding, the card is the
 // tray's only way out.
 func (app *nativeApp) trayCardQuit(c *ui.Context) {
-	quit := ui.Button(c, "終了").Label("終了").Tooltip("VocaBox を終了").Padding(6, 10)
+	quit := ui.Button(c, locales.ActionQuit()).Label(locales.ActionQuit()).Tooltip(locales.TrayQuitTooltip()).Padding(6, 10)
 	if quit.Clicked() {
 		app.trayCard.Hide()
 		mygo.App.Quit()
@@ -288,9 +289,9 @@ func (app *nativeApp) playRatio() float64 {
 // muteLabel names what the mute button does, as the player bar labels it.
 func (app *nativeApp) muteLabel() string {
 	if app.silent() {
-		return "ミュート解除"
+		return locales.PlayerUnmute()
 	}
-	return "ミュート"
+	return locales.PlayerMute()
 }
 
 // togglePlay plays or pauses the track, from the player bar's button, the
