@@ -6,7 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// Player icons come from Lucide (ISC, Feather-derived ones MIT). See
+// App icons come from Lucide (ISC, Feather-derived ones MIT). See
 // THIRD_PARTY_NOTICES.md. Parsed once at startup, not per frame.
 //
 //go:embed icons/play.svg
@@ -54,6 +54,15 @@ var lockSVG []byte
 //go:embed icons/trash-2.svg
 var trashSVG []byte
 
+//go:embed icons/house.svg
+var houseSVG []byte
+
+//go:embed icons/log-in.svg
+var logInSVG []byte
+
+//go:embed icons/log-out.svg
+var logOutSVG []byte
+
 var (
 	iconPlay        = ui.MustParseSVG(playSVG)
 	iconPause       = ui.MustParseSVG(pauseSVG)
@@ -70,4 +79,7 @@ var (
 	iconPin         = ui.MustParseSVG(pinSVG)
 	iconLock        = ui.MustParseSVG(lockSVG)
 	iconTrash       = ui.MustParseSVG(trashSVG)
+	iconHome        = ui.MustParseSVG(houseSVG)
+	iconLogIn       = ui.MustParseSVG(logInSVG)
+	iconLogOut      = ui.MustParseSVG(logOutSVG)
 )

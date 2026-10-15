@@ -125,13 +125,16 @@ type nativeApp struct {
 	// importing shows the dialog the home's import card opens.
 	importing bool
 	input     string
-	// confirmLogout shows the dialog the sidebar's way out opens, asking
-	// before the session is forgotten.
+	// confirmLogout shows the dialog the way out opens — the sidebar's
+	// account row and the rail's account menu — asking before the session
+	// is forgotten.
 	confirmLogout bool
-	page          *MylistPage
-	nextPage      int
-	hasMore       bool
-	loading       bool
+	// railAccountOpen drives the account menu of the rail's avatar.
+	railAccountOpen bool
+	page            *MylistPage
+	nextPage        int
+	hasMore         bool
+	loading         bool
 	// loadingID names the mylist a load is fetching, so a page waiting for it
 	// asks once rather than every frame.
 	loadingID   string
@@ -190,6 +193,10 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	t.Border = ui.Hex("#383842")
 	t.Text = ui.Hex("#f4f0f5")
 	t.TextMuted = ui.Hex("#a6a0ad")
+	// Tooltips (and toasts): the surface turned over, kept dark so a chip
+	// does not flash white over the dark app.
+	t.Inverse = ui.Hex("#2f2f3a")
+	t.InverseText = ui.Hex("#f4f0f5")
 	t.Accent = ui.Hex("#e45b9b")
 	t.AccentHover = ui.Hex("#f073ad")
 	t.AccentPressed = ui.Hex("#c84684")
@@ -221,6 +228,9 @@ func (app *nativeApp) view(c *ui.Context) {
 	ui.Column(c).Fill().Background(app.theme.Background).Padding(12).Gap(12).Children(func() {
 		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Gap(12).Children(func() {
 			if app.sidebarOpen {
+				// The rail's account menu goes with the rail; one left open
+				// would show again when the sidebar closes.
+				app.railAccountOpen = false
 				app.sidebar(c)
 			} else {
 				app.sidebarRail(c)
@@ -361,6 +371,9 @@ func (app *nativeApp) accountAvatar(c *ui.Context) {
 	ui.Box(c).Size(size, size).Radius(size / 2).Shrink(0).Background(app.theme.SurfaceHover)
 }
 
+// sidebarRail is the sidebar closed: a narrow strip that still navigates —
+// the way to the home and to the pinned mylists, and the account — rather
+// than only reopening the sidebar.
 func (app *nativeApp) sidebarRail(c *ui.Context) {
 	ui.Column(c).Width(64).FillHeight().PaddingY(12).Gap(12).
 		Background(app.theme.Surface).Border(1, app.theme.Border).Radius(12).
@@ -374,7 +387,140 @@ func (app *nativeApp) sidebarRail(c *ui.Context) {
 				app.brandMark(c)
 			})
 			ui.Divider(c)
+			// The same destinations as the open sidebar's list, the pinned
+			// ones: each mylist shows as the picture of its first track.
+			ui.Scroll(c).Grow(1).Children(func() {
+				ui.Column(c).FillWidth().PaddingX(12).Gap(6).Children(func() {
+					app.railHome(c)
+					for _, entry := range app.mylistEntries() {
+						if entry.Pinned {
+							app.railMylist(c, entry)
+						}
+					}
+				})
+			})
+			app.railAccount(c)
 		})
+}
+
+// railHome is the rail's way back to the home, lit while the home shows.
+func (app *nativeApp) railHome(c *ui.Context) {
+	item := ui.Button(c, "").Label("ホーム").Tooltip("ホーム").
+		Size(36, 36).Padding(0).BorderWidth(0).Radius(10)
+	if app.router.Path() == homePath {
+		item.Background(app.theme.SurfacePressed)
+	}
+	item.Children(func() { ui.Icon(c, iconHome).FontSize(20) })
+	if item.Clicked() {
+		app.railNavigate(homePath)
+	}
+}
+
+// railMylist shows one pinned mylist as its first track's picture, the way
+// to it and its menu; the tooltip names it, and the label marks it as the
+// pinned shortcut, apart from the same mylist's name on the home.
+func (app *nativeApp) railMylist(c *ui.Context, entry mylistEntry) {
+	item := ui.Button(c, "").Label(entry.Name+"（ピン留め）").Tooltip(entry.Name).
+		Size(36, 36).Padding(0).BorderWidth(0).Radius(10)
+	if app.router.Path() == mylistPath(entry.ID) {
+		item.Background(app.theme.SurfacePressed)
+	}
+	item.Children(func() { app.railTile(c, entry.Items) })
+	if item.RightClicked() {
+		app.openMylistMenu(item, entry)
+	}
+	app.mylistMenu(c, item, entry)
+	if item.Clicked() {
+		app.railNavigate(mylistPath(entry.ID))
+	}
+}
+
+// railTile shows a mylist's first track's picture, and a list mark until
+// the picture arrives, or where the mylist has no track to show.
+func (app *nativeApp) railTile(c *ui.Context, items []MylistItem) {
+	if len(items) > 0 {
+		item := items[0]
+		bitmap := app.thumbs[item.WatchID]
+		if bitmap == nil && item.Available {
+			app.requestThumbnail(item)
+		}
+		if bitmap != nil {
+			ui.Image(c, bitmap).Size(32, 32).Fit(ui.Cover).Radius(8)
+			return
+		}
+	}
+	ui.Box(c).Size(32, 32).Radius(8).Center().Background(app.theme.SurfaceHover).Children(func() {
+		ui.Icon(c, iconQueue).FontSize(15).TextColor(app.theme.TextMuted)
+	})
+}
+
+// railNavigate goes to a destination chosen on the rail, leaving the queue
+// screen for it even the destination already showing, as the open sidebar's
+// items do.
+func (app *nativeApp) railNavigate(path string) {
+	app.menuOpen = false
+	app.queueOpen = false
+	app.loadingID = ""
+	if app.router.Path() != path {
+		app.router.Push(path)
+	}
+}
+
+// railAccount is the rail's foot: the avatar opening the account menu
+// while signed in, the way in while not.
+func (app *nativeApp) railAccount(c *ui.Context) {
+	ui.Divider(c)
+	ui.Row(c).FillWidth().Justify(ui.Start).Children(func() {
+		ui.Box(c).Width(12).Shrink(0)
+		if app.loggedIn {
+			app.railAvatar(c)
+			return
+		}
+		label := "ニコニコにログイン"
+		button := ui.Button(c, "").Label(label).Tooltip(label).
+			Size(36, 36).Padding(0).BorderWidth(0).Radius(10).Disabled(app.loginWindow != nil)
+		button.Children(func() { ui.Icon(c, iconLogIn).FontSize(18) })
+		if button.Clicked() {
+			app.openLogin()
+		}
+	})
+}
+
+// railAvatar is the signed-in account's picture on the rail, opening the
+// account menu.
+func (app *nativeApp) railAvatar(c *ui.Context) {
+	tip := app.accountName
+	if tip == "" {
+		tip = "アカウント"
+	}
+	button := ui.Button(c, "").Label("アカウント").Tooltip(tip).
+		Size(36, 36).Padding(0).BorderWidth(0).Radius(10)
+	button.Children(func() { app.accountAvatar(c) })
+	if button.Clicked() {
+		app.railAccountOpen = !app.railAccountOpen
+	}
+	app.railAccountMenu(c, button)
+}
+
+// railAccountMenu is the small menu the rail's avatar opens: who is signed
+// in, and the way out that asks before the session is forgotten.
+func (app *nativeApp) railAccountMenu(c *ui.Context, anchor ui.Element) {
+	ui.PopoverBase(c, anchor, &app.railAccountOpen, func(panel ui.Element) {
+		panel.Padding(4).Radius(app.theme.Radius+2).Background(app.theme.Background).
+			Border(1, app.theme.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).
+			Role(ui.RoleMenu).Label("アカウントのメニュー")
+		name := app.accountName
+		if name == "" {
+			name = "ログイン中"
+		}
+		ui.Text(c, name).FontSize(12).TextColor(app.theme.TextMuted).
+			Padding(6, 8).MaxWidth(200).SingleLine().Ellipsis("…")
+		item := app.menuItem(c, iconLogOut, "ログアウト")
+		if item.Clicked() {
+			app.railAccountOpen = false
+			app.confirmLogout = true
+		}
+	})
 }
 
 // brandMark shows the VocaBox mark, the accent tile in the sidebar header

@@ -40,6 +40,10 @@ func TestNativeUITogglesSidebar(t *testing.T) {
 	if _, hasLogo := tester.Find("V"); app.sidebarOpen || !hasLogo || hasSection {
 		t.Fatalf("sidebar did not close cleanly: open=%v texts=%q", app.sidebarOpen, tester.Texts())
 	}
+	// The closed sidebar keeps its way home rather than only reopening.
+	if _, hasHome := tester.Find("ホーム"); !hasHome {
+		t.Fatalf("the closed sidebar has no way home: %q", tester.Texts())
+	}
 	openButton, ok := tester.Find("サイドバーを開く")
 	if !ok || openButton.X != closeButton.X || openButton.Y != closeButton.Y {
 		t.Fatalf("toggle moved while closing: was=%v now=%v", closeButton, openButton)
@@ -451,6 +455,99 @@ func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
 	}
 	if !tester.HasText("マイリストはありません") {
 		t.Fatalf("the empty sidebar says nothing: %q", tester.Texts())
+	}
+}
+
+// TestNativeUIRailNavigates checks the closed sidebar still navigates: the
+// rail carries the way home and to the pinned mylists, and choosing one
+// opens it and leaves the queue screen for it.
+func TestNativeUIRailNavigates(t *testing.T) {
+	mylist := NewMylist()
+	mylist.configDir = t.TempDir()
+	app := newNativeApp(mylist)
+	app.saved = []SavedMylist{{ID: "111", Name: "レールのピン",
+		Items: []MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}}}}
+	app.sidebarOpen = false
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	item, ok := tester.Find("レールのピン（ピン留め）")
+	if !ok || item.X < 12 || item.X+item.W > 76 {
+		t.Fatalf("the rail does not show the pinned mylist: %v, %v", item, ok)
+	}
+	if err := tester.Click("レールのピン（ピン留め）"); err != nil {
+		t.Fatal(err)
+	}
+	if app.router.Path() != "/mylist/111" || app.page == nil || app.page.ID != "111" || !tester.HasText("Aの曲") {
+		t.Fatalf("the rail did not open the mylist: path=%q texts=%q", app.router.Path(), tester.Texts())
+	}
+
+	// The mylist already showing leaves the queue screen for itself, as its
+	// sidebar item does, and the home returns home.
+	app.queueOpen = true
+	tester.Frame()
+	if err := tester.Click("レールのピン（ピン留め）"); err != nil {
+		t.Fatal(err)
+	}
+	if app.queueOpen || app.router.Path() != "/mylist/111" {
+		t.Fatalf("choosing the shown mylist left the queue screen open: queue=%v path=%q", app.queueOpen, app.router.Path())
+	}
+	if err := tester.Click("ホーム"); err != nil {
+		t.Fatal(err)
+	}
+	if app.router.Path() != homePath || !tester.HasText("聴きたいマイリストを選んで再生") {
+		t.Fatalf("the rail home did not return home: path=%q", app.router.Path())
+	}
+
+	// The rail tile carries the same right-click menu as the sidebar's item:
+	// unpinning from it drops the tile.
+	item, _ = tester.Find("レールのピン（ピン留め）")
+	tester.RightClickAt(item.X+item.W/2, item.Y+item.H/2)
+	if _, ok := tester.Find("ピン留めを外す"); !ok {
+		t.Fatalf("the rail menu did not open: %q", tester.Texts())
+	}
+	if err := tester.Click("ピン留めを外す"); err != nil {
+		t.Fatal(err)
+	}
+	if len(app.saved) != 0 || tester.HasText("レールのピン") {
+		t.Fatalf("the unpinned mylist still shows on the rail: %+v", app.saved)
+	}
+}
+
+// TestNativeUIRailAccount checks the rail's account foot: the avatar opens
+// the account menu, whose way out asks before the session is forgotten, and
+// signing out leaves the rail's way in.
+func TestNativeUIRailAccount(t *testing.T) {
+	mylist := NewMylist()
+	mylist.configDir = t.TempDir()
+	app := newNativeApp(mylist)
+	app.loggedIn = true
+	app.accountName = "テスト"
+	app.sidebarOpen = false
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	if err := tester.Click("アカウント"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if _, ok := tester.Find("アカウントのメニュー"); !ok {
+		t.Fatalf("the account menu did not open: %q", tester.Texts())
+	}
+	if err := tester.Click("ログアウト"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if app.railAccountOpen || !app.confirmLogout {
+		t.Fatalf("the way out did not ask before signing out: menu=%v confirm=%v", app.railAccountOpen, app.confirmLogout)
+	}
+	if _, ok := tester.Find("ログアウトしますか？"); !ok {
+		t.Fatalf("the confirm dialog is missing: %q", tester.Texts())
+	}
+
+	// Signed out, the rail shows the way in.
+	app.confirmLogout, app.loggedIn, app.accountName = false, false, ""
+	tester.Frame()
+	if _, ok := tester.Find("ニコニコにログイン"); !ok {
+		t.Fatalf("the rail has no way in while signed out: %q", tester.Texts())
 	}
 }
 
