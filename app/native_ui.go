@@ -128,6 +128,12 @@ type nativeApp struct {
 	// importing shows the dialog the home's import card opens.
 	importing bool
 	input     string
+	// combining shows the dialog building a combined list; combineSel holds
+	// one check box per selectable mylist, and combineName the heading the
+	// list will carry.
+	combining   bool
+	combineSel  map[string]*bool
+	combineName string
 	// confirmDelete shows the dialog that asks before a saved mylist of
 	// somebody else's is deleted from this PC; deleteEntry is the mylist it
 	// would delete.
@@ -260,6 +266,7 @@ func (app *nativeApp) view(c *ui.Context) {
 		app.playerBar(c)
 	})
 	ui.Modal(c, &app.importing, func() { app.importDialog(c) })
+	ui.Modal(c, &app.combining, func() { app.combineDialog(c) })
 	ui.Modal(c, &app.confirmLogout, func() { app.logoutDialog(c) })
 	ui.Modal(c, &app.confirmDelete, func() { app.deleteDialog(c) })
 	// A menu whose mylist left the screen, as after a refresh, does not stay
@@ -289,29 +296,30 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 			page := app.router.Path()
 			// Choosing a destination leaves the queue screen for it, even the
 			// mylist already showing, whose click changes no route of its own.
-			// The sidebar lists the same mylists as the home, in its order.
-			entries := app.mylistEntries()
+			// The sidebar lists the same destinations as the home: the
+			// mylists, and the combined ones under their own heading.
+			pinned, own, combined, read := app.mylistGroups()
+			entries := append(append(pinned, own...), read...)
 			homeClicked, mylistClicked := false, false
 			sidebar := ui.Sidebar(c, &page, func() {
 				item := ui.SidebarItem(c, homePath, nil, "ホーム")
 				homeClicked = item.Clicked()
 				ui.SidebarSection(c, "マイリスト", nil, func() {
 					for _, entry := range entries {
-						item := ui.SidebarItem(c, mylistPath(entry.ID), nil, entry.Name)
-						if entry.Pinned {
-							item.Children(func() { app.pinBadge(c) })
-						}
-						if item.RightClicked() {
-							app.openMylistMenu(item, entry)
-						}
-						app.mylistMenu(c, item, entry)
-						if item.Clicked() {
-							app.menuOpen = false
-							app.loadingID = ""
+						if app.sidebarMylistItem(c, entry) {
 							mylistClicked = true
 						}
 					}
 				})
+				if len(combined) > 0 {
+					ui.SidebarSection(c, "結合マイリスト", nil, func() {
+						for _, entry := range combined {
+							if app.sidebarMylistItem(c, entry) {
+								mylistClicked = true
+							}
+						}
+					})
+				}
 			}).Grow(1)
 			if homeClicked || mylistClicked {
 				app.queueOpen = false
@@ -319,11 +327,30 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 			if sidebar.Changed() {
 				app.router.Push(page)
 			}
-			if len(entries) == 0 {
+			if len(entries) == 0 && len(combined) == 0 {
 				ui.Text(c, "マイリストはありません").FontSize(12).TextColor(app.theme.TextMuted)
 			}
 			app.accountRow(c)
 		})
+}
+
+// sidebarMylistItem is one mylist of the sidebar: the way to it, its pin
+// badge, and its right-click menu. It reports a click.
+func (app *nativeApp) sidebarMylistItem(c *ui.Context, entry mylistEntry) bool {
+	item := ui.SidebarItem(c, mylistPath(entry.ID), nil, entry.Name)
+	if entry.Pinned {
+		item.Children(func() { app.pinBadge(c) })
+	}
+	if item.RightClicked() {
+		app.openMylistMenu(item, entry)
+	}
+	app.mylistMenu(c, item, entry)
+	if item.Clicked() {
+		app.menuOpen = false
+		app.loadingID = ""
+		return true
+	}
+	return false
 }
 
 // accountRow shows the sign-in state at the foot of the sidebar: the way
@@ -605,34 +632,36 @@ func (app *nativeApp) savedEntry(id string) *SavedIndexEntry {
 	return nil
 }
 
-// unpin takes a mylist off the top of the home, keeping its saved body.
-func (app *nativeApp) unpin(id string) {
-	saved, err := app.mylist.SetPinned(id, false)
+// unpin takes a mylist's pin off, keeping its saved body.
+func (app *nativeApp) unpin(id string) { app.setPinned(id, false) }
+
+// pin pins a saved mylist, writing only the index; one whose body is not
+// saved yet is fetched and saved first. A combined list has no body to fetch
+// and is pinned as it stands.
+func (app *nativeApp) pin(id string) {
+	if app.saving {
+		return
+	}
+	if entry := app.savedEntry(id); entry != nil && (entry.IsCombined() || app.mylist.HasSavedBody(id)) {
+		app.setPinned(id, true)
+		return
+	}
+	app.saveMylist(id)
+}
+
+// setPinned writes a saved mylist's pin, touching only the index.
+func (app *nativeApp) setPinned(id string, pinned bool) {
+	saved, err := app.mylist.SetPinned(id, pinned)
 	if err != nil {
 		app.setError(err)
 		return
 	}
 	app.saved = saved
-	app.setStatus("ピン留めを外しました。")
-}
-
-// pin pins a saved mylist, writing only the index; one whose body is not
-// saved yet is fetched and saved first.
-func (app *nativeApp) pin(id string) {
-	if app.saving {
-		return
-	}
-	if app.mylist.HasSavedBody(id) {
-		saved, err := app.mylist.SetPinned(id, true)
-		if err != nil {
-			app.setError(err)
-			return
-		}
-		app.saved = saved
+	if pinned {
 		app.setStatus("ピン留めしました。")
-		return
+	} else {
+		app.setStatus("ピン留めを外しました。")
 	}
-	app.saveMylist(id)
 }
 
 // openMylist shows the mylist the ID names: the one loaded, the pinned copy, else
@@ -651,6 +680,12 @@ func (app *nativeApp) openMylist(id string) {
 	}
 	// Opening a mylist leaves the playing screen for it, as home does.
 	app.queueOpen = false
+	// A combined list is built from its members' saved copies: there is no
+	// body and no niconico mylist behind it.
+	if entry := app.savedEntry(id); entry != nil && entry.IsCombined() {
+		app.openCombined(*entry)
+		return
+	}
 	if app.openSaved(id) {
 		return
 	}
@@ -707,6 +742,7 @@ func (app *nativeApp) startPendingMylist(id string, items []MylistItem) {
 // adoptSavedPage loads a saved body into the shown mylist page and hands its
 // entries to the player.
 func (app *nativeApp) adoptSavedPage(entry SavedMylist) {
+	app.resetTrackPlace(entry.ID)
 	total := entry.TotalItemCount
 	if total == 0 {
 		total = len(entry.Items)
@@ -725,6 +761,16 @@ func (app *nativeApp) adoptSavedPage(entry SavedMylist) {
 	app.resetThumbFailures()
 	app.resetThumbnailFill(page.Items)
 	app.sendPlayer(PlayerCommand{Action: "setItems", ID: page.ID, Name: page.Name, Items: page.Items})
+}
+
+// resetTrackPlace starts the track list at the top of the mylist id names,
+// when that is not the one already shown: the list keeps the place of the
+// mylist shown before otherwise, so another one would open mid-way down.
+func (app *nativeApp) resetTrackPlace(id string) {
+	if app.page != nil && app.page.ID == id {
+		return
+	}
+	app.trackList.ScrollTo(0, ui.Start)
 }
 
 // adoptShownBody hands the saved body of the mylist to the shown page and
@@ -794,6 +840,7 @@ func (app *nativeApp) fetchMylist(input string) {
 				app.setError(err)
 				return
 			}
+			app.resetTrackPlace(page.ID)
 			app.page = &page
 			app.nextPage = 2
 			app.hasMore = page.HasNext

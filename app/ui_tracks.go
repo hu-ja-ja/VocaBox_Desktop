@@ -79,14 +79,23 @@ func (app *nativeApp) mylistHeader(c *ui.Context) {
 				meta = app.page.Owner + "  ·  " + meta
 			}
 			ui.Text(c, meta).FontSize(13).TextColor(app.theme.TextMuted)
+			if entry := app.currentSaved(); entry != nil && entry.IsCombined() {
+				ui.Text(c, "結合元: "+app.combinedMemberNames(entry.Members)).FontSize(12).
+					MaxLines(2).TextColor(app.theme.TextMuted)
+			}
 			if app.page.Description != "" {
 				ui.Text(c, app.page.Description).FontSize(12).MaxLines(2).TextColor(app.theme.TextMuted)
 			}
 		})
 
 		if entry := app.currentSaved(); entry != nil {
-			if button := ui.Button(c, "更新").Disabled(app.saving || app.loading); button.Clicked() {
-				app.refreshSaved(*entry)
+			// A combined list lives on this PC alone: there is no niconico
+			// copy for a refresh, and its tracks come from its members'
+			// saved copies.
+			if !entry.IsCombined() {
+				if button := ui.Button(c, "更新").Disabled(app.saving || app.loading); button.Clicked() {
+					app.refreshSaved(*entry)
+				}
 			}
 			if entry.Pinned {
 				if button := ui.Button(c, "ピン留めを外す").Disabled(app.saving); button.Clicked() {

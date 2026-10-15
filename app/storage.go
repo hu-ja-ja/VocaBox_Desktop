@@ -38,6 +38,11 @@ type SavedIndexEntry struct {
 	// Private, that only its owner sees it.
 	Mine    bool `json:"mine,omitempty"`
 	Private bool `json:"private,omitempty"`
+	// Members names the saved mylists a combined list plays, in order. A
+	// combined list is made on this PC and has no body of its own: its
+	// tracks come from its members' saved copies. Empty for a mylist read
+	// from niconico.
+	Members []string `json:"members,omitempty"`
 	// Sample is the mylist's leading entries, for a card's pictures.
 	Sample []MylistItem `json:"sample,omitempty"`
 }
@@ -208,11 +213,15 @@ func (m *Mylist) SetPinned(id string, pinned bool) ([]SavedIndexEntry, error) {
 }
 
 // RemoveSaved deletes a saved mylist: its index line and its body. Server
-// data is never touched.
+// data is never touched. A combined list is named by its own local ID rather
+// than a niconico one, so it is removed by ID.
 func (m *Mylist) RemoveSaved(input string) ([]SavedIndexEntry, error) {
 	id, err := ParseMylistInput(input)
 	if err != nil {
-		return nil, err
+		if !isCombinedID(input) {
+			return nil, err
+		}
+		id = input
 	}
 	m.savedMu.Lock()
 	defer m.savedMu.Unlock()

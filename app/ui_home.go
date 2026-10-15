@@ -33,6 +33,9 @@ type mylistEntry struct {
 	// Mine is the mylist being one of the signed-in account's own; only a
 	// mylist of somebody else's can be deleted.
 	Mine bool
+	// Combined is the entry being a list made on this PC over other saved
+	// mylists: it has no niconico copy behind it.
+	Combined bool
 }
 
 // homeView shows the home's cards: each carries the pictures of its first
@@ -57,12 +60,16 @@ func (app *nativeApp) homeView(c *ui.Context) {
 }
 
 // homeCards lays the home's cards out: the pinned mylists come first, then
-// the rest of the account's own; the mylists read in from a URL follow under
-// their heading, and the import card comes last.
+// the rest of the account's own; the combined lists follow under their own
+// heading, the mylists read in from a URL under theirs, and the import card
+// comes last.
 func (app *nativeApp) homeCards(c *ui.Context) {
-	pinned, own, read := app.mylistGroups()
+	pinned, own, combined, read := app.mylistGroups()
 	if main := append(pinned, own...); len(main) > 0 {
 		app.homeCardsRow(c, main)
+	}
+	if len(combined) > 0 {
+		app.homeSection(c, "結合マイリスト", combined)
 	}
 	if len(read) > 0 {
 		app.homeSection(c, "読み込んだマイリスト", read)
@@ -88,8 +95,10 @@ func (app *nativeApp) homeSection(c *ui.Context, title string, entries []mylistE
 }
 
 // mylistGroups returns the mylists in the one order the home and the sidebar
-// share: the pinned ones, the account's own, then the ones read in from a URL.
-func (app *nativeApp) mylistGroups() (pinned, own, read []mylistEntry) {
+// share: the pinned ones — a combined list included, as a pin lifts it out of
+// its category — then the account's own, the remaining combined ones, and the
+// ones read in from a URL.
+func (app *nativeApp) mylistGroups() (pinned, own, combined, read []mylistEntry) {
 	for i := range app.saved {
 		entry := savedToEntry(app.saved[i])
 		switch {
@@ -97,17 +106,20 @@ func (app *nativeApp) mylistGroups() (pinned, own, read []mylistEntry) {
 			pinned = append(pinned, entry)
 		case entry.Mine:
 			own = append(own, entry)
+		case entry.Combined:
+			combined = append(combined, entry)
 		default:
 			read = append(read, entry)
 		}
 	}
-	return pinned, own, read
+	return pinned, own, combined, read
 }
 
-// mylistEntries returns the mylists in the shared order, for the sidebar.
+// mylistEntries returns the mylists in the shared order, for the rail.
 func (app *nativeApp) mylistEntries() []mylistEntry {
-	pinned, own, read := app.mylistGroups()
+	pinned, own, combined, read := app.mylistGroups()
 	entries := append(pinned, own...)
+	entries = append(entries, combined...)
 	return append(entries, read...)
 }
 
@@ -116,7 +128,7 @@ func savedToEntry(entry SavedIndexEntry) mylistEntry {
 	return mylistEntry{
 		ID: entry.ID, Name: entry.Name, Meta: savedMeta(entry),
 		Items: entry.Sample, Pinned: entry.Pinned, Private: entry.Private,
-		Mine: entry.Mine,
+		Mine: entry.Mine, Combined: entry.IsCombined(),
 	}
 }
 
@@ -194,8 +206,9 @@ func (app *nativeApp) mylistCard(c *ui.Context, entry mylistEntry) {
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
 			ui.Box(c).FillWidth().Children(func() {
 				app.cardTiles(c, entry.Items)
-				app.cardBadges(c, entry.Pinned, entry.Private)
+				app.cardBadges(c, entry)
 			})
+			// Every card is named by its title, combined lists included.
 			ui.Text(c, entry.Name).FontSize(14).Bold().SingleLine().Ellipsis("…")
 			ui.Text(c, entry.Meta).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
 		})
@@ -238,10 +251,6 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 		return
 	}
 	app.menuBuilt = true
-	label := "ピン留め"
-	if entry.Pinned {
-		label = "ピン留めを外す"
-	}
 	ui.PopoverBase(c, anchor, &app.menuOpen, func(panel ui.Element) {
 		// A margin carries the pointer offset into the attach calculation,
 		// which keeps the panel in the window at the edges.
@@ -249,6 +258,12 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 			Padding(4).Radius(app.theme.Radius+2).Background(app.theme.Background).
 			Border(1, app.theme.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).
 			Role(ui.RoleMenu).Label("マイリストのメニュー")
+		// A combined list is pinned like any other; its pin keeps only its
+		// index line, as it has no body to save.
+		label := "ピン留め"
+		if entry.Pinned {
+			label = "ピン留めを外す"
+		}
 		item := app.menuItem(c, iconPin, label).Role(ui.RoleMenuItemCheckBox).Checked(entry.Pinned)
 		if item.Clicked() {
 			app.menuOpen = false
@@ -265,6 +280,13 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 		shuffle := app.menuItem(c, iconShuffle, "シャッフル再生")
 		if shuffle.Clicked() {
 			app.playMylist(entry, true)
+		}
+		if !entry.Combined {
+			// A combined list cannot hold another one.
+			create := app.menuItem(c, iconLayers, "結合マイリストを作成")
+			if create.Clicked() {
+				app.openCombineDialog(entry.ID)
+			}
 		}
 		// The account's own mylists live on niconico: only a mylist read in
 		// from a URL can be deleted from this PC.
@@ -320,21 +342,30 @@ func (app *nativeApp) deleteSaved(entry mylistEntry) {
 func countMeta(count int) string { return fmt.Sprintf("全%d曲", count) }
 
 // cardBadges marks a card's tile: the pin badge over the tile's top-right
-// corner, and the private mark as a chip over its bottom-right.
-func (app *nativeApp) cardBadges(c *ui.Context, pinned, private bool) {
-	if pinned {
+// corner, the combined mark as a chip over its bottom-left, and the private
+// mark as a chip over its bottom-right.
+func (app *nativeApp) cardBadges(c *ui.Context, entry mylistEntry) {
+	if entry.Pinned {
 		app.pinBadge(c).Absolute().Top(4).Right(4)
 	}
-	if private {
-		ui.Box(c).Absolute().Bottom(4).Right(4).Radius(10).Padding(3, 7).
-			Background(app.theme.Background).Border(1, app.theme.Border).
-			Children(func() {
-				ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, iconLock).FontSize(11).TextColor(app.theme.Text)
-					ui.Text(c, "非公開").FontSize(11).TextColor(app.theme.Text)
-				})
-			})
+	if entry.Combined {
+		app.cardChip(c, iconLayers, "結合").Absolute().Bottom(4).Left(4)
 	}
+	if entry.Private {
+		app.cardChip(c, iconLock, "非公開").Absolute().Bottom(4).Right(4)
+	}
+}
+
+// cardChip is the small named mark a card carries over its tile.
+func (app *nativeApp) cardChip(c *ui.Context, icon *ui.SVG, label string) ui.Element {
+	return ui.Box(c).Radius(10).Padding(3, 7).
+		Background(app.theme.Background).Border(1, app.theme.Border).
+		Children(func() {
+			ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, icon).FontSize(11).TextColor(app.theme.Text)
+				ui.Text(c, label).FontSize(11).TextColor(app.theme.Text)
+			})
+		})
 }
 
 // pinBadge is the pinned mark: the filled, leaning pin on its round dark
@@ -377,11 +408,15 @@ func (app *nativeApp) cardTile(c *ui.Context, item MylistItem) {
 	ui.Box(c).AspectRatio(1).Radius(6).Background(app.theme.SurfaceHover)
 }
 
-// savedMeta labels a saved card: its owner when known, and its size.
+// savedMeta labels a saved card: its owner when known, and its size; a
+// combined list is labelled with how many mylists it plays.
 func savedMeta(entry SavedIndexEntry) string {
 	total := entry.TotalItemCount
 	if total == 0 {
 		total = len(entry.Sample)
+	}
+	if entry.IsCombined() {
+		return fmt.Sprintf("%d個のマイリスト  ·  %s", len(entry.Members), countMeta(total))
 	}
 	if entry.Owner != "" {
 		return entry.Owner + "  ·  " + countMeta(total)
