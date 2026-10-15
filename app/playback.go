@@ -652,6 +652,8 @@ func (p *playback) publish() {
 	st.QueueIndex = p.queue.currentIndex()
 	st.Quality = qualityLabel(p.bitrates, p.variant)
 	p.polling.Store(!p.closing && p.proc != nil && st.Ready && st.Playing)
+	// The tray is the only place the app speaks while its window is hidden.
+	p.app.refreshTray()
 }
 
 // shutdown ends the helper for good, as the app quits.

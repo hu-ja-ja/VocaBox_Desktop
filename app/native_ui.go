@@ -76,6 +76,16 @@ type nativeApp struct {
 	// playback is the player: the queue and the AmsHelper child process.
 	// Tests leave it nil and inspect the commands the UI sent instead.
 	playback *playback
+	// tray is the notification-area icon the app keeps playing behind: nil
+	// when none could be created, and a close then quits as it used to.
+	// quitting says the app is on its way out, so a close request closes
+	// the window rather than hiding it. trayCard is the now-playing card
+	// the icon's click opens, and trayPlaying the play state the icon
+	// itself shows, so it is only told when it changes.
+	tray        *mygo.Tray
+	quitting    bool
+	trayCard    *mygo.Window
+	trayPlaying bool
 	// session keeps the niconico session cookies across runs; loggedIn
 	// says one is loaded, and loginWindow is the sign-in window while one
 	// is open.
@@ -90,6 +100,9 @@ type nativeApp struct {
 	// hands them to playback.
 	sent  []PlayerCommand
 	theme *ui.Theme
+	// cardTheme is theme with a see-through background, which the card
+	// draws its rounded corners with.
+	cardTheme *ui.Theme
 	// router keeps the pages of the window, the home and the mylists, so the
 	// side buttons of a mouse and Alt+Left/Right go back and forward
 	// between them.
@@ -221,11 +234,17 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	router := ui.NewRouter(homePath)
 	// Pages show at once: the mylist a page waits for does not load twice.
 	router.Transition = ui.TransitionNone
+	// The card's theme is the app's, its background see-through: the root
+	// of a window fills all of it, and the card's rounded corners have to
+	// show what is behind them rather than a square of colour.
+	cardTheme := *t
+	cardTheme.Background = ui.RGBA(0, 0, 0, 0)
 	app := &nativeApp{
 		mylist:       mylist,
 		session:      sessionStore{mylist: mylist},
 		router:       router,
 		theme:        t,
+		cardTheme:    &cardTheme,
 		sidebarOpen:  true,
 		player:       playerState{Volume: 1},
 		thumbs:       map[string]*ui.Bitmap{},
@@ -903,6 +922,14 @@ func (app *nativeApp) loadMore() {
 // loaded from here.
 func (app *nativeApp) canLoadNext() bool {
 	return app.hasMore && app.page != nil && app.player.MylistID == app.page.ID
+}
+
+// canNext reports whether a next track can be started: the queue has one
+// loaded, the playing mylist has a page to load, or repeat goes back to the
+// queue's start. The player bar's button and the tray's 次へ judge alike.
+func (app *nativeApp) canNext() bool {
+	return app.player.WatchID != "" &&
+		(app.player.CanNext || app.canLoadNext() || app.player.Repeat)
 }
 
 // advance moves to the next track, whether the button asked for it or the

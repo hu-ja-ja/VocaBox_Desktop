@@ -8,6 +8,12 @@ import (
 )
 
 func main() {
+	// A second launch hands its command line to the instance already up,
+	// which shows its window: another tray icon and another player would
+	// otherwise start beside the one still playing.
+	if !mygo.App.RequestSingleInstanceLock() {
+		return
+	}
 	mylist := NewMylist()
 	// Keep the window's state in VocaBox's own config directory, beside
 	// settings.json, rather than mygo's default store.
@@ -44,7 +50,16 @@ func main() {
 		app.player.Repeat = settings.Repeat
 	}
 
+	mygo.App.OnSecondInstance(func([]string, string) { app.showWindow() })
+	// A quit, asked for by the tray or by a signal, closes the window the
+	// close listener would otherwise only hide.
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { app.quitting = true })
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		// The icon goes with the app: the shell is not left showing one of
+		// a process that is gone.
+		if app.tray != nil {
+			app.tray.Destroy()
+		}
 		app.playback.shutdown()
 		if err := mylist.SaveSettings(Settings{
 			Volume:  app.player.Volume,
@@ -66,6 +81,16 @@ func main() {
 			BackgroundColor: "#121217",
 			Content:         ui.View(app.view),
 		})
+		// Closing the window leaves VocaBox playing in the tray; without a
+		// tray to come back from it quits as it always did.
+		app.window.OnClose(func(e *mygo.CloseEvent) {
+			if !app.hideOnClose() {
+				return
+			}
+			e.PreventDefault()
+			app.window.Hide()
+		})
+		app.setupTray()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

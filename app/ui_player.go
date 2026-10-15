@@ -86,36 +86,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				// the queue back to the track playing.
 				app.queueFollowTrack = ""
 			}
-			// The player restarts the track first while it is past its
-			// opening, so the button needs no can-previous state.
-			previous := ui.Button(c, "").Label("前へ").Tooltip("前へ").Children(func() {
-				ui.Icon(c, iconSkipBack).FontSize(18)
-			}).Disabled(app.player.WatchID == "")
-			if previous.Clicked() {
-				app.sendPlayer(PlayerCommand{Action: "previous"})
-			}
-			playLabel := "再生"
-			playIcon := iconPlay
-			if app.player.Playing {
-				playLabel = "一時停止"
-				playIcon = iconPause
-			}
-			play := ui.PrimaryButton(c, "").Label(playLabel).Tooltip(playLabel).Children(func() {
-				ui.Icon(c, playIcon).FontSize(19)
-			}).Disabled(!app.player.Ready)
-			if play.Clicked() {
-				action := "play"
-				if app.player.Playing {
-					action = "pause"
-				}
-				app.sendPlayer(PlayerCommand{Action: action})
-			}
-			next := ui.Button(c, "").Label("次へ").Tooltip("次へ").Children(func() {
-				ui.Icon(c, iconSkipForward).FontSize(18)
-			}).Disabled(app.player.WatchID == "" || (!app.player.CanNext && !app.canLoadNext() && !app.player.Repeat))
-			if next.Clicked() {
-				app.advance()
-			}
+			app.transportButtons(c)
 			repeat := ui.Toggle(c, &app.player.Repeat, "").Label("ループ").Tooltip("ループ").Children(func() {
 				ui.Icon(c, iconRepeat).FontSize(18)
 			})
@@ -136,9 +107,10 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				// the mute was taken at. It sits on the bar's left, sized a
 				// touch above the bar's own height, and shows the silence of
 				// either way: the mute it took, or a level pulled to zero.
-				muteLabel, muteIcon := "ミュート", iconVolume
+				muteLabel := app.muteLabel()
+				muteIcon := iconVolume
 				if app.silent() {
-					muteLabel, muteIcon = "ミュート解除", iconVolumeMuted
+					muteIcon = iconVolumeMuted
 				}
 				mute := ui.Button(c, "").Label(muteLabel).Tooltip(muteLabel).Padding(4, 6).BorderWidth(0)
 				mute.Children(func() {
@@ -197,6 +169,37 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 	})
 }
 
+// transportButtons lays out 前へ / 再生・一時停止 / 次へ: the player bar and
+// the tray's card both carry them, and both judge them the same way.
+func (app *nativeApp) transportButtons(c *ui.Context) {
+	// The player restarts the track first while it is past its opening, so
+	// the button needs no can-previous state.
+	previous := ui.Button(c, "").Label("前へ").Tooltip("前へ").Children(func() {
+		ui.Icon(c, iconSkipBack).FontSize(18)
+	}).Disabled(app.player.WatchID == "")
+	if previous.Clicked() {
+		app.sendPlayer(PlayerCommand{Action: "previous"})
+	}
+	playLabel := "再生"
+	playIcon := iconPlay
+	if app.player.Playing {
+		playLabel = "一時停止"
+		playIcon = iconPause
+	}
+	play := ui.PrimaryButton(c, "").Label(playLabel).Tooltip(playLabel).Children(func() {
+		ui.Icon(c, playIcon).FontSize(19)
+	}).Disabled(!app.player.Ready)
+	if play.Clicked() {
+		app.togglePlay()
+	}
+	next := ui.Button(c, "").Label("次へ").Tooltip("次へ").Children(func() {
+		ui.Icon(c, iconSkipForward).FontSize(18)
+	}).Disabled(!app.canNext())
+	if next.Clicked() {
+		app.advance()
+	}
+}
+
 // playingTrack is the track the report names, built without looking at the
 // loaded mylist: the playing mylist is not always the one on screen.
 func (app *nativeApp) playingTrack() MylistItem {
@@ -210,9 +213,11 @@ func (app *nativeApp) playingTrack() MylistItem {
 }
 
 // silent reports the player at silence: muted by the icon, or a level the
-// user pulled down to zero. The icon shows the mute mark either way.
+// user pulled down to zero. The icon shows the mute mark either way. The
+// reported level is the player's, so a card opened with the window hidden
+// reads it without a frame of the bar's own.
 func (app *nativeApp) silent() bool {
-	return app.muted || app.volumeValue <= 0
+	return app.muted || app.player.Volume <= 0
 }
 
 // toggleMute silences the player by the icon and comes back to the level the
@@ -226,9 +231,9 @@ func (app *nativeApp) toggleMute() {
 		if app.volumeBeforeMute > 0 {
 			level = app.volumeBeforeMute
 		}
-	case app.volumeValue > 0:
+	case app.player.Volume > 0:
 		app.muted = true
-		app.volumeBeforeMute = app.volumeValue
+		app.volumeBeforeMute = app.player.Volume
 		level = 0
 	}
 	app.player.Volume, app.volumeValue, app.volumeSent = level, level, level
