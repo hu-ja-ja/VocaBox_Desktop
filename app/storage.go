@@ -189,7 +189,8 @@ func (m *Mylist) TrackMylist(page MylistPage) ([]SavedIndexEntry, error) {
 }
 
 // SetPinned pins or unpins a saved mylist, writing only the index: the body
-// stays where it is. An unknown mylist changes nothing.
+// stays where it is. A mylist just pinned joins the end of the pinned group.
+// An unknown mylist changes nothing.
 func (m *Mylist) SetPinned(id string, pinned bool) ([]SavedIndexEntry, error) {
 	m.savedMu.Lock()
 	defer m.savedMu.Unlock()
@@ -197,19 +198,43 @@ func (m *Mylist) SetPinned(id string, pinned bool) ([]SavedIndexEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	changed := false
+	changed, at := false, -1
 	for i := range index {
 		if index[i].ID == id && index[i].Pinned != pinned {
 			index[i].Pinned = pinned
-			changed = true
+			changed, at = true, i
 		}
 	}
 	if changed {
+		if pinned {
+			index = moveToPinnedEnd(index, at)
+		}
 		if err := m.writeIndex(index); err != nil {
 			return nil, err
 		}
 	}
 	return index, nil
+}
+
+// moveToPinnedEnd moves the entry at at to just after the last other pinned
+// entry, so a mylist just pinned joins the end of the pinned group rather than
+// its front. With no other pin the entry stays where it is.
+func moveToPinnedEnd(index []SavedIndexEntry, at int) []SavedIndexEntry {
+	last := -1
+	for i := range index {
+		if i != at && index[i].Pinned {
+			last = i
+		}
+	}
+	if last < at {
+		return index
+	}
+	entry := index[at]
+	index = append(index[:at], index[at+1:]...)
+	index = append(index, SavedIndexEntry{})
+	copy(index[last+1:], index[last:])
+	index[last] = entry
+	return index
 }
 
 // RemoveSaved deletes a saved mylist: its index line and its body. Server
@@ -324,7 +349,8 @@ func (m *Mylist) storeBody(snapshot MylistPage, pin *bool) ([]SavedIndexEntry, e
 
 // upsertIndex replaces id's index line with entry's fields, keeping the pin,
 // mine, and private flags of an existing line — the pin overridden when pin
-// is not nil — or appending a new line.
+// is not nil — or appending a new line. A pin turning on moves the line to
+// the end of the pinned group.
 func upsertIndex(index []SavedIndexEntry, entry SavedIndexEntry, pin *bool) []SavedIndexEntry {
 	at, found := indexAt(index, entry.ID)
 	if !found {
@@ -337,7 +363,11 @@ func upsertIndex(index []SavedIndexEntry, entry SavedIndexEntry, pin *bool) []Sa
 		index[at] = entry
 	}
 	if pin != nil {
+		was := index[at].Pinned
 		index[at].Pinned = *pin
+		if *pin && !was {
+			index = moveToPinnedEnd(index, at)
+		}
 	}
 	return index
 }

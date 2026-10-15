@@ -1195,6 +1195,43 @@ func TestFetchAllSpacesPages(t *testing.T) {
 	}
 }
 
+func TestSetPinnedJoinsPinnedEnd(t *testing.T) {
+	m := &Mylist{configDir: t.TempDir()}
+	if err := m.writeIndex([]SavedIndexEntry{{ID: "100"}, {ID: "200"}, {ID: "300"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Pinned in an order unlike the index order: each joins the end of the
+	// pinned group rather than its front.
+	for _, id := range []string{"300", "100", "200"} {
+		if _, err := m.SetPinned(id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pinned := func(entries []SavedIndexEntry) []string {
+		var ids []string
+		for _, e := range entries {
+			if e.Pinned {
+				ids = append(ids, e.ID)
+			}
+		}
+		return ids
+	}
+	saved, err := m.ListSaved()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pinned(saved); !slices.Equal(got, []string{"300", "100", "200"}) {
+		t.Fatalf("pinned order = %v; want 300 100 200", got)
+	}
+	// Unpinning the first leaves the rest in the order they were pinned.
+	if saved, err = m.SetPinned("300", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := pinned(saved); !slices.Equal(got, []string{"100", "200"}) {
+		t.Fatalf("pinned order after unpin = %v; want 100 200", got)
+	}
+}
+
 func TestSettingsRoundTrip(t *testing.T) {
 	m := &Mylist{configDir: t.TempDir()}
 	// A missing file yields the defaults.
