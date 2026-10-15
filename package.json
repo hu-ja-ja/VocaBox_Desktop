@@ -8,6 +8,6 @@
     "helper": "dotnet publish helper/AmsHelper -c Release -o resources"
   },
   "devDependencies": {
-    "mygo-cli": "^0.4.8"
+    "mygo-cli": "^0.5.1"
   }
 }

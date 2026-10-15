@@ -38,8 +38,6 @@
 ## セットアップ
 
 Windows、Go 1.27.1 以降、Bun、.NET SDK 10（+ MSVC ビルドツール。AmsHelper の NativeAOT ビルド用）が必要です。
-ログインのセッション読み出しに MyGo の `Cookies`（APIレビュー #335 の確定形）を使うため、未リリースの
-`mygo@api-review` を疑似バージョンで参照しています。次のリリースタグが出たらそれに置き換えます。
 
 ```sh
 bun install

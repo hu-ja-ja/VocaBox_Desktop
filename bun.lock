@@ -5,23 +5,23 @@
     "": {
       "name": "vocabox",
       "devDependencies": {
-        "mygo-cli": "^0.4.8",
+        "mygo-cli": "^0.5.1",
       },
     },
   },
   "packages": {
-    "@egoist/mygo-cli-darwin-arm64": ["@egoist/mygo-cli-darwin-arm64@0.4.8", "https://npm.flatt.tech/@egoist/mygo-cli-darwin-arm64/-/mygo-cli-darwin-arm64-0.4.8.tgz", { "os": "darwin", "cpu": "arm64" }, "sha512-2kj8dP++KassZih2eTvIdXmzi4aIPYocCxMOsOOmmivMwL87icXiQ2/YcricJm1pBL4OY8ZPJ+OFCVkrQBKu9w=="],
+    "@egoist/mygo-cli-darwin-arm64": ["@egoist/mygo-cli-darwin-arm64@0.5.1", "https://npm.flatt.tech/@egoist/mygo-cli-darwin-arm64/-/mygo-cli-darwin-arm64-0.5.1.tgz", { "os": "darwin", "cpu": "arm64" }, "sha512-oJHZdzeWkiBYYXbs5uHubskfGYXLrDFRydI0pT3rysZl63VLcIJXUVnVwESiR++mCk2SCX3GakWYabv5CFSCWg=="],
 
-    "@egoist/mygo-cli-darwin-x64": ["@egoist/mygo-cli-darwin-x64@0.4.8", "https://npm.flatt.tech/@egoist/mygo-cli-darwin-x64/-/mygo-cli-darwin-x64-0.4.8.tgz", { "os": "darwin", "cpu": "x64" }, "sha512-RVmmHftdIPgUyQ67vBAC45KrNz/Q4qM4cvjkqhmZfMINumcQgo3WUfpMbUObnnmWpnAFUy8UNTXF8KAZ3HG/gg=="],
+    "@egoist/mygo-cli-darwin-x64": ["@egoist/mygo-cli-darwin-x64@0.5.1", "https://npm.flatt.tech/@egoist/mygo-cli-darwin-x64/-/mygo-cli-darwin-x64-0.5.1.tgz", { "os": "darwin", "cpu": "x64" }, "sha512-5H4NPVsATde67TXlO6TFU6Hy6IM50yvbvRAJLqYLcvxZnedI268nQcg23kCEcMiqeZ3cj3hJwv0cEgB0OcwOGA=="],
 
-    "@egoist/mygo-cli-linux-arm64": ["@egoist/mygo-cli-linux-arm64@0.4.8", "https://npm.flatt.tech/@egoist/mygo-cli-linux-arm64/-/mygo-cli-linux-arm64-0.4.8.tgz", { "os": "linux", "cpu": "arm64" }, "sha512-N20rJZPXzOl9YpqGKTHJX9kOYVq8pnKCUHgMYLJZqOyn8DT1vtSqMdPZD/UpDz6cMI1hH60jhYUI6I0T/nPLbw=="],
+    "@egoist/mygo-cli-linux-arm64": ["@egoist/mygo-cli-linux-arm64@0.5.1", "https://npm.flatt.tech/@egoist/mygo-cli-linux-arm64/-/mygo-cli-linux-arm64-0.5.1.tgz", { "os": "linux", "cpu": "arm64" }, "sha512-c+tb5qwfJ29gUDCkxYkRlbYgZTFMp7CDYSqJ4Pcr6RZ29NNyuLjt857y84qga5c4/M0P0SPTQkozXBa+g/g+PA=="],
 
-    "@egoist/mygo-cli-linux-x64": ["@egoist/mygo-cli-linux-x64@0.4.8", "https://npm.flatt.tech/@egoist/mygo-cli-linux-x64/-/mygo-cli-linux-x64-0.4.8.tgz", { "os": "linux", "cpu": "x64" }, "sha512-qx7FsT0CMjUsb3diGW6c8WluvWTuOmBqUSvE5vEeZ9grSrdhy7q4GqeR7bo4zZckD2PiiTzhj1NYMdCMvdmo2g=="],
+    "@egoist/mygo-cli-linux-x64": ["@egoist/mygo-cli-linux-x64@0.5.1", "https://npm.flatt.tech/@egoist/mygo-cli-linux-x64/-/mygo-cli-linux-x64-0.5.1.tgz", { "os": "linux", "cpu": "x64" }, "sha512-9AvLTcIP0yJLXuJnLKYrIbWeM8oqTVWnUA5ddBC0/Z/zle9GrIy0fDPEC5/D6v05GJ4hvnewOl/MZYGpeCyYjg=="],
 
-    "@egoist/mygo-cli-win32-arm64": ["@egoist/mygo-cli-win32-arm64@0.4.8", "https://npm.flatt.tech/@egoist/mygo-cli-win32-arm64/-/mygo-cli-win32-arm64-0.4.8.tgz", { "os": "win32", "cpu": "arm64" }, "sha512-GpAHzVn3jiN8vmRZWjMSi/e6yERgVOPR5NKeJ1ZLY8oAaDW3pYlF7SXTP4JAT5lTAMdD0DMVpp/zpAuD44xNOQ=="],
+    "@egoist/mygo-cli-win32-arm64": ["@egoist/mygo-cli-win32-arm64@0.5.1", "https://npm.flatt.tech/@egoist/mygo-cli-win32-arm64/-/mygo-cli-win32-arm64-0.5.1.tgz", { "os": "win32", "cpu": "arm64" }, "sha512-a13DisKbZeIy4f0kt76xkVUrJLkjKxCnAPYF/wYP9CFsNR+gcDto0+eCXPIpeusiP0T8I+3JtkFnXuhYMSAmtg=="],
 
-    "@egoist/mygo-cli-win32-x64": ["@egoist/mygo-cli-win32-x64@0.4.8", "https://npm.flatt.tech/@egoist/mygo-cli-win32-x64/-/mygo-cli-win32-x64-0.4.8.tgz", { "os": "win32", "cpu": "x64" }, "sha512-fa0LCzp4quYh314SCKyNNOPKtAwKnWo5NF1luXX0nrwVfsvbJonkp+/tw5dO4R3pXmLJmieFN0K7Q1Wu9+XL6g=="],
+    "@egoist/mygo-cli-win32-x64": ["@egoist/mygo-cli-win32-x64@0.5.1", "https://npm.flatt.tech/@egoist/mygo-cli-win32-x64/-/mygo-cli-win32-x64-0.5.1.tgz", { "os": "win32", "cpu": "x64" }, "sha512-eZyfUuRcz+ka6vSXNqlzxPi1OkeLgT6CZI8Rx/wxBejue83A199lboNaEsoSTXpucoW3kLaoEX4wGV7McdKWzg=="],
 
-    "mygo-cli": ["mygo-cli@0.4.8", "https://npm.flatt.tech/mygo-cli/-/mygo-cli-0.4.8.tgz", { "optionalDependencies": { "@egoist/mygo-cli-darwin-arm64": "0.4.8", "@egoist/mygo-cli-darwin-x64": "0.4.8", "@egoist/mygo-cli-linux-arm64": "0.4.8", "@egoist/mygo-cli-linux-x64": "0.4.8", "@egoist/mygo-cli-win32-arm64": "0.4.8", "@egoist/mygo-cli-win32-x64": "0.4.8" }, "bin": { "mygo": "bin/mygo.js" } }, "sha512-Tb/CoT1V1XZEgbqhjwqgfQPyOFdu47pETk4ZHqdhfrMtygXWHZshyzyf/Jpy2vsk2f8TSdr9LsVZsNrLexND4A=="],
+    "mygo-cli": ["mygo-cli@0.5.1", "https://npm.flatt.tech/mygo-cli/-/mygo-cli-0.5.1.tgz", { "optionalDependencies": { "@egoist/mygo-cli-darwin-arm64": "0.5.1", "@egoist/mygo-cli-darwin-x64": "0.5.1", "@egoist/mygo-cli-linux-arm64": "0.5.1", "@egoist/mygo-cli-linux-x64": "0.5.1", "@egoist/mygo-cli-win32-arm64": "0.5.1", "@egoist/mygo-cli-win32-x64": "0.5.1" }, "bin": { "mygo": "bin/mygo.js" } }, "sha512-SW709gU+CzGrvDNzxuglj2mtcTnBoxPx2gPq4M/bDySStzL17BdGY1eKVgJPemcq84n9LY63lkkoEm/IpbKb5A=="],
   }
 }

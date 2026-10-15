@@ -71,9 +71,10 @@ func (app *nativeApp) openLogin() {
 // ends when the window closes or the session is taken.
 func (app *nativeApp) watchLogin(window *mygo.Window) {
 	// The store is only read once the login page's DOM is ready: asking
-	// before a window shows a page makes mygo's Windows backend build a
-	// hidden web view for the call, which races the login window's own web
-	// view being made and crashes the message loop (api-review; see 要件/).
+	// before a window shows a page made mygo's Windows backend build a
+	// hidden web view for the call, which raced the login window's own web
+	// view being made and crashed the message loop; mygo 0.5.0 fixed that
+	// (egoist/mygo#343), and the wait stays as a cheap guard (see 要件/).
 	// The page's DOM ready means its web view is up.
 	var pageReady atomic.Bool
 	if page := window.Page(); page != nil {

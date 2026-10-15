@@ -1425,11 +1425,10 @@ func TestNativeUIVolumeBarStepsWhileDragging(t *testing.T) {
 		t.Fatalf("a drag inside the interval sent again: %#v", app.sent)
 	}
 	time.Sleep(volumeSendInterval + 20*time.Millisecond)
-	before := app.volumeValue
 	tester.Move(x+45, y)
 	volume, ok = lastCommand(app.sent, "volume")
-	if !ok || len(app.sent) != 2 || volume.Volume != before {
-		t.Fatalf("a drag past the interval did not send: %#v value=%v", app.sent, before)
+	if !ok || len(app.sent) != 2 || volume.Volume != app.volumeValue {
+		t.Fatalf("a drag past the interval did not send the moved level: %#v value=%v", app.sent, app.volumeValue)
 	}
 
 	// The track reports as it plays on: the thumb must not fall back.
