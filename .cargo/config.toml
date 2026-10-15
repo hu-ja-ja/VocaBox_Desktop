@@ -1,0 +1,5 @@
+# AmsHelper is built for the GNU target so it needs no MSVC: rustup's
+# x86_64-pc-windows-gnu toolchain carries the MinGW-w64 C runtime, and
+# rust-lld comes from that toolchain too.
+[target.x86_64-pc-windows-gnu]
+linker = "rust-lld"

@@ -1,0 +1,4 @@
+# AmsHelper is built for the GNU target so it needs no MSVC. mise pins the
+# same toolchain in mise.toml; this file covers running cargo without mise.
+[toolchain]
+channel = "1.97.1-x86_64-pc-windows-gnu"

@@ -39,10 +39,10 @@
 
 ## セットアップ
 
-Windows と MSVC ビルドツール（AmsHelper の NativeAOT ビルド用）が必要です。Go と .NET SDK は [mise](https://mise.jdx.dev/) で固定しており、`mise install` で入ります（`mise.toml`。Go 1.27.1 / .NET SDK 10.0.303）。mise を使わない場合は Go 1.27.1 以降と .NET SDK 10 を自分で用意し、`mise run` の代わりに `go tool mygo dev` などを直接実行します。
+Windows のみ。`mise install` で Go と Rust が入ります。mise を使わない場合は Go 1.27.1 以降と `rustup toolchain install 1.97.1-x86_64-pc-windows-gnu` を用意し、`mise run` の代わりに `go tool mygo dev` などを直接実行します。
 
 ```sh
-mise install     # Go と .NET SDK（mise.toml のバージョン）
+mise install     # Go と Rust（mise.toml のバージョン）
 mise run dev     # AmsHelper をビルドして開発起動
 mise run build   # AmsHelper をビルドして build/ に出力
 mise run helper  # AmsHelper（resources/AmsHelper.exe）だけをビルド
@@ -51,7 +51,7 @@ mise run helper  # AmsHelper（resources/AmsHelper.exe）だけをビルド
 ## 構成
 
 - `app/` Go（MyGo Native UI、マイリスト取得・保存、再生エンジンとキュー、ニコニコの取得、トレイ常駐）
-- `helper/` C#（AmsHelper: 再生を担う常駐ヘルパー。プロトコルは `helper/README.md`）
+- `helper/` Rust（AmsHelper: 再生を担う常駐ヘルパー。プロトコルは `helper/README.md`）
 - `resources/` 同梱物（AmsHelper.exe。`mise run helper` の出力）
 
 ## テスト

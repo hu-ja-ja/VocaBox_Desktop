@@ -1,9 +1,11 @@
 [tools]
 go = "1.27.1"
-dotnet = "10.0.303"
+# The GNU target carries the MinGW-w64 C runtime and rust-lld, so the helper
+# builds without MSVC or a separate MinGW install.
+rust = { version = "1.97.1-x86_64-pc-windows-gnu", mr_boxington = true }
 
 [tasks.helper]
-run = "dotnet publish helper/AmsHelper -c Release -o resources"
+run = 'cargo build --release --manifest-path helper/Cargo.toml && copy /y helper\target\release\AmsHelper.exe resources\AmsHelper.exe'
 
 [tasks.dev]
 depends = ["helper"]

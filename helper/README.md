@@ -7,10 +7,10 @@ stdin/stdout の JSON lines で制御する。クラッシュ分離と、Go に 
 ## ビルド
 
 ```powershell
-mise run helper   # リポジトリ root で。dotnet publish -c Release -o resources
+mise run helper   # リポジトリ root で。resources/AmsHelper.exe を出力
 ```
 
-.NET SDK 10 + MSVC（PublishAot）。出力は `resources/AmsHelper.exe`（単体・ランタイム不要・約5MB）。
+`x86_64-pc-windows-gnu` でビルドする（MSVC 不要）。MinGW-w64 の C ランタイムと `rust-lld` はツールチェーン同梱。出力は `resources/AmsHelper.exe`（単体・ランタイム不要・約2MB）。
 
 ## プロトコル
 

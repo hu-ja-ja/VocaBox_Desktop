@@ -12,7 +12,7 @@ import (
 	"syscall"
 )
 
-// AmsHelper is VocaBox's playback helper: a small NativeAOT process that
+// AmsHelper is VocaBox's playback helper: a small Rust process that
 // plays one niconico DOMAND audio playlist through Windows' own media stack
 // (see helper/README.md for the protocol). The app runs it as a child, so a
 // media-stack crash cannot take the UI down.
@@ -149,8 +149,8 @@ func readHelperEvents(r io.Reader, onEvent func(helperEvent)) {
 	}
 }
 
-// drainHelperStderr logs what the helper writes to stderr: NativeAOT
-// exceptions and Windows' media-stack complaints arrive there.
+// drainHelperStderr logs what the helper writes to stderr: Rust panics
+// and Windows' media-stack complaints arrive there.
 func drainHelperStderr(r io.Reader) {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 0, 4<<10), 64<<10)
