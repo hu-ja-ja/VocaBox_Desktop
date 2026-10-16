@@ -14,6 +14,7 @@
   "settingsRepository": "リポジトリ",
   "settingsThirdPartyLicense": "サードパーティライセンス",
   "settingsThirdPartyLicenseBody": "同梱している Go モジュールと Rust クレートのライセンスです",
+  "settingsCheckUpdates": "更新を確認",
   "actionView": "表示",
   "actionViewOf": "{name}を表示",
   "actionClose": "閉じる",

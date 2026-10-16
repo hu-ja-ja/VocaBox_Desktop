@@ -130,7 +130,7 @@ func TestNativeUIOpensSettingsFromLogo(t *testing.T) {
 	if app.router.Path() != settingsPath {
 		t.Fatalf("the logo did not open the settings: path=%q", app.router.Path())
 	}
-	for _, row := range []string{"オフライン保存の音質", "保存する音源の音質です", audioQualityLabel(320)} {
+	for _, row := range []string{"オフライン保存の音質", "保存する音源の音質です", audioQualityLabel(320), "更新を確認"} {
 		if !tester.HasText(row) {
 			t.Fatalf("the settings page is missing %q: %q", row, tester.Texts())
 		}

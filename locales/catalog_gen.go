@@ -171,6 +171,16 @@ func (msgs Messages) SettingsThirdPartyLicenseBody() string {
 	return Catalog.Format(msgs.locale, "settingsThirdPartyLicenseBody", nil)
 }
 
+// SettingsCheckUpdates says "更新を確認"
+// in the language the app shows.
+func SettingsCheckUpdates() string { return In(i18n.Locale()).SettingsCheckUpdates() }
+
+// SettingsCheckUpdates says "更新を確認"
+// in the language of msgs.
+func (msgs Messages) SettingsCheckUpdates() string {
+	return Catalog.Format(msgs.locale, "settingsCheckUpdates", nil)
+}
+
 // ActionView says "表示"
 // in the language the app shows.
 func ActionView() string { return In(i18n.Locale()).ActionView() }

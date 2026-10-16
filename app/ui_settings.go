@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/ui"
 	vocabox "github.com/hu-ja-ja/VocaBox_Desktop"
 	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
@@ -68,6 +69,11 @@ func (app *nativeApp) aboutCard(c *ui.Context) {
 					ui.Text(c, "v"+version).FontSize(12).TextColor(app.theme.TextMuted)
 				}
 			})
+			ui.Spacer(c).Grow(1)
+			button := ui.Button(c, locales.SettingsCheckUpdates()).Label(locales.SettingsCheckUpdates())
+			if button.Clicked() {
+				updater.CheckForUpdates()
+			}
 		})
 		ui.Text(c, appCopyright).FontSize(12).TextColor(app.theme.TextMuted)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {

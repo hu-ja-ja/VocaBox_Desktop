@@ -14,6 +14,7 @@
   "settingsRepository": "Repository",
   "settingsThirdPartyLicense": "Third-party licenses",
   "settingsThirdPartyLicenseBody": "Licenses of the bundled Go modules and Rust crates",
+  "settingsCheckUpdates": "Check for Updates",
   "actionView": "View",
   "actionViewOf": "View {name}",
   "actionClose": "Close",

@@ -7,5 +7,9 @@
   "i18n": {
     "dir": "locales",
     "source": "ja"
+  },
+  "updates": {
+  "publicKey": "6zemcn7IxULzX/jQ/4ikw1ASTlxJj+6ICDJT/rD6rUg=",
+  "github": "hu-ja-ja/VocaBox_Desktop"
   }
 }

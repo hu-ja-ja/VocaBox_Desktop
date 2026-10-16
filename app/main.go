@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -14,6 +15,9 @@ func main() {
 	if !mygo.App.RequestSingleInstanceLock() {
 		return
 	}
+	// The update window, in native UI as the rest of the app is: it checks in
+	// the background once a day, and the settings ask it to check now.
+	mygo.Use(native.Plugin)
 	mylist := NewMylist()
 	// Keep the window's state in VocaBox's own config directory, beside
 	// settings.json, rather than mygo's default store.
