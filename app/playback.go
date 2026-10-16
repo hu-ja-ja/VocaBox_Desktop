@@ -60,6 +60,9 @@ type playback struct {
 	cookie   string
 	ua       string
 	file     string
+	// fileQuality is the band the saved file stands at, "192kbps"; "" when
+	// its size and the track's length name none.
+	fileQuality string
 	// resumeMS is where a fallback replay or a restarted helper picks the
 	// track up; zero means from the start.
 	resumeMS float64
@@ -285,6 +288,7 @@ func (p *playback) play(item MylistItem) {
 	p.resumeMS = 0
 	p.variant = 0
 	p.uris, p.bitrates, p.cookie, p.ua, p.file = nil, nil, "", "", ""
+	p.fileQuality = ""
 	p.restarted = false
 	st := &p.app.player
 	st.WatchID = item.WatchID
@@ -312,6 +316,7 @@ func (p *playback) play(item MylistItem) {
 				return
 			}
 			p.uris, p.bitrates, p.cookie, p.ua, p.file = sources.URIs, sources.BitRates, sources.Cookie, sources.UserAgent, sources.File
+			p.fileQuality = sources.FileQuality
 			p.variant = 0
 			p.sendPlay()
 		})
@@ -340,7 +345,7 @@ func (p *playback) skippable(item MylistItem) (MylistItem, bool) {
 func (p *playback) prepareSources(item MylistItem) (playbackSources, error) {
 	if p.app != nil && p.app.mylist != nil {
 		if file := p.app.savedAudioPath(item.WatchID); file != "" {
-			return playbackSources{File: file}, nil
+			return playbackSources{File: file, FileQuality: savedAudioQuality(file, float64(item.Duration)*1000)}, nil
 		}
 	}
 	videoID := item.VideoID
@@ -685,8 +690,11 @@ func qualityLabel(bitrates []int, variant int) string {
 	if kbps >= 1000 {
 		kbps /= 1000
 	}
-	return strconv.Itoa(kbps) + "kbps"
+	return kbpsLabel(kbps)
 }
+
+// kbpsLabel names a bitrate as the bar shows it: "192kbps" for 192.
+func kbpsLabel(kbps int) string { return strconv.Itoa(kbps) + "kbps" }
 
 // publish refreshes the app's player state from the queue and the track; the
 // UI reads it on every frame.
@@ -701,7 +709,13 @@ func (p *playback) publish() {
 	st.Items = p.queue.orderedItems()
 	st.QueueIndex = p.queue.currentIndex()
 	if p.file != "" {
-		st.Quality = locales.PlayerOffline()
+		// A saved file names the band it was fetched at when its size and
+		// length do; without one the bar says only that it plays offline.
+		if p.fileQuality != "" {
+			st.Quality = locales.PlayerOfflineQuality(p.fileQuality)
+		} else {
+			st.Quality = locales.PlayerOffline()
+		}
 	} else {
 		st.Quality = qualityLabel(p.bitrates, p.variant)
 	}

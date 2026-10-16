@@ -212,6 +212,9 @@ type playbackSources struct {
 	Cookie    string
 	UserAgent string
 	File      string
+	// FileQuality is the band a saved File plays at, "192kbps"; "" when its
+	// size and the track's length name none.
+	FileQuality string
 }
 
 // nicoAudio is one audio rendition of the watch API. SamplingRate keeps the

@@ -601,6 +601,18 @@ func (msgs Messages) PlayerOffline() string {
 	return Catalog.Format(msgs.locale, "playerOffline", nil)
 }
 
+// PlayerOfflineQuality says "オフライン（{quality}）"
+// in the language the app shows.
+func PlayerOfflineQuality(quality string) string {
+	return In(i18n.Locale()).PlayerOfflineQuality(quality)
+}
+
+// PlayerOfflineQuality says "オフライン（{quality}）"
+// in the language of msgs.
+func (msgs Messages) PlayerOfflineQuality(quality string) string {
+	return Catalog.Format(msgs.locale, "playerOfflineQuality", map[string]any{"quality": quality})
+}
+
 // AudioSavedLabel says "オフライン保存済み"
 // in the language the app shows.
 func AudioSavedLabel() string { return In(i18n.Locale()).AudioSavedLabel() }

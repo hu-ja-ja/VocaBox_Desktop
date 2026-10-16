@@ -216,6 +216,36 @@ func TestPickAudioBand(t *testing.T) {
 	}
 }
 
+// TestSavedAudioBand checks the band a saved file's size and length name: the
+// bands niconico serves, the rounding between them, and what names none.
+func TestSavedAudioBand(t *testing.T) {
+	const seconds = 120
+	size := func(kbps int) int64 { return int64(kbps) * 1000 / 8 * seconds }
+	cases := []struct {
+		name     string
+		size     int64
+		duration float64
+		want     int
+	}{
+		{"320kbps", size(320), 120_000, 320},
+		{"192kbps", size(192), 120_000, 192},
+		{"128kbps", size(128), 120_000, 128},
+		{"64kbps", size(64), 120_000, 64},
+		{"a rate between bands rounds to the nearer", size(240), 120_000, 192},
+		{"a rate far over every band names none", size(1000), 120_000, 0},
+		{"a file too small names no band", 6, 120_000, 0},
+		{"an unknown length names no band", size(192), 0, 0},
+		{"an empty file names no band", 0, 120_000, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := savedAudioBand(tc.size, tc.duration); got != tc.want {
+				t.Fatalf("savedAudioBand(%d, %v) = %d; want %d", tc.size, tc.duration, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestWithMovieDuration checks the length the save writes into the movie
 // header: the version 0 and version 1 durations, and an initialization section
 // without a movie header left as it is.

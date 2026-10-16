@@ -284,6 +284,42 @@ func TestPlaybackPlaysTheSavedAudio(t *testing.T) {
 	}
 }
 
+// TestPlaybackShowsSavedAudioQuality checks that a saved file the bar can name
+// a band for shows it with the offline mark. The band comes from the file's
+// size and the track's length, so a file saved before this app recorded
+// anything shows one too.
+func TestPlaybackShowsSavedAudioQuality(t *testing.T) {
+	p, helper, _ := newTestPlayback(t)
+	path, err := p.app.mylist.audioPath("sm1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A sparse file needs only its size: 120s at 192kbps is what a band of
+	// that length costs.
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(2_880_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p.acquire = p.prepareSources
+
+	p.setItems("111", "マイリストA", testQueueItems())
+	play := selectPlayed(t, p, helper, "sm1")
+	p.handleEvent(helperEvent{Event: "opened", Gen: play.Gen})
+	want := locales.PlayerOfflineQuality("192kbps")
+	if quality := p.app.player.Quality; quality != want {
+		t.Fatalf("quality = %q; want %q", quality, want)
+	}
+}
+
 // TestPlaybackMarksBrokenSavedAudio checks that a saved track the media stack
 // cannot open is dropped and recorded: the list shows it as broken, and the
 // next pass fetches it again.

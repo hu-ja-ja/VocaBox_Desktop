@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -103,6 +104,50 @@ func pickAudioBand(bitrates []int, target int) int {
 		return lowest
 	}
 	return len(bitrates) - 1
+}
+
+// audioSavedBands are the bitrates niconico's encoder produces, the bands a
+// saved file can stand at. Playback rules out 576kbps (88.2/96kHz, which
+// Windows' AAC decoder cannot play), but a file another build saved could be
+// at it, so it is named here too.
+var audioSavedBands = []int{576, 320, 192, 128, 64}
+
+// savedAudioBand is the band a saved file's size and length name, 0 when the
+// two name none. The saved renditions stand far apart, so the bitrate a size
+// and length imply rounds to the right band; a rate far from every band is no
+// save, and names none.
+func savedAudioBand(size int64, durationMS float64) int {
+	if size <= 0 || durationMS <= 0 {
+		return 0
+	}
+	kbps := float64(size) * 8 / (durationMS / 1000) / 1000
+	band, best := 0, 0.0
+	for _, b := range audioSavedBands {
+		diff := math.Abs(kbps - float64(b))
+		if band == 0 || diff < best {
+			band, best = b, diff
+		}
+	}
+	if best > float64(band)*0.3 {
+		return 0
+	}
+	return band
+}
+
+// savedAudioQuality is the band label a saved file plays at, "192kbps"; "" when
+// its size and the track's length name no band.
+// shortcut: the band is derived from the file, not recorded when the save
+// picked it; record it at save time if a file ever strays far from its band.
+func savedAudioQuality(path string, durationMS float64) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	band := savedAudioBand(info.Size(), durationMS)
+	if band <= 0 {
+		return ""
+	}
+	return kbpsLabel(band)
 }
 
 // audioDir is the directory holding the saved audio.

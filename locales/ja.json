@@ -57,6 +57,7 @@
   "playerNext": "次へ",
   "playerQueue": "再生キュー",
   "playerOffline": "オフライン",
+  "playerOfflineQuality": "オフライン（{quality}）",
   "audioSavedLabel": "オフライン保存済み",
   "audioSavingLabel": "オフライン保存中",
   "audioPlannedLabel": "オフライン保存予定",

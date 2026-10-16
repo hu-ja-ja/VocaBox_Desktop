@@ -57,6 +57,7 @@
   "playerNext": "Next",
   "playerQueue": "Playback queue",
   "playerOffline": "Offline",
+  "playerOfflineQuality": "Offline ({quality})",
   "audioSavedLabel": "Saved for offline",
   "audioSavingLabel": "Saving for offline",
   "audioPlannedLabel": "Waiting to be saved",
