@@ -10,7 +10,8 @@ import (
 )
 
 // TestDiscordPresenceCard checks the card the track playing shows: the shape
-// WSA_RPC_Bridge sends, with the timer running only while the track plays.
+// WSA_RPC_Bridge sends, with the timer from the position reached, played or
+// paused.
 func TestDiscordPresenceCard(t *testing.T) {
 	st := playerState{
 		Title:      "一曲目",
@@ -19,7 +20,7 @@ func TestDiscordPresenceCard(t *testing.T) {
 		PositionMS: 42000,
 		DurationMS: 120000,
 	}
-	activity := discordPresence(st, true)
+	activity := discordPresence(st)
 	if activity.Name != "一曲目" || activity.State != "一曲目" || activity.Details != "VocaBox" {
 		t.Fatalf("activity = %#v", activity)
 	}
@@ -37,12 +38,32 @@ func TestDiscordPresenceCard(t *testing.T) {
 		t.Fatalf("the timer starts %d seconds in the past", ago)
 	}
 
-	// A paused track shows no timer, and one without artwork no image.
-	if paused := discordPresence(st, false); paused.Timestamps != nil {
-		t.Fatalf("paused timestamps = %#v", paused.Timestamps)
+	// The timer is there the same way for a track without artwork, which
+	// shows no image.
+	if bare := discordPresence(playerState{Title: "x"}); bare.Assets != nil || bare.Timestamps == nil {
+		t.Fatalf("bare = %#v", bare)
 	}
-	if bare := discordPresence(playerState{Title: "x"}, false); bare.Assets != nil {
-		t.Fatalf("bare assets = %#v", bare.Assets)
+}
+
+// TestDiscordResendDue checks the resend timing: a paused card is re-pinned
+// on its own interval, where the position must be kept on show, and a playing
+// one only now and then, which needs just the keepalive.
+func TestDiscordResendDue(t *testing.T) {
+	for n := 1; n < discordPausedResendEvery; n++ {
+		if discordResendDue(n, false) {
+			t.Fatalf("paused tick %d was due early", n)
+		}
+	}
+	if !discordResendDue(discordPausedResendEvery, false) {
+		t.Fatal("the paused re-pin tick was not due")
+	}
+	for n := 1; n < discordResendEvery; n++ {
+		if discordResendDue(n, true) {
+			t.Fatalf("playing tick %d was due early", n)
+		}
+	}
+	if !discordResendDue(discordResendEvery, true) {
+		t.Fatal("the playing keepalive tick was not due")
 	}
 }
 
@@ -107,9 +128,10 @@ func TestPlaybackSendsDiscordPresence(t *testing.T) {
 		t.Fatalf("the same card was sent again: %#v", discord.activities)
 	}
 
-	// Pausing takes the timer off, and a volume change shows nothing.
+	// Pausing keeps the timer, from the position reached, and a volume change
+	// shows nothing.
 	p.pause()
-	if len(discord.activities) != 2 || discord.activities[1].Timestamps != nil {
+	if len(discord.activities) != 2 || discord.activities[1].Timestamps == nil {
 		t.Fatalf("paused = %#v", discord.activities)
 	}
 	p.setVolume(0.5)

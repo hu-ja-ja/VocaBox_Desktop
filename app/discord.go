@@ -40,10 +40,20 @@ const (
 // drops the update rather than slowing the UI thread down.
 const discordQueueSize = 8
 
-// discordResendInterval is how often the presence is sent again unchanged: a
-// Discord client that starts after the app hears of the track playing only
-// on the next send.
-const discordResendInterval = 5 * time.Second
+// discordResendTick is the step the resend loop takes, and the intervals are
+// whole multiples of it, so one loop serves both. discordResendInterval is how
+// often a playing presence is sent again unchanged: a Discord client that
+// starts after the app hears of the track playing only on the next send.
+// discordPausedResendInterval is how often a paused card is re-pinned: Discord
+// counts its elapsed time up itself and cannot be told to freeze, so only a
+// fresh start of now minus the position keeps the paused position on show.
+const (
+	discordResendTick           = time.Second
+	discordResendInterval       = 5 * time.Second
+	discordPausedResendInterval = 3 * time.Second
+	discordResendEvery          = int(discordResendInterval / discordResendTick)
+	discordPausedResendEvery    = int(discordPausedResendInterval / discordResendTick)
+)
 
 // discordPipes is how many `discord-ipc-N` pipes Discord may be listening
 // on; discordMaxFrame is the length a frame read from it may not pass.
@@ -84,9 +94,11 @@ type discordTimestamps struct {
 
 // discordPresence is the card the track playing shows, the shape of
 // WSA_RPC_Bridge's: the track names the card and reads under state, the app
-// reads under details, the artwork and its uploader fill the large image,
-// and the time played runs only while the track does.
-func discordPresence(st playerState, playing bool) discordActivity {
+// reads under details, the artwork and its uploader fill the large image.
+// The timer runs from the position reached whether the track plays or is
+// paused, so a paused card shows that position rather than the count Discord
+// makes up from the activity's start.
+func discordPresence(st playerState) discordActivity {
 	activity := discordActivity{
 		Name:    st.Title,
 		Type:    discordActivityListening,
@@ -96,12 +108,10 @@ func discordPresence(st playerState, playing bool) discordActivity {
 	if st.ThumbURL != "" {
 		activity.Assets = &discordAssets{LargeImage: st.ThumbURL, LargeText: st.Uploader}
 	}
-	if playing {
-		start := time.Now().Unix() - int64(st.PositionMS/1000)
-		activity.Timestamps = &discordTimestamps{Start: start}
-		if st.DurationMS > 0 {
-			activity.Timestamps.End = start + int64(st.DurationMS/1000)
-		}
+	start := time.Now().Unix() - int64(st.PositionMS/1000)
+	activity.Timestamps = &discordTimestamps{Start: start}
+	if st.DurationMS > 0 {
+		activity.Timestamps.End = start + int64(st.DurationMS/1000)
 	}
 	return activity
 }
@@ -124,20 +134,34 @@ func (p *playback) syncDiscord(force bool) {
 		p.app.discord.disconnect()
 		return
 	}
-	p.app.discord.update(discordPresence(st, p.wantPlaying))
+	p.app.discord.update(discordPresence(st))
 }
 
 // resendDiscord keeps Discord in step with the app: a client that starts or
 // restarts while a track plays hears of it within discordResendInterval even
-// though the app only sends on a change.
+// though the app only sends on a change, and a paused card is re-pinned on
+// its own interval, since Discord keeps counting its elapsed time up.
 func (p *playback) resendDiscord() {
-	for range time.Tick(discordResendInterval) {
+	for tick := 1; ; tick++ {
+		time.Sleep(discordResendTick)
+		n := tick
 		p.post(func() {
-			if p.app.discordOn && p.app.player.Title != "" {
+			if p.app.discordOn && p.app.player.Title != "" && discordResendDue(n, p.wantPlaying) {
 				p.syncDiscord(true)
 			}
 		})
 	}
+}
+
+// discordResendDue reports whether the tick numbered n is due a resend: every
+// discordPausedResendEvery ticks while paused, so the paused position is
+// re-pinned, and every discordResendEvery ticks while playing, which needs
+// only the keepalive.
+func discordResendDue(n int, playing bool) bool {
+	if playing {
+		return n%discordResendEvery == 0
+	}
+	return n%discordPausedResendEvery == 0
 }
 
 // setDiscordRPC turns the presence on or off from the settings: on shows the
