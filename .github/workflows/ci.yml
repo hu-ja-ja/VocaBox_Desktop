@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      # mise.toml is the only source of the tool versions (Go, Rust and the
+      # licence tools), so CI installs what a developer's mise install does.
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      # The helper first: the app bundles resources/AmsHelper.exe, and its
+      # smoke test only runs once the file is there.
+      - run: mise run helper
+      - run: go vet ./...
+      - run: go test ./...
+      - run: mise run build
