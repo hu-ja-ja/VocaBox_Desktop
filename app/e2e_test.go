@@ -138,3 +138,111 @@ func waitHelperPosition(t *testing.T, helper helperConn, events <-chan helperEve
 	t.Fatalf("position stuck at %vms; want at least %vms", position, min)
 	return position
 }
+
+// TestOfflineSaveE2E saves a real track and plays the saved file through the
+// real helper: the container the app writes must open without a network and
+// seek like a streamed track does. It is skipped unless VOCABOX_E2E=1, as it
+// needs the network, the built helper, and sound comes out of the speakers.
+func TestOfflineSaveE2E(t *testing.T) {
+	if os.Getenv("VOCABOX_E2E") == "" {
+		t.Skip("set VOCABOX_E2E=1 to save and play a real track (sm1097445 for a few seconds)")
+	}
+	path, err := filepath.Abs(filepath.Join("..", "resources", "AmsHelper.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("AmsHelper.exe is not built; run `mise run helper`")
+	}
+	dest := filepath.Join(t.TempDir(), "sm1097445.m4a")
+	if err := NewNico().DownloadAudio("sm1097445", 192, dest); err != nil {
+		t.Fatalf("saving the track: %v", err)
+	}
+	info, err := os.Stat(dest)
+	if err != nil || info.Size() == 0 {
+		t.Fatalf("the saved file: %v, %d bytes", err, info.Size())
+	}
+	t.Logf("saved %d bytes", info.Size())
+
+	events := make(chan helperEvent, 64)
+	exited := make(chan error, 1)
+	helper, err := startHelper(path, "..", func(event helperEvent) { events <- event }, func(err error) { exited <- err })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer helper.shutdown()
+
+	if err := helper.send(helperCommand{Cmd: "play", File: savedAudioURI(dest), Play: true}); err != nil {
+		t.Fatal(err)
+	}
+	opened := waitHelperEvent(t, events, "opened", 30*time.Second)
+	if opened.DurationMS < 60_000 {
+		t.Fatalf("duration = %vms; want the track's", opened.DurationMS)
+	}
+	position := waitHelperPosition(t, helper, events, 1000, 15*time.Second)
+	if err := helper.send(helperCommand{Cmd: "seek", MS: 55_000}); err != nil {
+		t.Fatal(err)
+	}
+	position = waitHelperPosition(t, helper, events, 54_000, 15*time.Second)
+	if position > 60_000 {
+		t.Fatalf("seek overshot: %vms", position)
+	}
+
+	if err := helper.send(helperCommand{Cmd: "quit"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Fatalf("quit did not end the helper cleanly: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the helper did not exit on quit")
+	}
+}
+
+// TestOfflineSaveThroughTheAppE2E drives the app's own path with a real
+// track: a mylist whose offline saving is on queues its audio and the
+// background worker saves it. It is skipped unless VOCABOX_E2E=1, as it needs
+// the network.
+func TestOfflineSaveThroughTheAppE2E(t *testing.T) {
+	if os.Getenv("VOCABOX_E2E") == "" {
+		t.Skip("set VOCABOX_E2E=1 to save a real track through the app (sm1097445)")
+	}
+	app := newNativeApp(&Mylist{configDir: t.TempDir()})
+	items := []MylistItem{{WatchID: "sm1097445", VideoID: "sm1097445", Title: "曲", Available: true, Duration: 99}}
+	writeBody(t, app, SavedIndexEntry{ID: "111", Name: "オフライン", Download: true}, items)
+	app.setDownload("111", true)
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		if app.savedAudioPath("sm1097445") != "" {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// The settings change fetches the saved audio again, at the band chosen:
+	// the same track, written once more and smaller.
+	saved := app.savedAudioPath("sm1097445")
+	if saved == "" {
+		t.Fatal("the worker did not save the track")
+	}
+	done, err := os.Stat(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.setAudioQuality(64)
+	app.startAudioDownloads()
+	deadline = time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		at, err := os.Stat(saved)
+		if err == nil && at.Size() != done.Size() {
+			if at.Size() >= done.Size() {
+				t.Fatalf("the re-fetch did not shrink the file: %d -> %d", done.Size(), at.Size())
+			}
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatal("the quality change did not re-fetch the track")
+}

@@ -93,12 +93,22 @@ func (app *nativeApp) mylistHeader(c *ui.Context) {
 		})
 
 		if entry := app.currentSaved(); entry != nil {
+			if entry.Download {
+				app.audioChip(c, entry.ID)
+			}
 			// A combined list lives on this PC alone: there is no niconico
 			// copy for a refresh, and its tracks come from its members'
 			// saved copies.
 			if !entry.IsCombined() {
 				if button := ui.Button(c, locales.ActionRefresh()).Disabled(app.saving || app.loading); button.Clicked() {
 					app.refreshSaved(*entry)
+				}
+				label := locales.ActionSaveAudio()
+				if entry.Download {
+					label = locales.ActionStopSaveAudio()
+				}
+				if button := ui.Button(c, label).Disabled(app.saving); button.Clicked() {
+					app.setDownload(entry.ID, !entry.Download)
 				}
 			}
 			if entry.Pinned {
@@ -120,6 +130,7 @@ func (app *nativeApp) mylistHeader(c *ui.Context) {
 }
 
 func (app *nativeApp) trackRows(c *ui.Context) {
+	planned := app.savesForOffline(app.page.ID)
 	app.trackList.Key = func(row int) any { return app.page.Items[row].WatchID }
 	app.trackList.Label = func(row int) string { return trackLabel(app.page.Items[row]) }
 	list := ui.List(c, &app.trackList, len(app.page.Items), func(i int) {
@@ -147,6 +158,7 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 					}
 				})
 				ui.Spacer(c).Grow(1)
+				app.trackAudioMark(c, item, planned)
 				if item.Duration > 0 {
 					ui.Text(c, formatDuration(item.Duration)).Width(54).FontSize(12).TextAlign(ui.End).TextColor(app.theme.TextMuted)
 				}
@@ -270,6 +282,7 @@ func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 				}
 			})
 			ui.Spacer(c).Grow(1)
+			app.trackAudioMark(c, item, app.savesForOffline(app.player.MylistID))
 			if item.Duration > 0 {
 				ui.Text(c, formatDuration(item.Duration)).Width(46).FontSize(12).TextAlign(ui.End).TextColor(app.theme.TextMuted)
 			}
@@ -376,10 +389,23 @@ func queueMatchesOrder(items []MylistItem, order []string) bool {
 	return true
 }
 
+// savesForOffline reports whether the mylist saves its audio for offline
+// playing: what marks its tracks as planned.
+func (app *nativeApp) savesForOffline(id string) bool {
+	entry := app.savedEntry(id)
+	return entry != nil && entry.Download
+}
+
+// formatDuration renders a track's length as m:ss.
 func formatDuration(seconds int) string {
 	return fmt.Sprintf("%d:%02d", seconds/60, seconds%60)
 }
 
+// isPlayable reports whether a track plays: the API answered with a video
+// niconico still serves. A deleted or private video comes back as a stub with
+// no duration, and a mylist saved before its deletion was noticed keeps the
+// stub's title and no duration either, so a track without one is not played,
+// saved, or counted. The list still shows it, as what it is.
 func isPlayable(item MylistItem) bool {
-	return item.Available && item.Title != ""
+	return item.Available && item.Title != "" && item.Duration > 0
 }

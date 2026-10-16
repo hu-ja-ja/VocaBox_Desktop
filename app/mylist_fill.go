@@ -92,4 +92,7 @@ func (app *nativeApp) fillSavedBody(id string) {
 		return
 	}
 	app.update(app.reloadSaved)
+	// The saved body is what the audio saving needs: a mylist whose offline
+	// saving was just turned on starts fetching now.
+	app.enqueueSavedAudio(id)
 }

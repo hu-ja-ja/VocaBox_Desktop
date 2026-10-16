@@ -22,12 +22,12 @@ func writeSaved(t *testing.T, m *Mylist, id, name string, items []MylistItem) {
 func TestCreateCombined(t *testing.T) {
 	m := &Mylist{configDir: t.TempDir()}
 	writeSaved(t, m, "111", "朝のリスト", []MylistItem{
-		{WatchID: "sm1", Title: "朝1", Available: true},
-		{WatchID: "sm2", Title: "共有", Available: true},
+		{WatchID: "sm1", Title: "朝1", Available: true, Duration: 120},
+		{WatchID: "sm2", Title: "共有", Available: true, Duration: 120},
 	})
 	writeSaved(t, m, "222", "夜のリスト", []MylistItem{
-		{WatchID: "sm2", Title: "共有", Available: true},
-		{WatchID: "sm3", Title: "夜3", Available: true},
+		{WatchID: "sm2", Title: "共有", Available: true, Duration: 120},
+		{WatchID: "sm3", Title: "夜3", Available: true, Duration: 120},
 	})
 
 	// A mylist whose body is not saved yet cannot join, and neither can a
@@ -74,8 +74,8 @@ func TestCreateCombined(t *testing.T) {
 		t.Fatalf("CombinedItems with a member's copy gone = %+v; want the rest", items)
 	}
 	writeSaved(t, m, "111", "朝のリスト", []MylistItem{
-		{WatchID: "sm1", Title: "朝1", Available: true},
-		{WatchID: "sm2", Title: "共有", Available: true},
+		{WatchID: "sm1", Title: "朝1", Available: true, Duration: 120},
+		{WatchID: "sm2", Title: "共有", Available: true, Duration: 120},
 	})
 
 	// A fresh service over the same dir reads it, a sync of the account's

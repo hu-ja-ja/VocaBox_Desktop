@@ -36,8 +36,10 @@ type helperEvent struct {
 type helperCommand struct {
 	Cmd string `json:"cmd"`
 	// URL, Cookie and UA belong to play: the signed audio media playlist,
-	// the app's cookies for .nicovideo.jp, and the User-Agent.
+	// the app's cookies for .nicovideo.jp, and the User-Agent. File names a
+	// saved track instead, a file:// URI the helper opens from disk.
 	URL    string  `json:"url,omitempty"`
+	File   string  `json:"file,omitempty"`
 	Cookie string  `json:"cookie,omitempty"`
 	UA     string  `json:"ua,omitempty"`
 	MS     float64 `json:"ms,omitempty"`

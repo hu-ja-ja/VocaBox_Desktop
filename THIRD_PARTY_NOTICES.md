@@ -16,9 +16,9 @@ The icons under app/icons/ are taken from Lucide (https://lucide.dev),
 unmodified apart from line breaks, except the pin, which is used filled and
 with a thinner stroke than the original:
 
-ellipsis-vertical, github, house, layers-2, lock, log-in, log-out, menu,
-pause, pin, play, plus, queue, repeat, shuffle, skip-back, skip-forward,
-trash-2, volume-2, volume-x
+arrow-down-to-line, download, ellipsis-vertical, file-exclamation-point,
+github, house, layers-2, lock, log-in, log-out, menu, pause, pin, play, plus,
+queue, repeat, shuffle, skip-back, skip-forward, trash-2, volume-2, volume-x
 
 ISC License
 
@@ -275,6 +275,45 @@ Used by:
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
+
+### BSD-3-Clause
+
+Used by:
+
+- github.com/Eyevinn/hls-m3u8 v0.6.5
+
+```
+Copyright (c) 2024-2025 Eyevinn Technology AB.
+Copyright (c) 2013-2025 Project Developers in AUTHORS file.
+Copyright (c) 2013-2024 The Project Developers from https://github.com/grafov/m3u8/.
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+  Redistributions in binary form must reproduce the above copyright notice, this
+  list of conditions and the following disclaimer in the documentation and/or
+  other materials provided with the distribution.
+
+  Neither the name of the author nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ### BSD-3-Clause

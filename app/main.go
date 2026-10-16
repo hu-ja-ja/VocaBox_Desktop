@@ -25,7 +25,7 @@ func main() {
 	if cookie, err := app.session.Load(); err != nil {
 		log.Printf("session: %v", err)
 	} else if cookie != "" {
-		if err := app.playback.nico.SetSession(cookie); err != nil {
+		if err := app.nico.SetSession(cookie); err != nil {
 			log.Printf("session: %v", err)
 		} else {
 			app.loggedIn = true
@@ -48,7 +48,11 @@ func main() {
 		app.player.Volume = settings.Volume
 		app.player.Shuffle = settings.Shuffle
 		app.player.Repeat = settings.Repeat
+		app.setAudioQuality(audioQualityKbps(settings.DownloadQuality))
 	}
+	// The mylists the user keeps offline start fetching in the background,
+	// one track at a time, at the quality the settings named.
+	app.startAudioDownloads()
 
 	mygo.App.OnSecondInstance(func([]string, string) { app.showWindow() })
 	// A quit, asked for by the tray or by a signal, closes the window the
@@ -62,9 +66,10 @@ func main() {
 		}
 		app.playback.shutdown()
 		if err := mylist.SaveSettings(Settings{
-			Volume:  app.player.Volume,
-			Shuffle: app.player.Shuffle,
-			Repeat:  app.player.Repeat,
+			Volume:          app.player.Volume,
+			Shuffle:         app.player.Shuffle,
+			Repeat:          app.player.Repeat,
+			DownloadQuality: audioQualityValue(int(app.audioKbps.Load())),
 		}); err != nil {
 			log.Printf("settings: %v", err)
 		}
@@ -81,6 +86,14 @@ func main() {
 			BackgroundColor: "#121217",
 			Content:         ui.View(app.view),
 		})
+		// The work the background handed over before the window existed runs
+		// here, on the UI thread, ahead of anything the window posts.
+		app.runHeld()
+		// The mylists the user keeps offline start fetching in the background,
+		// one track at a time, at the quality the settings named. The window
+		// exists first, so the progress the worker reports reaches the UI
+		// thread rather than writing the view's state from its own.
+		app.startAudioDownloads()
 		// Closing the window leaves VocaBox playing in the tray; without a
 		// tray to come back from it quits as it always did.
 		app.window.OnClose(func(e *mygo.CloseEvent) {

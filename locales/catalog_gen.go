@@ -81,44 +81,54 @@ func (msgs Messages) SettingsSubtitle() string {
 	return Catalog.Format(msgs.locale, "settingsSubtitle", nil)
 }
 
-// SettingsResumeTitle says "起動時に前回の曲を再開"
+// SettingsQualityTitle says "オフライン保存の音質"
 // in the language the app shows.
-func SettingsResumeTitle() string { return In(i18n.Locale()).SettingsResumeTitle() }
+func SettingsQualityTitle() string { return In(i18n.Locale()).SettingsQualityTitle() }
 
-// SettingsResumeTitle says "起動時に前回の曲を再開"
+// SettingsQualityTitle says "オフライン保存の音質"
 // in the language of msgs.
-func (msgs Messages) SettingsResumeTitle() string {
-	return Catalog.Format(msgs.locale, "settingsResumeTitle", nil)
+func (msgs Messages) SettingsQualityTitle() string {
+	return Catalog.Format(msgs.locale, "settingsQualityTitle", nil)
 }
 
-// SettingsResumeBody says "終了時に再生していた曲から始めます"
+// SettingsQualityBody says "…"
 // in the language the app shows.
-func SettingsResumeBody() string { return In(i18n.Locale()).SettingsResumeBody() }
+func SettingsQualityBody() string { return In(i18n.Locale()).SettingsQualityBody() }
 
-// SettingsResumeBody says "終了時に再生していた曲から始めます"
+// SettingsQualityBody says "…"
 // in the language of msgs.
-func (msgs Messages) SettingsResumeBody() string {
-	return Catalog.Format(msgs.locale, "settingsResumeBody", nil)
+func (msgs Messages) SettingsQualityBody() string {
+	return Catalog.Format(msgs.locale, "settingsQualityBody", nil)
 }
 
-// SettingsTrayTitle says "トレイに残して再生を続ける"
+// SettingsQualityHigh says "高音質 320kbps（5分で約12MB）"
 // in the language the app shows.
-func SettingsTrayTitle() string { return In(i18n.Locale()).SettingsTrayTitle() }
+func SettingsQualityHigh() string { return In(i18n.Locale()).SettingsQualityHigh() }
 
-// SettingsTrayTitle says "トレイに残して再生を続ける"
+// SettingsQualityHigh says "高音質 320kbps（5分で約12MB）"
 // in the language of msgs.
-func (msgs Messages) SettingsTrayTitle() string {
-	return Catalog.Format(msgs.locale, "settingsTrayTitle", nil)
+func (msgs Messages) SettingsQualityHigh() string {
+	return Catalog.Format(msgs.locale, "settingsQualityHigh", nil)
 }
 
-// SettingsTrayBody says "ウィンドウを閉じても再生を止めません"
+// SettingsQualityStandard says "標準 192kbps（5分で約7.2MB）"
 // in the language the app shows.
-func SettingsTrayBody() string { return In(i18n.Locale()).SettingsTrayBody() }
+func SettingsQualityStandard() string { return In(i18n.Locale()).SettingsQualityStandard() }
 
-// SettingsTrayBody says "ウィンドウを閉じても再生を止めません"
+// SettingsQualityStandard says "標準 192kbps（5分で約7.2MB）"
 // in the language of msgs.
-func (msgs Messages) SettingsTrayBody() string {
-	return Catalog.Format(msgs.locale, "settingsTrayBody", nil)
+func (msgs Messages) SettingsQualityStandard() string {
+	return Catalog.Format(msgs.locale, "settingsQualityStandard", nil)
+}
+
+// SettingsQualityLow says "低音質 64kbps（5分で約2.4MB）"
+// in the language the app shows.
+func SettingsQualityLow() string { return In(i18n.Locale()).SettingsQualityLow() }
+
+// SettingsQualityLow says "低音質 64kbps（5分で約2.4MB）"
+// in the language of msgs.
+func (msgs Messages) SettingsQualityLow() string {
+	return Catalog.Format(msgs.locale, "settingsQualityLow", nil)
 }
 
 // SettingsLicense says "MPL-2.0 License (Mozilla Public License Version 2.0)"
@@ -341,6 +351,26 @@ func (msgs Messages) ActionPlay() string {
 	return Catalog.Format(msgs.locale, "actionPlay", nil)
 }
 
+// ActionSaveAudio says "オフライン保存"
+// in the language the app shows.
+func ActionSaveAudio() string { return In(i18n.Locale()).ActionSaveAudio() }
+
+// ActionSaveAudio says "オフライン保存"
+// in the language of msgs.
+func (msgs Messages) ActionSaveAudio() string {
+	return Catalog.Format(msgs.locale, "actionSaveAudio", nil)
+}
+
+// ActionStopSaveAudio says "オフライン保存をやめる"
+// in the language the app shows.
+func ActionStopSaveAudio() string { return In(i18n.Locale()).ActionStopSaveAudio() }
+
+// ActionStopSaveAudio says "オフライン保存をやめる"
+// in the language of msgs.
+func (msgs Messages) ActionStopSaveAudio() string {
+	return Catalog.Format(msgs.locale, "actionStopSaveAudio", nil)
+}
+
 // ActionPause says "一時停止"
 // in the language the app shows.
 func ActionPause() string { return In(i18n.Locale()).ActionPause() }
@@ -529,6 +559,66 @@ func PlayerQueue() string { return In(i18n.Locale()).PlayerQueue() }
 // in the language of msgs.
 func (msgs Messages) PlayerQueue() string {
 	return Catalog.Format(msgs.locale, "playerQueue", nil)
+}
+
+// PlayerOffline says "オフライン"
+// in the language the app shows.
+func PlayerOffline() string { return In(i18n.Locale()).PlayerOffline() }
+
+// PlayerOffline says "オフライン"
+// in the language of msgs.
+func (msgs Messages) PlayerOffline() string {
+	return Catalog.Format(msgs.locale, "playerOffline", nil)
+}
+
+// AudioSavedLabel says "オフライン保存済み"
+// in the language the app shows.
+func AudioSavedLabel() string { return In(i18n.Locale()).AudioSavedLabel() }
+
+// AudioSavedLabel says "オフライン保存済み"
+// in the language of msgs.
+func (msgs Messages) AudioSavedLabel() string {
+	return Catalog.Format(msgs.locale, "audioSavedLabel", nil)
+}
+
+// AudioSavingLabel says "オフライン保存中"
+// in the language the app shows.
+func AudioSavingLabel() string { return In(i18n.Locale()).AudioSavingLabel() }
+
+// AudioSavingLabel says "オフライン保存中"
+// in the language of msgs.
+func (msgs Messages) AudioSavingLabel() string {
+	return Catalog.Format(msgs.locale, "audioSavingLabel", nil)
+}
+
+// AudioPlannedLabel says "オフライン保存予定"
+// in the language the app shows.
+func AudioPlannedLabel() string { return In(i18n.Locale()).AudioPlannedLabel() }
+
+// AudioPlannedLabel says "オフライン保存予定"
+// in the language of msgs.
+func (msgs Messages) AudioPlannedLabel() string {
+	return Catalog.Format(msgs.locale, "audioPlannedLabel", nil)
+}
+
+// AudioBrokenLabel says "音源が破損しています（次回の取得で取り直します）"
+// in the language the app shows.
+func AudioBrokenLabel() string { return In(i18n.Locale()).AudioBrokenLabel() }
+
+// AudioBrokenLabel says "音源が破損しています（次回の取得で取り直します）"
+// in the language of msgs.
+func (msgs Messages) AudioBrokenLabel() string {
+	return Catalog.Format(msgs.locale, "audioBrokenLabel", nil)
+}
+
+// AudioBrokenCount says "{count, plural, other {#曲が破損しています}}"
+// in the language the app shows.
+func AudioBrokenCount(count int) string { return In(i18n.Locale()).AudioBrokenCount(count) }
+
+// AudioBrokenCount says "{count, plural, other {#曲が破損しています}}"
+// in the language of msgs.
+func (msgs Messages) AudioBrokenCount(count int) string {
+	return Catalog.Format(msgs.locale, "audioBrokenCount", map[string]any{"count": count})
 }
 
 // PlayerMute says "ミュート"
@@ -1003,6 +1093,38 @@ func (msgs Messages) StatusDeleted() string {
 	return Catalog.Format(msgs.locale, "statusDeleted", nil)
 }
 
+// StatusAudioQueued says "オフライン保存を開始しました。"
+// in the language the app shows.
+func StatusAudioQueued() string { return In(i18n.Locale()).StatusAudioQueued() }
+
+// StatusAudioQueued says "オフライン保存を開始しました。"
+// in the language of msgs.
+func (msgs Messages) StatusAudioQueued() string {
+	return Catalog.Format(msgs.locale, "statusAudioQueued", nil)
+}
+
+// StatusAudioStopped says "オフライン保存を停止しました。"
+// in the language the app shows.
+func StatusAudioStopped() string { return In(i18n.Locale()).StatusAudioStopped() }
+
+// StatusAudioStopped says "オフライン保存を停止しました。"
+// in the language of msgs.
+func (msgs Messages) StatusAudioStopped() string {
+	return Catalog.Format(msgs.locale, "statusAudioStopped", nil)
+}
+
+// StatusSavingAudio says "オフライン保存中 {done}/{total}…"
+// in the language the app shows.
+func StatusSavingAudio(done int, total int) string {
+	return In(i18n.Locale()).StatusSavingAudio(done, total)
+}
+
+// StatusSavingAudio says "オフライン保存中 {done}/{total}…"
+// in the language of msgs.
+func (msgs Messages) StatusSavingAudio(done int, total int) string {
+	return Catalog.Format(msgs.locale, "statusSavingAudio", map[string]any{"done": done, "total": total})
+}
+
 // StatusCombinedCreated says "結合マイリスト「{name}」を作成しました。"
 // in the language the app shows.
 func StatusCombinedCreated(name string) string { return In(i18n.Locale()).StatusCombinedCreated(name) }
@@ -1355,6 +1477,46 @@ func ErrAudioSourceHTTP(status int) string { return In(i18n.Locale()).ErrAudioSo
 // in the language of msgs.
 func (msgs Messages) ErrAudioSourceHTTP(status int) string {
 	return Catalog.Format(msgs.locale, "errAudioSourceHTTP", map[string]any{"status": status})
+}
+
+// ErrAudioSave says "音源を保存できませんでした"
+// in the language the app shows.
+func ErrAudioSave() string { return In(i18n.Locale()).ErrAudioSave() }
+
+// ErrAudioSave says "音源を保存できませんでした"
+// in the language of msgs.
+func (msgs Messages) ErrAudioSave() string {
+	return Catalog.Format(msgs.locale, "errAudioSave", nil)
+}
+
+// ErrAudioUnsupported says "保存に対応していない音源です"
+// in the language the app shows.
+func ErrAudioUnsupported() string { return In(i18n.Locale()).ErrAudioUnsupported() }
+
+// ErrAudioUnsupported says "保存に対応していない音源です"
+// in the language of msgs.
+func (msgs Messages) ErrAudioUnsupported() string {
+	return Catalog.Format(msgs.locale, "errAudioUnsupported", nil)
+}
+
+// ErrAudioStateRead says "音源の保存状態を読み込めませんでした"
+// in the language the app shows.
+func ErrAudioStateRead() string { return In(i18n.Locale()).ErrAudioStateRead() }
+
+// ErrAudioStateRead says "音源の保存状態を読み込めませんでした"
+// in the language of msgs.
+func (msgs Messages) ErrAudioStateRead() string {
+	return Catalog.Format(msgs.locale, "errAudioStateRead", nil)
+}
+
+// ErrAudioStateWrite says "音源の保存状態を書き込めませんでした"
+// in the language the app shows.
+func ErrAudioStateWrite() string { return In(i18n.Locale()).ErrAudioStateWrite() }
+
+// ErrAudioStateWrite says "音源の保存状態を書き込めませんでした"
+// in the language of msgs.
+func (msgs Messages) ErrAudioStateWrite() string {
+	return Catalog.Format(msgs.locale, "errAudioStateWrite", nil)
 }
 
 // ErrNicoNetwork says "ニコニコに接続できませんでした（通信エラー）"

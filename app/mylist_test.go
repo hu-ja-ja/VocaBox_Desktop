@@ -284,7 +284,7 @@ func TestGetPagePublicDoesNotFallBack(t *testing.T) {
 // mylist with a sample entry, one public with none.
 const ownMylistsFixture = `{"meta":{"status":200},"data":{"mylists":[` +
 	`{"id":71043760,"isPublic":false,"name":"非公開マイリスト","itemsCount":2,` +
-	`"sampleItems":[{"watchId":"sm1","video":{"id":"sm1","title":"曲A","thumbnail":{"url":"https://nicovideo.cdn.nimg.jp/thumbnails/1/1"}}}]},` +
+	`"sampleItems":[{"watchId":"sm1","video":{"id":"sm1","title":"曲A","duration":125,"thumbnail":{"url":"https://nicovideo.cdn.nimg.jp/thumbnails/1/1"}}}]},` +
 	`{"id":71043761,"isPublic":true,"name":"公開マイリスト","itemsCount":0,"sampleItems":[]}` +
 	`]}}`
 
@@ -621,7 +621,7 @@ func TestSaveMylistFetchError(t *testing.T) {
 
 func TestFetchAllMergesPages(t *testing.T) {
 	final := `{"meta":{"status":200},"data":{"mylist":{"name":"テストマイリスト","isPublic":true,` +
-		`"items":[{"watchId":"sm4","video":{"id":"sm4","title":"曲D"}}],` +
+		`"items":[{"watchId":"sm4","video":{"id":"sm4","title":"曲D","duration":125}}],` +
 		`"totalItemCount":4,"hasNext":false}}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("page") == "1" {
@@ -665,13 +665,54 @@ func TestFetchAllStopsAtPageCap(t *testing.T) {
 	}
 }
 
+// TestMapMylistItemSkipsDeletedVideos checks the stub the mylist API answers
+// with for a deleted or private video — a placeholder picture, a hidden
+// owner, no duration — which the list shows by the stub's own title without
+// playing it, while a video niconico still serves keeps its metadata. A
+// hidden owner alone is not the stub's mark: the duration decides, so a video
+// the API hides the owner of but would still play is not dropped.
+func TestMapMylistItemSkipsDeletedVideos(t *testing.T) {
+	body := `{"meta":{"status":200},"data":{"mylist":{"name":"t","isPublic":true,"items":[` +
+		`{"watchId":"sm1","video":{"id":"sm1","title":"曲A","duration":125,"owner":{"name":"作者","visibility":"visible"}}},` +
+		`{"watchId":"sm2","video":{"id":"sm2","title":"削除された動画","duration":0,"owner":{"ownerType":"hidden","type":"unknown","visibility":"hidden","name":""}}},` +
+		`{"watchId":"sm3","video":{"id":"sm3","title":"曲C","owner":{"name":"作者"}}},` +
+		`{"watchId":"sm4","video":null},` +
+		`{"watchId":"sm5","video":{"id":"sm5","title":"自分の非公開曲","duration":125,"owner":{"visibility":"hidden","name":""}}}` +
+		`],"totalItemCount":5}}}`
+	page, err := mapMylistPage("1", []byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 5 {
+		t.Fatalf("items = %d; want the whole page listed", len(page.Items))
+	}
+	served := page.Items[0]
+	if !served.Available || served.Title != "曲A" || served.Duration != 125 {
+		t.Fatalf("a served video lost its metadata: %+v", served)
+	}
+	stub := page.Items[1]
+	if stub.Available || stub.Duration != 0 || stub.Title == "" {
+		t.Fatalf("a deleted video's stub read as a track: %+v", stub)
+	}
+	if isPlayable(stub) {
+		t.Fatalf("a deleted video's stub reads as playable: %+v", stub)
+	}
+	if page.Items[3].Available {
+		t.Fatalf("a video the API did not answer for read as a track: %+v", page.Items[3])
+	}
+	private := page.Items[4]
+	if !private.Available || private.Duration != 125 || !isPlayable(private) {
+		t.Fatalf("a video with a hidden owner and a duration reads as deleted: %+v", private)
+	}
+}
+
 func TestMapMylistPageThumbnailURLs(t *testing.T) {
 	// url wins; middleUrl alone falls back to the same shape without .M;
 	// videos without a thumbnail keep an empty URL.
 	body := `{"meta":{"status":200},"data":{"mylist":{"name":"t","isPublic":true,"items":[` +
-		`{"watchId":"sm1","video":{"id":"sm1","title":"a","thumbnail":{"url":"https://nicovideo.cdn.nimg.jp/thumbnails/1/1","middleUrl":"https://nicovideo.cdn.nimg.jp/thumbnails/1/1.M"}}},` +
-		`{"watchId":"sm2","video":{"id":"sm2","title":"b","thumbnail":{"middleUrl":"https://nicovideo.cdn.nimg.jp/thumbnails/2/2.M"}}},` +
-		`{"watchId":"sm3","video":{"id":"sm3","title":"c"}}` +
+		`{"watchId":"sm1","video":{"id":"sm1","title":"a","duration":125,"thumbnail":{"url":"https://nicovideo.cdn.nimg.jp/thumbnails/1/1","middleUrl":"https://nicovideo.cdn.nimg.jp/thumbnails/1/1.M"}}},` +
+		`{"watchId":"sm2","video":{"id":"sm2","title":"b","duration":125,"thumbnail":{"middleUrl":"https://nicovideo.cdn.nimg.jp/thumbnails/2/2.M"}}},` +
+		`{"watchId":"sm3","video":{"id":"sm3","title":"c","duration":125}}` +
 		`],"totalItemCount":3}}}`
 	page, err := mapMylistPage("1", []byte(body))
 	if err != nil {

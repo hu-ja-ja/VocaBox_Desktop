@@ -5,10 +5,11 @@
   "navCombined": "結合マイリスト",
   "navSettings": "設定",
   "settingsSubtitle": "アプリの設定",
-  "settingsResumeTitle": "起動時に前回の曲を再開",
-  "settingsResumeBody": "終了時に再生していた曲から始めます",
-  "settingsTrayTitle": "トレイに残して再生を続ける",
-  "settingsTrayBody": "ウィンドウを閉じても再生を止めません",
+  "settingsQualityTitle": "オフライン保存の音質",
+  "settingsQualityBody": "保存する音源の音質です。上位の音質がない曲は、その下の音質で保存します。変更すると、保存済みの音源も新しい音質で取り直します。",
+  "settingsQualityHigh": "高音質 320kbps（5分で約12MB）",
+  "settingsQualityStandard": "標準 192kbps（5分で約7.2MB）",
+  "settingsQualityLow": "低音質 64kbps（5分で約2.4MB）",
   "settingsLicense": "MPL-2.0 License (Mozilla Public License Version 2.0)",
   "settingsRepository": "リポジトリ",
   "settingsThirdPartyLicense": "サードパーティライセンス",
@@ -31,6 +32,8 @@
   "actionDelete": "削除",
   "actionDeleteConfirm": "削除する",
   "actionPlay": "再生",
+  "actionSaveAudio": "オフライン保存",
+  "actionStopSaveAudio": "オフライン保存をやめる",
   "actionPause": "一時停止",
   "actionPlayShuffle": "シャッフル再生",
   "actionRefresh": "更新",
@@ -50,6 +53,17 @@
   "playerPrevious": "前へ",
   "playerNext": "次へ",
   "playerQueue": "再生キュー",
+  "playerOffline": "オフライン",
+  "audioSavedLabel": "オフライン保存済み",
+  "audioSavingLabel": "オフライン保存中",
+  "audioPlannedLabel": "オフライン保存予定",
+  "audioBrokenLabel": "音源が破損しています（次回の取得で取り直します）",
+  "audioBrokenCount": "{count, plural, other {#曲が破損しています}}",
+  "@audioBrokenCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
   "playerMute": "ミュート",
   "playerUnmute": "ミュート解除",
   "queueEmpty": "キューは空です",
@@ -113,6 +127,15 @@
   "statusRefreshingMylist": "マイリストを更新しています…",
   "statusRefreshed": "更新しました。",
   "statusDeleted": "保存したマイリストを削除しました。",
+  "statusAudioQueued": "オフライン保存を開始しました。",
+  "statusAudioStopped": "オフライン保存を停止しました。",
+  "statusSavingAudio": "オフライン保存中 {done}/{total}…",
+  "@statusSavingAudio": {
+    "placeholders": {
+      "done": { "type": "int" },
+      "total": { "type": "int" }
+    }
+  },
   "statusCombinedCreated": "結合マイリスト「{name}」を作成しました。",
   "statusLoggedIn": "ログインしました。",
   "statusLoggedOut": "ログアウトしました。",
@@ -180,6 +203,10 @@
       "status": { "type": "int" }
     }
   },
+  "errAudioSave": "音源を保存できませんでした",
+  "errAudioUnsupported": "保存に対応していない音源です",
+  "errAudioStateRead": "音源の保存状態を読み込めませんでした",
+  "errAudioStateWrite": "音源の保存状態を書き込めませんでした",
   "errNicoNetwork": "ニコニコに接続できませんでした（通信エラー）",
   "errNicoParse": "ニコニコの応答を読み取れませんでした",
   "errNicoAPIHTTP": "ニコニコのAPIが失敗しました（HTTP {status}）",

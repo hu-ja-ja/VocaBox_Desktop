@@ -69,6 +69,15 @@ var layersSVG []byte
 //go:embed icons/github.svg
 var githubSVG []byte
 
+//go:embed icons/download.svg
+var downloadSVG []byte
+
+//go:embed icons/arrow-down-to-line.svg
+var arrowDownSVG []byte
+
+//go:embed icons/file-exclamation-point.svg
+var fileWarningSVG []byte
+
 var (
 	iconPlay        = ui.MustParseSVG(playSVG)
 	iconPause       = ui.MustParseSVG(pauseSVG)
@@ -90,4 +99,9 @@ var (
 	iconLogOut      = ui.MustParseSVG(logOutSVG)
 	iconLayers      = ui.MustParseSVG(layersSVG)
 	iconGitHub      = ui.MustParseSVG(githubSVG)
+	iconDownload    = ui.MustParseSVG(downloadSVG)
+	// The mark of a saved track is this arrow, outlined; the state reads from
+	// the circle it stands in, which is filled in the app's own accent.
+	iconArrowDown   = ui.MustParseSVG(arrowDownSVG)
+	iconFileWarning = ui.MustParseSVG(fileWarningSVG)
 )

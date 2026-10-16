@@ -2,9 +2,13 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // fakeHelper records what a playback sends it, and lets a test fire events
@@ -93,10 +97,21 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// waitForApp waits for a condition the app's own work produces: it runs the
+// work the background goroutines handed over before each check, as a frame
+// build does, the test having no window to run it.
+func waitForApp(t *testing.T, app *nativeApp, what string, ok func() bool) {
+	t.Helper()
+	waitFor(t, what, func() bool {
+		app.runHeld()
+		return ok()
+	})
+}
+
 func testQueueItems() []MylistItem {
 	return []MylistItem{
-		{WatchID: "sm1", Title: "一曲目", Available: true},
-		{WatchID: "sm2", Title: "二曲目", Available: true},
+		{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120},
+		{WatchID: "sm2", Title: "二曲目", Available: true, Duration: 120},
 	}
 }
 
@@ -232,6 +247,127 @@ func TestPlaybackReportsQuality(t *testing.T) {
 	p.handleEvent(helperEvent{Event: "failed", Code: "DecodingError", Ext: -1, Msg: "no decoder", Gen: play.Gen})
 	if quality := p.app.player.Quality; quality != "192kbps" {
 		t.Fatalf("fallback quality = %q", quality)
+	}
+}
+
+// TestPlaybackPlaysTheSavedAudio checks that a track this PC has saved plays
+// from disk: the helper is handed the file rather than a manifest, and the
+// bar says the track is offline.
+func TestPlaybackPlaysTheSavedAudio(t *testing.T) {
+	p, helper, _ := newTestPlayback(t)
+	path, err := p.app.mylist.audioPath("sm1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("saved"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The saved copy is found before the network: the acquisition under test
+	// is the engine's own.
+	p.acquire = p.prepareSources
+
+	p.setItems("111", "マイリストA", testQueueItems())
+	play := selectPlayed(t, p, helper, "sm1")
+	if play.File != savedAudioURI(path) || play.URL != "" || play.Cookie != "" {
+		t.Fatalf("play = %#v; want the saved file", play)
+	}
+	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120_000, Gen: play.Gen})
+	if quality := p.app.player.Quality; quality != locales.PlayerOffline() {
+		t.Fatalf("quality = %q; want %q", quality, locales.PlayerOffline())
+	}
+}
+
+// TestPlaybackMarksBrokenSavedAudio checks that a saved track the media stack
+// cannot open is dropped and recorded: the list shows it as broken, and the
+// next pass fetches it again.
+func TestPlaybackMarksBrokenSavedAudio(t *testing.T) {
+	p, helper, _ := newTestPlayback(t)
+	path, err := p.app.mylist.audioPath("sm1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("saved"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.acquire = p.prepareSources
+
+	p.setItems("111", "マイリストA", testQueueItems())
+	play := selectPlayed(t, p, helper, "sm1")
+	if play.File == "" {
+		t.Fatal("the track did not play from its saved copy")
+	}
+	p.handleEvent(helperEvent{Event: "failed", Code: "DecodingError", Ext: -1, Msg: "no decoder", Gen: play.Gen})
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("the broken file is still there: %v", err)
+	}
+	if !p.app.broken["sm1"] {
+		t.Fatal("the track was not recorded as broken")
+	}
+	if p.app.playerError == "" {
+		t.Fatal("the failure was not reported to the player")
+	}
+}
+
+// TestPlaybackKeepsTheSavedFileWhenTheHelperTookNoSource checks a failure
+// that never reached the file: a helper older than the app ignores the file
+// command and answers that it has no source, which must leave the saved copy
+// where it is. The file is not what failed, and dropping it would have the
+// download pass fetch it again only for the same helper to fail it again.
+func TestPlaybackKeepsTheSavedFileWhenTheHelperTookNoSource(t *testing.T) {
+	p, helper, _ := newTestPlayback(t)
+	path := writeAudio(t, p.app, "sm1")
+	p.acquire = p.prepareSources
+
+	p.setItems("111", "マイリストA", testQueueItems())
+	play := selectPlayed(t, p, helper, "sm1")
+	if play.File == "" {
+		t.Fatal("the track did not play from its saved copy")
+	}
+	p.handleEvent(helperEvent{Event: "failed", Code: "NoSource", Gen: play.Gen})
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("a helper that took no source dropped the saved file: %v", err)
+	}
+	if p.app.broken["sm1"] {
+		t.Fatal("a helper that took no source marked the track broken")
+	}
+	if p.app.playerError == "" {
+		t.Fatal("the failure was not reported to the player")
+	}
+}
+
+// TestPlaybackSkipsTracksNiconicoNoLongerServes checks that the queue moves
+// on when it lands on a track that cannot play: shuffle and next pass it over
+// rather than stopping on it, and a queue with nothing playable starts
+// nothing.
+func TestPlaybackSkipsTracksNiconicoNoLongerServes(t *testing.T) {
+	p, helper, _ := newTestPlayback(t)
+	p.queue.reset(testQueueItems())
+	deleted := MylistItem{WatchID: "sm9", Title: "削除された動画", Available: true}
+
+	p.play(deleted)
+
+	waitFor(t, "the play command", func() bool { return helper.count("play") == 1 })
+	if p.track.WatchID != "sm1" {
+		t.Fatalf("the player landed on %q; want the track after the deleted one", p.track.WatchID)
+	}
+
+	// A queue left with nothing playable starts nothing at all.
+	p2, helper2, _ := newTestPlayback(t)
+	p2.queue.reset([]MylistItem{deleted})
+	p2.play(deleted)
+	if helper2.count("play") != 0 {
+		t.Fatal("a track niconico no longer serves was handed to the helper")
+	}
+	if p2.track.WatchID != "" {
+		t.Fatalf("the player shows %q; want nothing playing", p2.track.WatchID)
 	}
 }
 
@@ -384,7 +520,7 @@ func TestPlaybackKeepsThePlayingMylistAcrossMylists(t *testing.T) {
 	waitFor(t, "the play command", func() bool { return helper.count("play") == 1 })
 
 	// Opening another mylist keeps the queue and the track playing.
-	p.setItems("222", "マイリストB", []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}})
+	p.setItems("222", "マイリストB", []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true, Duration: 120}})
 	if p.app.player.WatchID != "sm1" || p.app.player.MylistID != "111" || p.app.player.Name != "マイリストA" {
 		t.Fatalf("opening a mylist took the queue over: %#v", p.app.player)
 	}

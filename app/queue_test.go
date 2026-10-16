@@ -253,6 +253,37 @@ func TestPlayQueueRemoveKeepsThePlayingTrack(t *testing.T) {
 	}
 }
 
+// TestPlayQueueUpdateTakesThePagesCopies checks the refresh of a playing
+// mylist: the queue's own copies follow the page that just arrived, so a
+// track deleted since the queue was built stops reading as playable, while
+// the order, the selection and the entries the page does not hold stay put.
+func TestPlayQueueUpdateTakesThePagesCopies(t *testing.T) {
+	q := &playQueue{}
+	abcd := queueTracks("a", "b", "c", "d")
+	q.reset(abcd)
+	q.selectTrack(abcd[1])
+
+	page := []MylistItem{
+		{WatchID: "b", Title: "曲B", Available: true, Duration: 125},
+		{WatchID: "c", Title: "削除された動画", Available: true},
+	}
+	q.update(page)
+
+	if got := q.orderIDs(); !slices.Equal(got, []string{"a", "b", "c", "d"}) {
+		t.Fatalf("the update reordered the queue: %v", got)
+	}
+	if cur, _ := q.current(); cur.WatchID != "b" || cur.Duration != 125 {
+		t.Fatalf("the track playing did not take the page's copy: %#v", cur)
+	}
+	items := q.orderedItems()
+	if isPlayable(items[2]) {
+		t.Fatalf("a deleted track still reads as playable: %#v", items[2])
+	}
+	if items[0].WatchID != "a" || items[3].WatchID != "d" {
+		t.Fatalf("an entry the page does not hold changed: %#v", queueIDs(items))
+	}
+}
+
 // TestPlayQueueMoveReordersRows checks the drag's reordering: to counts rows
 // before the drop, in the queue as it stands.
 func TestPlayQueueMoveReordersRows(t *testing.T) {

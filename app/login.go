@@ -117,10 +117,10 @@ func (app *nativeApp) completeLogin(window *mygo.Window, header string) {
 	}
 	verifyErr := error(nil)
 	if app.playback != nil {
-		if err := app.playback.nico.SetSession(header); err != nil {
+		if err := app.nico.SetSession(header); err != nil {
 			verifyErr = err
 		} else {
-			verifyErr = app.playback.nico.VerifySession()
+			verifyErr = app.nico.VerifySession()
 		}
 	}
 	if errors.Is(verifyErr, errSessionExpired) {
@@ -205,7 +205,7 @@ func (app *nativeApp) loadAccount() {
 // fetchAccount asks niconico for the signed-in account and the bytes of
 // its picture; the caller decodes the picture where bitmaps may be made.
 func (app *nativeApp) fetchAccount() (nicoUser, []byte, error) {
-	user, err := app.playback.nico.User()
+	user, err := app.nico.User()
 	if err != nil {
 		return nicoUser{}, nil, err
 	}
@@ -257,18 +257,41 @@ func (app *nativeApp) clearSession() {
 		log.Printf("session: %v", err)
 	}
 	if app.playback != nil {
-		app.playback.nico.ClearSession()
+		app.nico.ClearSession()
 	}
 	app.loggedIn = false
 	app.accountName, app.accountIcon = "", nil
 }
 
-// update runs fn on the UI thread; without a window, as in tests, it runs
-// inline.
+// update runs fn on the UI thread: the window when there is one, and the next
+// frame build otherwise, which is where a test takes it. Work handed over
+// with no UI thread to run it waits rather than touching the view's state
+// from the goroutine that asked.
 func (app *nativeApp) update(fn func()) {
-	if app.window == nil {
-		fn()
+	if app.window != nil {
+		app.window.Update(fn)
 		return
 	}
-	app.window.Update(fn)
+	app.heldMu.Lock()
+	app.held = append(app.held, fn)
+	app.heldMu.Unlock()
+}
+
+// runHeld runs the work the background goroutines handed over, in order, on
+// the caller's goroutine: a frame build does, and a test that waits on the
+// view's state does before it looks. Work a closure hands over while they run
+// follows it.
+func (app *nativeApp) runHeld() {
+	for {
+		app.heldMu.Lock()
+		held := app.held
+		app.held = nil
+		app.heldMu.Unlock()
+		if len(held) == 0 {
+			return
+		}
+		for _, fn := range held {
+			fn()
+		}
+	}
 }

@@ -336,6 +336,16 @@ type nvapiVideo struct {
 	Thumbnail *nvapiThumbnail `json:"thumbnail"`
 }
 
+// served reports whether the video the mylist API answered with is a real
+// one: a deleted or private video comes back as a stub — a placeholder
+// picture, a hidden owner, no duration — which must not read as a track. The
+// duration alone decides it: a hidden owner may sit on a video the account
+// can still play, and refusing those would drop the track and sweep its saved
+// audio away.
+func (v nvapiVideo) served() bool {
+	return v.Duration > 0
+}
+
 type nvapiThumbnail struct {
 	URL       string `json:"url"`
 	MiddleURL string `json:"middleUrl"`
@@ -380,18 +390,26 @@ func mapMylistPage(id string, body []byte) (MylistPage, error) {
 	return out, nil
 }
 
-// mapMylistItem maps one entry: metadata only when the API knew the video.
+// mapMylistItem maps one entry: metadata only when the API answered with a
+// video niconico still serves. A deleted or private video keeps its own
+// placeholder title — "削除された動画" and the like — as an entry the list
+// shows without playing it.
 func mapMylistItem(it nvapiItem) MylistItem {
 	item := MylistItem{WatchID: it.WatchID}
-	if it.Video != nil {
-		item.Available = true
-		item.VideoID = it.Video.ID
+	if it.Video == nil {
+		return item
+	}
+	if !it.Video.served() {
 		item.Title = it.Video.Title
-		item.Duration = it.Video.Duration
-		item.ThumbURL = nvapiThumbBase(it.Video.Thumbnail)
-		if it.Video.Owner != nil {
-			item.Uploader = it.Video.Owner.Name
-		}
+		return item
+	}
+	item.Available = true
+	item.VideoID = it.Video.ID
+	item.Title = it.Video.Title
+	item.Duration = it.Video.Duration
+	item.ThumbURL = nvapiThumbBase(it.Video.Thumbnail)
+	if it.Video.Owner != nil {
+		item.Uploader = it.Video.Owner.Name
 	}
 	return item
 }

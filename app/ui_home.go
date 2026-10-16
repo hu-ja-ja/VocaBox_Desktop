@@ -33,6 +33,8 @@ type mylistEntry struct {
 	// its owner sees it.
 	Pinned  bool
 	Private bool
+	// Download is the mylist saved for offline playing.
+	Download bool
 	// Mine is the mylist being one of the signed-in account's own; only a
 	// mylist of somebody else's can be deleted.
 	Mine bool
@@ -131,7 +133,7 @@ func savedToEntry(entry SavedIndexEntry) mylistEntry {
 	return mylistEntry{
 		ID: entry.ID, Name: entry.Name, Meta: savedMeta(entry),
 		Items: entry.Sample, Pinned: entry.Pinned, Private: entry.Private,
-		Mine: entry.Mine, Combined: entry.IsCombined(),
+		Mine: entry.Mine, Combined: entry.IsCombined(), Download: entry.Download,
 	}
 }
 
@@ -276,6 +278,19 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 				app.pin(entry.ID)
 			}
 		}
+		// A combined list plays its members' tracked copies: the members are
+		// where its audio is saved.
+		if !entry.Combined {
+			label := locales.ActionSaveAudio()
+			if entry.Download {
+				label = locales.ActionStopSaveAudio()
+			}
+			save := app.menuItem(c, iconDownload, label).Role(ui.RoleMenuItemCheckBox).Checked(entry.Download)
+			if save.Clicked() {
+				app.menuOpen = false
+				app.setDownload(entry.ID, !entry.Download)
+			}
+		}
 		play := app.menuItem(c, iconPlay, locales.ActionPlay())
 		if play.Clicked() {
 			app.playMylist(entry, false)
@@ -330,7 +345,7 @@ func (app *nativeApp) deleteDialog(c *ui.Context) {
 }
 
 // deleteSaved removes the saved copy of a mylist from this PC: its index line
-// and its body.
+// and its body. The audio no other enabled mylist holds goes with it.
 func (app *nativeApp) deleteSaved(entry mylistEntry) {
 	saved, err := app.mylist.RemoveSaved(entry.ID)
 	if err != nil {
@@ -339,17 +354,22 @@ func (app *nativeApp) deleteSaved(entry mylistEntry) {
 	}
 	app.saved = saved
 	app.setStatus(locales.StatusDeleted())
+	app.downloads.addStats()
 }
 
 // countMeta labels a mylist with its size.
 func countMeta(count int) string { return locales.SongCountTotal(count) }
 
 // cardBadges marks a card's tile: the pin badge over the tile's top-right
-// corner, the combined mark as a chip over its bottom-left, and the private
-// mark as a chip over its bottom-right.
+// corner, the offline saving as a chip over its top-left, the combined mark
+// as a chip over its bottom-left, and the private mark as a chip over its
+// bottom-right.
 func (app *nativeApp) cardBadges(c *ui.Context, entry mylistEntry) {
 	if entry.Pinned {
 		app.pinBadge(c).Absolute().Top(4).Right(4)
+	}
+	if entry.Download {
+		app.audioChip(c, entry.ID).Absolute().Top(4).Left(4)
 	}
 	if entry.Combined {
 		app.cardChip(c, iconLayers, locales.BadgeCombined()).Absolute().Bottom(4).Left(4)

@@ -202,7 +202,8 @@ func (n *Nico) User() (nicoUser, error) {
 // playbackSources is everything the helper needs for one track: the audio
 // media playlist URLs, the highest band first (the Go side falls back to the
 // next one when playback of a band fails), and the Cookie and User-Agent the
-// delivery hosts expect.
+// delivery hosts expect. File is the track's saved copy instead: it plays
+// without the network, and the bands stay empty.
 type playbackSources struct {
 	URIs []string
 	// BitRates is the kbps of each band of URIs, for the quality the
@@ -210,6 +211,7 @@ type playbackSources struct {
 	BitRates  []int
 	Cookie    string
 	UserAgent string
+	File      string
 }
 
 // nicoAudio is one audio rendition of the watch API. SamplingRate keeps the

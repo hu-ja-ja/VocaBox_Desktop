@@ -19,6 +19,7 @@ stdin（コマンド、1行1オブジェクト）:
 | cmd | フィールド | 意味 |
 |---|---|---|
 | `play` | `url`, `cookie`, `ua`, `gen`, `play` | audio media playlist の署名URLを再生。既存の再生は置き換え。`gen` はこの再生の世代名（イベントにそのまま付く）、`play` が false なら停止状態で読み込む |
+| `play` | `file`, `gen`, `play` | 保存済み音源（`file://` URI）を再生。`url` の代わり。cookie / ua は不要 |
 | `pause` / `resume` | | 一時停止 / 再開 |
 | `seek` | `ms` | 位置移動（read-only 時は無視） |
 | `volume` | `value` | 0〜1 |
@@ -32,7 +33,7 @@ stdout（イベント、1行1オブジェクト）:
 |---|---|---|
 | `opened` | `durationMs` | 再生開始。`NaturalDuration` |
 | `ended` | | 最後まで再生した |
-| `failed` | `code`, `ext`, `msg` | 再生失敗。`code` は `MediaPlayerError` 名か `AdaptiveMediaSourceCreationStatus` 名 |
+| `failed` | `code`, `ext`, `msg` | 再生失敗。`code` は `MediaPlayerError` 名か `AdaptiveMediaSourceCreationStatus` 名（`NoSource` は `play` に `url` も `file` も無かったとき） |
 | `position` | `ms` | `position` への応答 |
 
 - `cookie` は `name=value; ...`。ヘルパーの HttpClient の Cookie ヘッダとして全リクエスト
@@ -40,6 +41,7 @@ stdout（イベント、1行1オブジェクト）:
   システムの Cookie ストアは使わない（`CookieUsageBehavior.NoCookies`）ため、
   `user_session` などが OS 側に残ることはない。
 - 位置のプルは Go 側が約4回/秒。イベントと応答は同じ stdout に混ざるため、`ev` で振り分ける。
+- `file` の再生は `MediaSource::CreateFromUri`（ローカルファイル）で開く。HLS のときだけ `AdaptiveMediaSource` を使う。
 - イベントには `gen` が付く（`play` で渡された世代名）。差し替えられた再生の遅れたイベントを
   アプリが見分けて捨てるためのもので、ヘルパー自身は `gen` を検証しない。
 - 失敗時の音質フォールバック（次の帯で `play` し直し）は Go 側の仕事。ヘルパーは渡された URL だけを扱う。

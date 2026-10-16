@@ -52,12 +52,14 @@ type playback struct {
 	// uris are the playable bands of the track, highest first, bitrates
 	// their kbps for the quality shown, and variant the band playing: a
 	// band whose playback fails falls back to the next. cookie and ua are
-	// what the helper's own requests carry.
+	// what the helper's own requests carry. file is the track's saved copy,
+	// which plays instead of the bands when it is there.
 	uris     []string
 	bitrates []int
 	variant  int
 	cookie   string
 	ua       string
+	file     string
 	// resumeMS is where a fallback replay or a restarted helper picks the
 	// track up; zero means from the start.
 	resumeMS float64
@@ -109,7 +111,7 @@ const positionPollInterval = 250 * time.Millisecond
 const previousRestartMS = 3000
 
 func newPlayback(app *nativeApp) *playback {
-	p := &playback{app: app, nico: NewNico()}
+	p := &playback{app: app, nico: app.nico}
 	// The mylist lookup rides the same session: the account's own mylists,
 	// private ones included, answer only with its cookies.
 	app.mylist.session = p.nico.SessionCookie
@@ -172,6 +174,10 @@ func (p *playback) setItems(id, name string, items []MylistItem) {
 		p.adoptQueue()
 	} else if p.queueID == p.mylistID {
 		p.queueName = p.mylistName
+		// The queue's copies of this mylist's entries follow the page just
+		// arrived from, so a track deleted since the queue was built stops
+		// reading as playable.
+		p.queue.update(items)
 		if len(p.items) > p.queueFed {
 			p.queue.append(p.items[p.queueFed:])
 			p.queueFed = len(p.items)
@@ -257,6 +263,13 @@ func (p *playback) selectTrack(watchID string) {
 // play starts item from its beginning: the sources are acquired in the
 // background, and the best band goes to the helper as soon as they arrive.
 func (p *playback) play(item MylistItem) {
+	item, ok := p.skippable(item)
+	if !ok {
+		// Nothing playable is left: the player stays where it is rather than
+		// stopping on what cannot play.
+		p.publish()
+		return
+	}
 	p.loadToken++
 	token := p.loadToken
 	// The load gets its own name: the events of the track just replaced, and
@@ -266,7 +279,7 @@ func (p *playback) play(item MylistItem) {
 	p.wantPlaying = true
 	p.resumeMS = 0
 	p.variant = 0
-	p.uris, p.bitrates, p.cookie, p.ua = nil, nil, "", ""
+	p.uris, p.bitrates, p.cookie, p.ua, p.file = nil, nil, "", "", ""
 	p.restarted = false
 	st := &p.app.player
 	st.WatchID = item.WatchID
@@ -293,15 +306,38 @@ func (p *playback) play(item MylistItem) {
 				p.fail(err)
 				return
 			}
-			p.uris, p.bitrates, p.cookie, p.ua = sources.URIs, sources.BitRates, sources.Cookie, sources.UserAgent
+			p.uris, p.bitrates, p.cookie, p.ua, p.file = sources.URIs, sources.BitRates, sources.Cookie, sources.UserAgent, sources.File
 			p.variant = 0
 			p.sendPlay()
 		})
 	}()
 }
 
-// prepareSources fetches what playing item needs from niconico.
+// skippable passes over the tracks a queue picked that niconico no longer
+// serves: shuffle and next move on to the entry after rather than stopping on
+// what cannot play. It reports false when nothing playable is left. A queue
+// is built from playable entries, so this meets one only when it died with
+// its mylist open, or when an entry is handed in from outside.
+func (p *playback) skippable(item MylistItem) (MylistItem, bool) {
+	for tries := p.queue.len(); !isPlayable(item) && tries > 0; tries-- {
+		next, ok := p.queue.moveNext()
+		if !ok {
+			return MylistItem{}, false
+		}
+		item = next
+	}
+	return item, isPlayable(item)
+}
+
+// prepareSources fetches what playing item needs from niconico, or hands
+// over the track's saved copy when this PC has one: a saved track plays
+// without touching the network.
 func (p *playback) prepareSources(item MylistItem) (playbackSources, error) {
+	if p.app != nil && p.app.mylist != nil {
+		if file := p.app.savedAudioPath(item.WatchID); file != "" {
+			return playbackSources{File: file}, nil
+		}
+	}
 	videoID := item.VideoID
 	if videoID == "" {
 		videoID = item.WatchID
@@ -324,18 +360,19 @@ func (p *playback) sendPlay() {
 		p.gen++
 		p.lastProc = p.proc
 	}
-	if p.variant >= len(p.uris) {
-		p.fail(errors.New(locales.ErrNoAudio()))
-		return
+	command := helperCommand{Cmd: "play", Gen: p.gen, Play: p.wantPlaying}
+	if p.file != "" {
+		command.File = savedAudioURI(p.file)
+	} else {
+		if p.variant >= len(p.uris) {
+			p.fail(errors.New(locales.ErrNoAudio()))
+			return
+		}
+		command.URL = p.uris[p.variant]
+		command.Cookie = p.cookie
+		command.UA = p.ua
 	}
-	if err := p.proc.send(helperCommand{
-		Cmd:    "play",
-		URL:    p.uris[p.variant],
-		Cookie: p.cookie,
-		UA:     p.ua,
-		Gen:    p.gen,
-		Play:   p.wantPlaying,
-	}); err != nil {
+	if err := p.proc.send(command); err != nil {
 		p.fail(errors.New(locales.ErrPlayerConnect()))
 		return
 	}
@@ -458,6 +495,13 @@ func (p *playback) bandFailed(event helperEvent) {
 		// failed.
 		p.publish()
 		return
+	}
+	// A saved copy that failed is dropped and recorded, so the list shows it
+	// as broken and the next pass fetches it again. A helper that never took
+	// the file on at all — one older than the command, an unknown request —
+	// leaves it where it is: the file is not what failed.
+	if p.file != "" && event.Code != "NoSource" {
+		p.app.markAudioBroken(p.track.WatchID)
 	}
 	p.fail(playbackErrorMessage(event))
 }
@@ -651,7 +695,11 @@ func (p *playback) publish() {
 	st.Order = p.queue.orderIDs()
 	st.Items = p.queue.orderedItems()
 	st.QueueIndex = p.queue.currentIndex()
-	st.Quality = qualityLabel(p.bitrates, p.variant)
+	if p.file != "" {
+		st.Quality = locales.PlayerOffline()
+	} else {
+		st.Quality = qualityLabel(p.bitrates, p.variant)
+	}
 	p.polling.Store(!p.closing && p.proc != nil && st.Ready && st.Playing)
 	// The tray is the only place the app speaks while its window is hidden.
 	p.app.refreshTray()

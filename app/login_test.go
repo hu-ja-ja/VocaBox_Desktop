@@ -49,7 +49,7 @@ func TestNativeAppLoadsAccount(t *testing.T) {
 	}
 	mylist := &Mylist{client: server.Client(), configDir: t.TempDir(), thumbHost: host}
 	app := newNativeApp(mylist)
-	app.playback = &playback{nico: n}
+	app.nico = n
 	app.loggedIn = true
 
 	user, body, err := app.fetchAccount()

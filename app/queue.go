@@ -163,6 +163,23 @@ func (q *playQueue) append(items []MylistItem) {
 	}
 }
 
+// update replaces the queue's copies of the entries the page holds with the
+// page's own, by watch ID: a body fetched again says what niconico serves
+// now, so a track that died since the queue was built reads as it is now
+// rather than playing on the metadata it had then. Entries the page does not
+// hold keep their copies, as their pages were not loaded.
+func (q *playQueue) update(items []MylistItem) {
+	fresh := make(map[string]MylistItem, len(items))
+	for _, item := range items {
+		fresh[item.WatchID] = item
+	}
+	for i := range q.items {
+		if item, ok := fresh[q.items[i].WatchID]; ok {
+			q.items[i] = item
+		}
+	}
+}
+
 // current is the track playing, if any.
 func (q *playQueue) current() (MylistItem, bool) { return q.at(q.pos) }
 

@@ -170,11 +170,11 @@ func iconEntry(root string) (entry, error) {
 // goEntries lists the modules the app links: go-licenses names their licences
 // and saves their texts.
 func goEntries(root, module string) ([]entry, error) {
-	modules, err := linkedModules(root)
+	modules, packages, err := linkedModules(root)
 	if err != nil {
 		return nil, err
 	}
-	reports, err := licenseReports(root, module)
+	reports, err := licenseReports(root, module, packages)
 	if err != nil {
 		return nil, err
 	}
@@ -213,26 +213,39 @@ type goModule struct {
 }
 
 // linkedModules names the Go modules whose code ends up in the app, with the
-// versions the build uses. Packages with no module, the standard library
-// among them, and the app's own module are left out.
-func linkedModules(root string) ([]goModule, error) {
+// versions the build uses, and the module each linked package belongs to:
+// go-licenses reports its licences by package, which is the module path only
+// for a module's own package. Packages with no module, the standard library
+// among them, and the app's own module are left out of the modules.
+func linkedModules(root string) ([]goModule, map[string]string, error) {
 	out, err := output(root, "go", "list", "-deps",
-		"-f", "{{with .Module}}{{.Path}}|{{.Version}}{{end}}", "./app")
+		"-f", "{{.ImportPath}}|{{with .Module}}{{.Path}}|{{.Version}}{{end}}", "./app")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	seen := map[string]bool{}
+	packages := map[string]string{}
 	var modules []goModule
 	for _, line := range strings.Split(out, "\n") {
-		path, version, ok := strings.Cut(strings.TrimSpace(line), "|")
-		if !ok || path == "" || version == "" || seen[path] {
+		fields := strings.Split(strings.TrimSpace(line), "|")
+		if len(fields) < 3 {
+			continue
+		}
+		importPath, path, version := fields[0], fields[1], fields[2]
+		if path == "" || version == "" {
+			// The standard library, and the app's own module, which carries
+			// no version.
+			continue
+		}
+		packages[importPath] = path
+		if seen[path] {
 			continue
 		}
 		seen[path] = true
 		modules = append(modules, goModule{Path: path, Version: version})
 	}
 	sort.Slice(modules, func(i, j int) bool { return modules[i].Path < modules[j].Path })
-	return modules, nil
+	return modules, packages, nil
 }
 
 // licenseReport is what go-licenses says about one module: the licences it
@@ -242,8 +255,10 @@ type licenseReport struct {
 	url     string
 }
 
-// licenseReports reads go-licenses' report, module path → its licences.
-func licenseReports(root, module string) (map[string]licenseReport, error) {
+// licenseReports reads go-licenses' report, module path → its licences. The
+// report names packages, so each row is folded onto the module of the package
+// it names; a package the build does not list keeps its own name.
+func licenseReports(root, module string, packages map[string]string) (map[string]licenseReport, error) {
 	out, err := output(root, "go-licenses", "report", "./app", "--ignore", module)
 	if err != nil {
 		return nil, err
@@ -258,11 +273,15 @@ func licenseReports(root, module string) (map[string]licenseReport, error) {
 		if len(row) < 3 {
 			continue
 		}
-		if !contains(reports[row[0]], row[2]) {
-			reports[row[0]] = append(reports[row[0]], row[2])
+		at := row[0]
+		if path, ok := packages[at]; ok {
+			at = path
 		}
-		if urls[row[0]] == "" {
-			urls[row[0]] = row[1]
+		if !contains(reports[at], row[2]) {
+			reports[at] = append(reports[at], row[2])
+		}
+		if urls[at] == "" {
+			urls[at] = row[1]
 		}
 	}
 	out2 := map[string]licenseReport{}

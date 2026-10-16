@@ -47,6 +47,12 @@ func TestHelperCommandWireShape(t *testing.T) {
 			helperCommand{Cmd: "play", URL: "https://d/x.m3u8", Gen: 2, Play: true},
 			`{"cmd":"play","url":"https://d/x.m3u8","gen":2,"play":true}`,
 		},
+		{
+			// A saved track plays from disk: no url, no cookie, just the file
+			// URI and the play state.
+			helperCommand{Cmd: "play", File: "file:///C:/audio/sm1.m4a", Gen: 3, Play: true},
+			`{"cmd":"play","file":"file:///C:/audio/sm1.m4a","gen":3,"play":true}`,
+		},
 		{helperCommand{Cmd: "position"}, `{"cmd":"position"}`},
 		{helperCommand{Cmd: "seek", MS: 1500}, `{"cmd":"seek","ms":1500}`},
 		{helperCommand{Cmd: "volume", Value: 0.4}, `{"cmd":"volume","value":0.4}`},

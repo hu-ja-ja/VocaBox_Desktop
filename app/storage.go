@@ -36,6 +36,13 @@ type SavedIndexEntry struct {
 	TotalItemCount int    `json:"totalItemCount,omitempty"`
 	// Pinned is the mylist pinned to the top of the home.
 	Pinned bool `json:"pinned,omitempty"`
+	// Download is the mylist saved for offline playing: the audio of its
+	// tracks is fetched to this PC and played from there.
+	Download bool `json:"download,omitempty"`
+	// AudioQuality is the kbps the mylist's saved audio was fetched at, empty
+	// on one whose audio this app has not saved yet. A quality change in the
+	// settings compares against it to re-fetch.
+	AudioQuality string `json:"audioQuality,omitempty"`
 	// Mine is the entry being one of the signed-in account's own mylists;
 	// Private, that only its owner sees it.
 	Mine    bool `json:"mine,omitempty"`
@@ -64,12 +71,15 @@ const maxSettingsBody = 64 << 10
 const cardSampleCount = 4
 
 // Settings holds the preferences kept across runs: the player's volume,
-// shuffle and repeat. A missing file, or a field a file does not carry,
-// leaves the default.
+// shuffle and repeat, and the quality saved audio is fetched at. A missing
+// file, or a field a file does not carry, leaves the default.
 type Settings struct {
 	Volume  float64 `json:"volume"`
 	Shuffle bool    `json:"shuffle"`
 	Repeat  bool    `json:"repeat"`
+	// DownloadQuality is the kbps of audioQualityOptions saved audio is
+	// fetched at; empty means the highest.
+	DownloadQuality string `json:"downloadQuality,omitempty"`
 }
 
 // defaultSettings is what a missing or reset settings file yields.
@@ -218,6 +228,84 @@ func (m *Mylist) SetPinned(id string, pinned bool) ([]SavedIndexEntry, error) {
 	return index, nil
 }
 
+// SetAudioQuality records the kbps a mylist's saved audio was fetched at.
+// An unknown mylist changes nothing.
+func (m *Mylist) SetAudioQuality(id, quality string) error {
+	m.savedMu.Lock()
+	defer m.savedMu.Unlock()
+	index, err := m.readIndex()
+	if err != nil {
+		return err
+	}
+	changed := false
+	for i := range index {
+		if index[i].ID == id && index[i].AudioQuality != quality {
+			index[i].AudioQuality = quality
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return m.writeIndex(index)
+}
+
+// LoadBroken returns the tracks whose saved audio the media stack could not
+// play. A missing file means none.
+func (m *Mylist) LoadBroken() ([]string, error) {
+	m.savedMu.Lock()
+	defer m.savedMu.Unlock()
+	path, err := m.problemsPath()
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	if _, err := readJSONFile(path, maxIndexBody, &ids, locales.ErrAudioStateRead(), locales.ErrAudioStateRead()); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// SaveBroken records the tracks whose saved audio could not be played: the
+// app shows them, and the next pass fetches them again.
+func (m *Mylist) SaveBroken(ids []string) error {
+	m.savedMu.Lock()
+	defer m.savedMu.Unlock()
+	path, err := m.problemsPath()
+	if err != nil {
+		return err
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return writeJSONFile(path, ids, maxIndexBody, locales.ErrAudioStateWrite())
+}
+
+// SetDownload turns a saved mylist's offline saving on or off, writing only
+// the index: the audio itself is the background worker's business. An unknown
+// mylist changes nothing.
+func (m *Mylist) SetDownload(id string, download bool) ([]SavedIndexEntry, error) {
+	m.savedMu.Lock()
+	defer m.savedMu.Unlock()
+	index, err := m.readIndex()
+	if err != nil {
+		return nil, err
+	}
+	changed := false
+	for i := range index {
+		if index[i].ID == id && index[i].Download != download {
+			index[i].Download = download
+			changed = true
+		}
+	}
+	if changed {
+		if err := m.writeIndex(index); err != nil {
+			return nil, err
+		}
+	}
+	return index, nil
+}
+
 // moveToPinnedEnd moves the entry at at to just after the last other pinned
 // entry, so a mylist just pinned joins the end of the pinned group rather than
 // its front. With no other pin the entry stays where it is.
@@ -273,8 +361,8 @@ func (m *Mylist) RemoveSaved(input string) ([]SavedIndexEntry, error) {
 
 // SyncOwn merges the signed-in account's mylists into the index: each gets
 // its live name, size, privacy, and sample. An own mylist the account no
-// longer has is dropped — body and all — unless it is pinned, the user's own
-// request to keep it.
+// longer has is dropped — body and all — unless it is pinned or saved for
+// offline playing, the user's own requests to keep it.
 func (m *Mylist) SyncOwn(own []OwnMylist) ([]SavedIndexEntry, error) {
 	m.savedMu.Lock()
 	defer m.savedMu.Unlock()
@@ -293,7 +381,7 @@ func (m *Mylist) SyncOwn(own []OwnMylist) ([]SavedIndexEntry, error) {
 			entry.TotalItemCount = o.ItemCount
 			entry.Sample = sampleItems(o.Items)
 			entry.Mine, entry.Private = true, !o.IsPublic
-		} else if entry.Mine && !entry.Pinned {
+		} else if entry.Mine && !entry.Pinned && !entry.Download {
 			m.dropBody(entry.ID)
 			continue
 		}
@@ -362,6 +450,10 @@ func upsertIndex(index []SavedIndexEntry, entry SavedIndexEntry, pin *bool) []Sa
 		entry.Pinned = index[at].Pinned
 		entry.Mine = index[at].Mine
 		entry.Private = index[at].Private
+		// The user's own choices about the saved copy survive a refreshed
+		// name, size, or sample: only the server's fields are replaced.
+		entry.Download = index[at].Download
+		entry.AudioQuality = index[at].AudioQuality
 		index[at] = entry
 	}
 	if pin != nil {
@@ -440,6 +532,16 @@ func (m *Mylist) bodyPath(id string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, id+".json"), nil
+}
+
+// problemsPath is the file recording the saved audio the media stack could
+// not play, by watch ID.
+func (m *Mylist) problemsPath() (string, error) {
+	dir, err := m.audioDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "problems.json"), nil
 }
 
 // configPath returns the path of name inside the app's config directory.

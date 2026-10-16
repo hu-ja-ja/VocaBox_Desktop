@@ -177,7 +177,7 @@ impl Engine {
                 let _ = self.player.Play();
             }
             "seek" => {
-                if self.current.is_some()
+                if self.source.is_some()
                     && let Ok(session) = self.player.PlaybackSession()
                 {
                     let _ = session.SetPosition(millis(command.ms.unwrap_or(0.0).max(0.0)));
@@ -190,7 +190,7 @@ impl Engine {
             }
             "stop" => self.stop(),
             "position" => {
-                let ms = if self.current.is_none() {
+                let ms = if self.source.is_none() {
                     0.0
                 } else {
                     self.player
@@ -212,9 +212,19 @@ impl Engine {
     // play installs the playlist at url and starts it unless the command
     // says it is paused. Cookie and UA are the ones the app fetched the
     // playlist with; the delivery hosts need the domand_bid cookie. Gen
-    // stamps the events this source brings.
+    // stamps the events this source brings. A command carrying a file plays
+    // the app's saved copy of the track instead: the media stack decodes it
+    // as it decodes a stream, only the way the source is made differs.
     fn play(&mut self, command: &Command) {
+        if let Some(file) = command.file.as_deref().filter(|file| !file.is_empty()) {
+            self.play_file(command, file);
+            return;
+        }
         let Some(url) = command.url.as_deref().filter(|url| !url.is_empty()) else {
+            // A play with no source is the app's bug, or a helper older than
+            // the command it was sent: reporting it keeps the app from
+            // waiting on a source that never comes.
+            self.fail(self.generation, command.r#gen, "NoSource", 0, "");
             return;
         };
         self.stop();
@@ -239,6 +249,37 @@ impl Engine {
             generation: self.generation,
             r#gen: command.r#gen,
         });
+    }
+
+    // play_file opens one saved track from disk. The file URI is the app's own
+    // path, so no cookie or user agent rides along, and nothing is polled: the
+    // source is made at once.
+    fn play_file(&mut self, command: &Command, file: &str) {
+        self.stop();
+        self.generation += 1;
+        self.want_play = command.play;
+        let source =
+            Uri::CreateUri(&HSTRING::from(file)).and_then(|uri| MediaSource::CreateFromUri(&uri));
+        let source = match source {
+            Ok(source) => source,
+            Err(err) => {
+                let generation = self.generation;
+                self.fail(
+                    generation,
+                    command.r#gen,
+                    "SourceFailed",
+                    err.code().0,
+                    &err.message(),
+                );
+                return;
+            }
+        };
+        GEN.store(command.r#gen, Ordering::SeqCst);
+        let _ = self.player.SetSource(&source);
+        self.source = Some(source);
+        if self.want_play {
+            let _ = self.player.Play();
+        }
     }
 
     // start hands the playlist to the media stack. The download it begins is
@@ -484,6 +525,10 @@ struct Command {
     cmd: String,
     #[serde(default)]
     url: Option<String>,
+    // file is a play's local source, a file:// URI of a saved track; it
+    // replaces url when set.
+    #[serde(default)]
+    file: Option<String>,
     #[serde(default)]
     cookie: Option<String>,
     #[serde(default)]

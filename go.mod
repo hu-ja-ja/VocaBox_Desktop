@@ -3,6 +3,7 @@ module github.com/hu-ja-ja/VocaBox_Desktop
 go 1.27.1
 
 require (
+	github.com/Eyevinn/hls-m3u8 v0.6.5
 	github.com/egoist/mygo v0.5.1
 	golang.org/x/image v0.47.0
 )

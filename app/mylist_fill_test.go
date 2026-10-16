@@ -8,11 +8,12 @@ import (
 	"testing"
 )
 
-// fillIdle waits for the background saving to finish everything queued, so a
-// test can read the view without racing the worker.
+// fillIdle waits for the background saving to finish everything queued, and
+// runs what the worker handed over, so a test can read the view without
+// racing the worker.
 func fillIdle(t *testing.T, app *nativeApp) {
 	t.Helper()
-	waitFor(t, "the background saving to go idle", func() bool {
+	waitForApp(t, app, "the background saving to go idle", func() bool {
 		app.fill.mu.Lock()
 		defer app.fill.mu.Unlock()
 		return len(app.fill.pending) == 0 && len(app.fill.queued) == 0
@@ -23,14 +24,14 @@ func fillIdle(t *testing.T, app *nativeApp) {
 // public one with a sample entry and a private empty one.
 const ownFillFixture = `{"meta":{"status":200},"data":{"mylists":[` +
 	`{"id":200,"isPublic":true,"name":"自分のA","itemsCount":1,` +
-	`"sampleItems":[{"watchId":"sm1","video":{"id":"sm1","title":"曲A"}}]},` +
+	`"sampleItems":[{"watchId":"sm1","video":{"id":"sm1","title":"曲A","duration":125}}]},` +
 	`{"id":300,"isPublic":false,"name":"自分のB","itemsCount":0,"sampleItems":[]}` +
 	`]}}`
 
 // fillBody is the one-page body the fill test's server serves for a mylist.
 func fillBody(name string) string {
 	return fmt.Sprintf(`{"meta":{"status":200},"data":{"mylist":{"name":%q,"isPublic":true,`+
-		`"items":[{"watchId":"sm1","video":{"id":"sm1","title":"曲A"}}],`+
+		`"items":[{"watchId":"sm1","video":{"id":"sm1","title":"曲A","duration":125}}],`+
 		`"totalItemCount":1,"hasNext":false}}}`, name)
 }
 
@@ -57,7 +58,7 @@ func TestOwnMylistsFillBodiesInBackground(t *testing.T) {
 	app.loggedIn = true
 
 	app.loadOwnMylists()
-	waitFor(t, "both own mylists' bodies", func() bool {
+	waitForApp(t, app, "both own mylists' bodies", func() bool {
 		return m.HasSavedBody("200") && m.HasSavedBody("300")
 	})
 	fillIdle(t, app)
@@ -94,7 +95,7 @@ func TestOpeningAMylistSavesItsBody(t *testing.T) {
 	app := newNativeApp(m)
 
 	app.fetchMylist("27411728")
-	waitFor(t, "the opened mylist's body", func() bool { return m.HasSavedBody("27411728") })
+	waitForApp(t, app, "the opened mylist's body", func() bool { return m.HasSavedBody("27411728") })
 	fillIdle(t, app)
 
 	index, err := m.ListSaved()

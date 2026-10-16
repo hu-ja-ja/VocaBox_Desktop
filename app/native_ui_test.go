@@ -130,7 +130,7 @@ func TestNativeUIOpensSettingsFromLogo(t *testing.T) {
 	if app.router.Path() != settingsPath {
 		t.Fatalf("the logo did not open the settings: path=%q", app.router.Path())
 	}
-	for _, row := range []string{"起動時に前回の曲を再開", "終了時に再生していた曲から始めます", "トレイに残して再生を続ける"} {
+	for _, row := range []string{"オフライン保存の音質", "保存する音源の音質です", audioQualityLabel(320)} {
 		if !tester.HasText(row) {
 			t.Fatalf("the settings page is missing %q: %q", row, tester.Texts())
 		}
@@ -388,7 +388,7 @@ func TestNativeUIHomePinsFirst(t *testing.T) {
 	// one pinned.
 	syncTestOwn(t, app,
 		OwnMylist{ID: "71043760", Name: "自分の非公開マイリスト", ItemCount: 2,
-			Items: []MylistItem{{WatchID: "sm1", Title: "一曲目", Available: true}}},
+			Items: []MylistItem{{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120}}},
 		OwnMylist{ID: "71043761", Name: "自分の公開マイリスト", ItemCount: 0, IsPublic: true},
 	)
 	if saved, err := app.mylist.SetPinned("71043760", true); err != nil {
@@ -398,7 +398,7 @@ func TestNativeUIHomePinsFirst(t *testing.T) {
 	}
 	// A pinned mylist of somebody else's, saved earlier.
 	indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "ピン留めした公開マイリスト", TotalItemCount: 3, Pinned: true},
-		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}})
+		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true, Duration: 120}})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	for _, text := range []string{"全2曲", "全3曲", "全0曲"} {
@@ -472,7 +472,7 @@ func TestNativeUIHomeUnpinsFromMenu(t *testing.T) {
 	app := savedApp(t)
 	app.sidebarOpen = false
 	indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "ピン留めした公開マイリスト", TotalItemCount: 3, Pinned: true},
-		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}})
+		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true, Duration: 120}})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	if err := tester.RightClick("ピン留めした公開マイリスト"); err != nil {
@@ -549,7 +549,7 @@ func TestNativeUIHomeGroupsAndDeletes(t *testing.T) {
 	syncTestOwn(t, app, OwnMylist{ID: "71043760", Name: "自分のリストA", ItemCount: 2, IsPublic: true})
 	indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "ピン留めした読み込み", TotalItemCount: 3, Pinned: true}, nil)
 	indexSaved(t, app, SavedIndexEntry{ID: "556", Name: "読み込み済みの他人リスト", TotalItemCount: 1},
-		[]MylistItem{{WatchID: "sm7", Title: "読み込み曲", Available: true}})
+		[]MylistItem{{WatchID: "sm7", Title: "読み込み曲", Available: true, Duration: 120}})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	texts := tester.Texts()
@@ -639,7 +639,7 @@ func TestNativeUIHomeGroupsAndDeletes(t *testing.T) {
 func TestNativeUIMylistHeaderDeletesReadInMylist(t *testing.T) {
 	app := savedApp(t)
 	indexSaved(t, app, SavedIndexEntry{ID: "556", Name: "ヘッダーの読み込み", TotalItemCount: 1},
-		[]MylistItem{{WatchID: "sm7", Title: "読み込み曲", Available: true}})
+		[]MylistItem{{WatchID: "sm7", Title: "読み込み曲", Available: true, Duration: 120}})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	if err := tester.Click("ヘッダーの読み込み"); err != nil {
@@ -728,7 +728,7 @@ func TestNativeUISidebarMylistsLikeHome(t *testing.T) {
 func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
 	app := savedApp(t)
 	indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "サイドバーのピン", TotalItemCount: 3, Pinned: true},
-		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}})
+		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true, Duration: 120}})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	item, ok := tester.Find("サイドバーのピン")
@@ -759,7 +759,7 @@ func TestNativeUISidebarUnpinsFromMenu(t *testing.T) {
 func TestNativeUIRailNavigates(t *testing.T) {
 	app := savedApp(t)
 	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "レールのピン", Pinned: true},
-		[]MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}})
+		[]MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true, Duration: 120}})
 	app.sidebarOpen = false
 	tester := ui.NewTester(app.view, 1120, 760)
 
@@ -918,7 +918,7 @@ func TestNativeUIMylistMenuKeyboard(t *testing.T) {
 	app := savedApp(t)
 	app.sidebarOpen = false
 	indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "キーボードのピン", TotalItemCount: 2, Pinned: true},
-		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true}})
+		[]MylistItem{{WatchID: "sm5", Title: "公開の曲", Available: true, Duration: 120}})
 	tester := ui.NewTester(app.view, 1120, 760)
 
 	focused := false
@@ -961,9 +961,9 @@ func TestNativeUIMylistMenuPlays(t *testing.T) {
 		app.sidebarOpen = false
 		indexSaved(t, app, SavedIndexEntry{ID: "555", Name: "再生するマイリスト", TotalItemCount: 3},
 			[]MylistItem{
-				{WatchID: "sm1", Title: "一曲目", Available: true},
-				{WatchID: "sm2", Title: "二曲目", Available: true},
-				{WatchID: "sm3", Title: "三曲目", Available: true},
+				{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120},
+				{WatchID: "sm2", Title: "二曲目", Available: true, Duration: 120},
+				{WatchID: "sm3", Title: "三曲目", Available: true, Duration: 120},
 			})
 		return app
 	}
@@ -1034,7 +1034,7 @@ func TestNativeUIMylistMenuPlays(t *testing.T) {
 	app = newNativeApp(&Mylist{client: srv.Client(), baseURL: srv.URL, configDir: t.TempDir()})
 	app.player.Playing = true
 	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "表示中のマイリスト"},
-		[]MylistItem{{WatchID: "sm9", Title: "表示曲", Available: true}})
+		[]MylistItem{{WatchID: "sm9", Title: "表示曲", Available: true, Duration: 120}})
 	syncTestOwn(t, app, OwnMylist{ID: "27411728", Name: "未ピンのマイリスト", ItemCount: 2, IsPublic: true})
 	tester = ui.NewTester(app.view, 1120, 760)
 	if err := tester.Click("表示中のマイリスト"); err != nil {
@@ -1078,9 +1078,9 @@ func lastCommand(commands []PlayerCommand, action string) (PlayerCommand, bool) 
 func TestNativeUIKeepsPlayingTrackAcrossMylists(t *testing.T) {
 	app := savedApp(t)
 	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "マイリストA"},
-		[]MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}})
+		[]MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true, Duration: 120}})
 	indexSaved(t, app, SavedIndexEntry{ID: "222", Name: "マイリストB"},
-		[]MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}})
+		[]MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true, Duration: 120}})
 	tester := ui.NewTester(app.view, 1120, 760)
 	if err := tester.Click("マイリストA"); err != nil {
 		t.Fatal(err)
@@ -1137,9 +1137,9 @@ func TestNativeUICanLoadNextOnlyForPlayingMylist(t *testing.T) {
 func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	items := []MylistItem{
-		{WatchID: "sm1", Title: "一曲目", Available: true},
-		{WatchID: "sm2", Title: "二曲目", Available: true},
-		{WatchID: "sm3", Title: "三曲目", Available: true},
+		{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120},
+		{WatchID: "sm2", Title: "二曲目", Available: true, Duration: 120},
+		{WatchID: "sm3", Title: "三曲目", Available: true, Duration: 120},
 	}
 	app.saved = []SavedIndexEntry{{ID: "123", Name: "作業用キュー", TotalItemCount: 3,
 		Sample: items}}
@@ -1200,9 +1200,9 @@ func TestNativeUIQueueDragReorders(t *testing.T) {
 		Name:  "作業用ドラッグ",
 		Order: []string{"sm1", "sm2", "sm3"},
 		Items: []MylistItem{
-			{WatchID: "sm1", Title: "一曲目", Available: true},
-			{WatchID: "sm2", Title: "二曲目", Available: true},
-			{WatchID: "sm3", Title: "三曲目", Available: true},
+			{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120},
+			{WatchID: "sm2", Title: "二曲目", Available: true, Duration: 120},
+			{WatchID: "sm3", Title: "三曲目", Available: true, Duration: 120},
 		},
 	}
 	tester := ui.NewTester(app.view, 1120, 760)
@@ -1236,7 +1236,7 @@ func TestNativeUIQueueCanScrollAfterFollowingThePlayingTrack(t *testing.T) {
 	order := make([]string, 300)
 	for i := range items {
 		id := fmt.Sprintf("sm%d", i+1)
-		items[i] = MylistItem{WatchID: id, Title: id, Available: true}
+		items[i] = MylistItem{WatchID: id, Title: id, Available: true, Duration: 120}
 		order[i] = id
 	}
 	app.player = playerState{
@@ -1262,8 +1262,8 @@ func TestNativeUIQueueMenuTogglesOnSecondClick(t *testing.T) {
 		Name:  "作業用メニュー",
 		Order: []string{"sm1", "sm2"},
 		Items: []MylistItem{
-			{WatchID: "sm1", Title: "一曲目", Available: true},
-			{WatchID: "sm2", Title: "二曲目", Available: true},
+			{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120},
+			{WatchID: "sm2", Title: "二曲目", Available: true, Duration: 120},
 		},
 	}
 	tester := ui.NewTester(app.view, 1120, 760)
@@ -1318,8 +1318,8 @@ func TestNativeUIQueueCommands(t *testing.T) {
 		Name:  "作業用コマンド",
 		Order: []string{"sm1", "sm2"},
 		Items: []MylistItem{
-			{WatchID: "sm1", Title: "一曲目", Available: true},
-			{WatchID: "sm2", Title: "二曲目", Available: true},
+			{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120},
+			{WatchID: "sm2", Title: "二曲目", Available: true, Duration: 120},
 		},
 	}
 
@@ -1342,12 +1342,12 @@ func TestNativeUIQueueCommands(t *testing.T) {
 func TestQueueItemsComeFromTheReport(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.page = &MylistPage{ID: "9", Items: []MylistItem{
-		{WatchID: "sm2", Title: "表示中マイリストの曲", Available: true},
-		{WatchID: "sm1", Title: "表示中マイリストの曲", Available: true},
+		{WatchID: "sm2", Title: "表示中マイリストの曲", Available: true, Duration: 120},
+		{WatchID: "sm1", Title: "表示中マイリストの曲", Available: true, Duration: 120},
 	}}
 	app.player = playerState{
 		Order: []string{"sm2", "sm9", "sm1"},
-		Items: []MylistItem{{WatchID: "sm9", Title: "再生中マイリストの曲", Available: true}},
+		Items: []MylistItem{{WatchID: "sm9", Title: "再生中マイリストの曲", Available: true, Duration: 120}},
 	}
 	got := app.queueItems()
 	ids := make([]string, 0, len(got))
@@ -1372,7 +1372,7 @@ func TestNativeUIMylistDoesNotFollowPlayback(t *testing.T) {
 	app := savedApp(t)
 	items := make([]MylistItem, 100)
 	for i := range items {
-		items[i] = MylistItem{WatchID: fmt.Sprintf("sm%d", i+1), Title: fmt.Sprintf("曲%d", i+1), Available: true}
+		items[i] = MylistItem{WatchID: fmt.Sprintf("sm%d", i+1), Title: fmt.Sprintf("曲%d", i+1), Available: true, Duration: 120}
 	}
 	indexSaved(t, app, SavedIndexEntry{ID: "123", Name: "作業用マイリスト"}, items)
 
@@ -1393,9 +1393,9 @@ func TestNativeUIMylistDoesNotFollowPlayback(t *testing.T) {
 func TestNativeUISidebarMylistLeavesQueueScreen(t *testing.T) {
 	app := savedApp(t)
 	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "マイリストA"},
-		[]MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true}})
+		[]MylistItem{{WatchID: "sm1", Title: "Aの曲", Available: true, Duration: 120}})
 	indexSaved(t, app, SavedIndexEntry{ID: "222", Name: "マイリストB"},
-		[]MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true}})
+		[]MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true, Duration: 120}})
 	tester := ui.NewTester(app.view, 1120, 760)
 	if err := tester.Click("マイリストA"); err != nil {
 		t.Fatal(err)
@@ -1432,7 +1432,7 @@ func TestNativeUIQueueFollowsTheTrackPlaying(t *testing.T) {
 	order := make([]string, 300)
 	for i := range items {
 		id := fmt.Sprintf("sm%d", i+1)
-		items[i] = MylistItem{WatchID: id, Title: id, Available: true}
+		items[i] = MylistItem{WatchID: id, Title: id, Available: true, Duration: 120}
 		order[i] = id
 	}
 	app.player = playerState{
@@ -1471,6 +1471,7 @@ func TestNativeUITrackClickPlaysIt(t *testing.T) {
 	indexSaved(t, app, SavedIndexEntry{ID: "123", Name: "作業用クリック"}, []MylistItem{{
 		WatchID:   "sm9",
 		Title:     "サンプル曲",
+		Duration:  120,
 		Available: true,
 	}})
 
@@ -1553,11 +1554,11 @@ func TestNativeUIHomeOpensMylistCards(t *testing.T) {
 	app.sidebarOpen = false
 	indexSaved(t, app, SavedIndexEntry{ID: "123", Name: "作業用ホーム", TotalItemCount: 6},
 		[]MylistItem{
-			{WatchID: "sm1", Title: "一曲目", Available: true},
-			{WatchID: "sm2", Title: "二曲目", Available: true},
-			{WatchID: "sm3", Title: "三曲目", Available: true},
-			{WatchID: "sm4", Title: "四曲目", Available: true},
-			{WatchID: "sm5", Title: "五曲目", Available: true},
+			{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120},
+			{WatchID: "sm2", Title: "二曲目", Available: true, Duration: 120},
+			{WatchID: "sm3", Title: "三曲目", Available: true, Duration: 120},
+			{WatchID: "sm4", Title: "四曲目", Available: true, Duration: 120},
+			{WatchID: "sm5", Title: "五曲目", Available: true, Duration: 120},
 		})
 
 	tester := ui.NewTester(app.view, 1120, 760)
@@ -1648,6 +1649,7 @@ func TestNativeUIThumbnailPlaceholderNeedsWindow(t *testing.T) {
 	indexSaved(t, app, SavedIndexEntry{ID: "456", Name: "別のサムネ"}, []MylistItem{{
 		WatchID:   "sm9",
 		Title:     "別の曲",
+		Duration:  120,
 		Available: true,
 	}})
 
@@ -1907,12 +1909,12 @@ func TestNativeUIMuteMarkAtZero(t *testing.T) {
 func TestNativeUICreatesCombinedMylist(t *testing.T) {
 	app := savedApp(t)
 	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "朝のリスト", TotalItemCount: 2}, []MylistItem{
-		{WatchID: "sm1", Title: "朝1", Available: true},
-		{WatchID: "sm2", Title: "共有", Available: true},
+		{WatchID: "sm1", Title: "朝1", Available: true, Duration: 120},
+		{WatchID: "sm2", Title: "共有", Available: true, Duration: 120},
 	})
 	indexSaved(t, app, SavedIndexEntry{ID: "222", Name: "夜のリスト", TotalItemCount: 2}, []MylistItem{
-		{WatchID: "sm2", Title: "共有", Available: true},
-		{WatchID: "sm3", Title: "夜3", Available: true},
+		{WatchID: "sm2", Title: "共有", Available: true, Duration: 120},
+		{WatchID: "sm3", Title: "夜3", Available: true, Duration: 120},
 	})
 	// A mylist whose body the background saving has not written yet, and a
 	// combined list already made.
@@ -2080,9 +2082,9 @@ func TestNativeUICreatesCombinedMylist(t *testing.T) {
 func TestNativeUICombineDialogCheckboxes(t *testing.T) {
 	app := savedApp(t)
 	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "朝のリスト", TotalItemCount: 1},
-		[]MylistItem{{WatchID: "sm1", Title: "朝1", Available: true}})
+		[]MylistItem{{WatchID: "sm1", Title: "朝1", Available: true, Duration: 120}})
 	indexSaved(t, app, SavedIndexEntry{ID: "222", Name: "夜のリスト", TotalItemCount: 1},
-		[]MylistItem{{WatchID: "sm2", Title: "夜2", Available: true}})
+		[]MylistItem{{WatchID: "sm2", Title: "夜2", Available: true, Duration: 120}})
 	indexSaved(t, app, SavedIndexEntry{ID: "333", Name: "保存中のリスト", TotalItemCount: 5}, nil)
 
 	app.openCombineDialog("111")
@@ -2119,9 +2121,9 @@ func TestNativeUICombineDialogCheckboxes(t *testing.T) {
 func TestNativeUICombineDialogSubmitsWithEnter(t *testing.T) {
 	app := savedApp(t)
 	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "朝のリスト", TotalItemCount: 1},
-		[]MylistItem{{WatchID: "sm1", Title: "朝1", Available: true}})
+		[]MylistItem{{WatchID: "sm1", Title: "朝1", Available: true, Duration: 120}})
 	indexSaved(t, app, SavedIndexEntry{ID: "222", Name: "夜のリスト", TotalItemCount: 1},
-		[]MylistItem{{WatchID: "sm2", Title: "夜2", Available: true}})
+		[]MylistItem{{WatchID: "sm2", Title: "夜2", Available: true, Duration: 120}})
 
 	app.openCombineDialog("111")
 	*app.combineCheck("222") = true
@@ -2162,7 +2164,7 @@ func TestNativeUIOpensMylistAtItsTop(t *testing.T) {
 
 	page := make([]MylistItem, 100)
 	for i := range page {
-		page[i] = MylistItem{WatchID: fmt.Sprintf("sm%d", i+1), Title: fmt.Sprintf("曲%d", i+1), Available: true}
+		page[i] = MylistItem{WatchID: fmt.Sprintf("sm%d", i+1), Title: fmt.Sprintf("曲%d", i+1), Available: true, Duration: 120}
 	}
 	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "作業用", TotalItemCount: 100}, page)
 	indexSaved(t, app, SavedIndexEntry{ID: "222", Name: "別の作業用", TotalItemCount: 100}, page)
@@ -2191,10 +2193,123 @@ func TestNativeUIOpensMylistAtItsTop(t *testing.T) {
 	app.trackList.ScrollTo(50, ui.Start)
 	tester.Frame()
 	app.fetchMylist("999")
-	waitFor(t, "the fetched mylist", func() bool { return app.page != nil && app.page.ID == "999" })
+	waitForApp(t, app, "the fetched mylist", func() bool { return app.page != nil && app.page.ID == "999" })
 	tester.Frame()
 	if first, _ := app.trackList.Visible(); first != 0 {
 		t.Fatalf("the fetched mylist did not open at its top: first=%d", first)
 	}
 	fillIdle(t, app)
+}
+
+// noAudioServer points the app's nico at a port nothing answers, so a test
+// that turns offline saving on does not reach niconico.
+func noAudioServer(app *nativeApp) {
+	app.nico.baseURL = "http://127.0.0.1:1"
+	app.nico.apiBase = "http://127.0.0.1:1"
+}
+
+// TestNativeUITogglesOfflineSaving checks the mylist menu's オフライン保存 and
+// the mylist page's own button: the flag is written either way, and the
+// mylist reads as saved afterwards.
+func TestNativeUITogglesOfflineSaving(t *testing.T) {
+	app := savedApp(t)
+	noAudioServer(app)
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "朝のリスト"}, testItems("sm1"))
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	if err := tester.RightClick("朝のリスト"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tester.Find("オフライン保存"); !ok {
+		t.Fatalf("the menu has no offline saving: %q", tester.Texts())
+	}
+	if err := tester.Click("オフライン保存"); err != nil {
+		t.Fatal(err)
+	}
+	index, err := app.mylist.ListSaved()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if at, ok := indexAt(index, "111"); !ok || !index[at].Download {
+		t.Fatalf("the menu did not turn offline saving on: %+v", index)
+	}
+	if entry := app.savedEntry("111"); entry == nil || !entry.Download {
+		t.Fatal("the view does not know the mylist is saved")
+	}
+
+	// The mylist page says it is saved, and its button turns the saving off
+	// again.
+	if err := tester.Click("朝のリスト"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tester.Find("オフライン保存をやめる"); !ok {
+		t.Fatalf("the page does not offer to stop: %q", tester.Texts())
+	}
+	if err := tester.Click("オフライン保存をやめる"); err != nil {
+		t.Fatal(err)
+	}
+	index, err = app.mylist.ListSaved()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if at, ok := indexAt(index, "111"); !ok || index[at].Download {
+		t.Fatalf("the page's button did not turn offline saving off: %+v", index)
+	}
+}
+
+// TestNativeUISettingsQuality checks the quality the settings dropdown keeps:
+// the choice is stored in the form the downloads pick their band by, and a
+// change asks for the saved audio to be fetched again.
+func TestNativeUISettingsQuality(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	tester := ui.NewTester(app.view, 1120, 760)
+	if err := tester.Click("設定"); err != nil {
+		t.Fatal(err)
+	}
+	// The dropdown shows the current preset, and opening it lists every
+	// preset, the estimates included.
+	if !tester.HasText(audioQualityLabel(320)) {
+		t.Fatalf("the settings show no quality choice: %q", tester.Texts())
+	}
+	if err := tester.Click(audioQualityLabel(320)); err != nil {
+		t.Fatal(err)
+	}
+	if !tester.HasText(audioQualityLabel(64)) {
+		t.Fatalf("the dropdown lists no low preset: %q", tester.Texts())
+	}
+	if err := tester.Click(audioQualityLabel(64)); err != nil {
+		t.Fatal(err)
+	}
+	if app.audioKbps.Load() != 64 || app.qualityOption != audioQualityLabel(64) {
+		t.Fatalf("the choice did not reach the downloads: %d/%q", app.audioKbps.Load(), app.qualityOption)
+	}
+	if got := audioQualityValue(int(app.audioKbps.Load())); got != "64" {
+		t.Fatalf("the stored quality = %q; want the low preset", got)
+	}
+}
+
+// TestNativeUIShowsOfflineSavingChip checks that a download-enabled mylist
+// carries its saving state — the saved count included — on its card and on
+// its page.
+func TestNativeUIShowsOfflineSavingChip(t *testing.T) {
+	app := savedApp(t)
+	noAudioServer(app)
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "朝のリスト"}, testItems("sm1", "sm2", "sm3"))
+	saved, err := app.mylist.SetDownload("111", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.saved = saved
+	app.audioStats["111"] = audioStat{saved: 2, total: 3}
+
+	tester := ui.NewTester(app.view, 1120, 760)
+	if !tester.HasText("2/3") {
+		t.Fatalf("the card has no offline saving chip: %q", tester.Texts())
+	}
+	if err := tester.Click("朝のリスト"); err != nil {
+		t.Fatal(err)
+	}
+	if !tester.HasText("2/3") {
+		t.Fatalf("the page has no offline saving chip: %q", tester.Texts())
+	}
 }

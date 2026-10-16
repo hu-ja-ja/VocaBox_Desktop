@@ -26,7 +26,7 @@ func (app *nativeApp) settingsView(c *ui.Context) {
 		})
 		ui.Scroll(c).Grow(1).Children(func() {
 			ui.Column(c).FillWidth().Gap(18).Children(func() {
-				app.settingsExamples(c)
+				app.settingsCard(c)
 				app.aboutCard(c)
 				app.licensesCard(c)
 			})
@@ -34,17 +34,23 @@ func (app *nativeApp) settingsView(c *ui.Context) {
 	})
 }
 
-// settingsExamples is the card of the example rows, until the preferences
-// behind them exist.
-func (app *nativeApp) settingsExamples(c *ui.Context) {
+// settingsCard is the preferences the app keeps across runs: the quality the
+// audio saved for offline playing is fetched at.
+func (app *nativeApp) settingsCard(c *ui.Context) {
+	options := make([]string, 0, len(audioQualityPresets))
+	for _, kbps := range audioQualityPresets {
+		options = append(options, audioQualityLabel(kbps))
+	}
 	ui.Column(c).Gap(4).Padding(16).Radius(12).Background(app.theme.Background).
 		Border(1, app.theme.Border).Children(func() {
-		app.settingRow(c, locales.SettingsResumeTitle(), locales.SettingsResumeBody(), func() {
-			ui.Toggle(c, &app.settingResume, "").Label(locales.SettingsResumeTitle())
-		})
-		ui.Divider(c)
-		app.settingRow(c, locales.SettingsTrayTitle(), locales.SettingsTrayBody(), func() {
-			ui.Toggle(c, &app.settingTray, "").Label(locales.SettingsTrayTitle())
+		app.settingRow(c, locales.SettingsQualityTitle(), locales.SettingsQualityBody(), func() {
+			control := ui.Select(c, &app.qualityOption, options).Label(locales.SettingsQualityTitle())
+			if control.Changed() {
+				app.setAudioQuality(audioQualityOfLabel(app.qualityOption))
+				// The saved audio of the enabled mylists stands at the old
+				// quality now: the passes fetch it again.
+				app.startAudioDownloads()
+			}
 		})
 	})
 }

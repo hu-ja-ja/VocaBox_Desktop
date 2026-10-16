@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -73,7 +75,16 @@ type playerState struct {
 
 type nativeApp struct {
 	mylist *Mylist
+	// nico is the app's one client to niconico: playback, the mylist
+	// lookups, and the audio saving all ride the same session cookies.
+	nico   *Nico
 	window *mygo.Window
+	// held is the work the background goroutines handed over while no window
+	// was there to run it: the UI thread takes it when it builds a frame, and
+	// a test, which never has a window, with runHeld. It is what keeps the
+	// view's state to one goroutine, in the app and in a test alike.
+	heldMu sync.Mutex
+	held   []func()
 	// playback is the player: the queue and the AmsHelper child process.
 	// Tests leave it nil and inspect the commands the UI sent instead.
 	playback *playback
@@ -159,10 +170,22 @@ type nativeApp struct {
 	confirmLogout bool
 	// railAccountOpen drives the account menu of the rail's avatar.
 	railAccountOpen bool
-	// settingResume and settingTray are the example rows of the settings
-	// page, until the preferences behind them exist.
-	settingResume bool
-	settingTray   bool
+	// qualityOption is the saved-audio preset the settings dropdown shows,
+	// and audioKbps the same choice in the form the download worker reads
+	// off the UI thread. downloads queues the mylists whose audio is still
+	// to be fetched: audioNow and audioNowList are the track and the mylist a
+	// pass is fetching right now, and audioProgress says whether the status
+	// line is the progress one. audioStats and broken are what the lists
+	// mark tracks by, the counts of the enabled mylists and the tracks whose
+	// saved audio could not be played.
+	qualityOption string
+	audioKbps     atomic.Int32
+	downloads     *audioDownloads
+	audioNow      string
+	audioNowList  string
+	audioProgress bool
+	audioStats    map[string]audioStat
+	broken        map[string]bool
 	// licenseOpen holds the licence rows of the settings left open, by the
 	// work they name; licenseOpenDialog shows the dialog the app's own
 	// licence opens, licenseTitle its heading and licenseBody its text.
@@ -253,6 +276,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	cardTheme.Background = ui.RGBA(0, 0, 0, 0)
 	app := &nativeApp{
 		mylist:       mylist,
+		nico:         NewNico(),
 		session:      sessionStore{mylist: mylist},
 		router:       router,
 		theme:        t,
@@ -263,20 +287,34 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 		thumbBusy:    map[string]bool{},
 		thumbFail:    map[string]bool{},
 		fill:         newSavedFill(),
+		downloads:    newAudioDownloads(),
+		audioStats:   map[string]audioStat{},
+		broken:       map[string]bool{},
 		queueMenuRow: -1,
 		queueFollow:  -2,
 		queueChoice:  -1,
-		// One example row shows on and the other off, so the settings page
-		// shows both states of a toggle.
-		settingResume: true,
-		licenseOpen:   map[string]bool{},
+		licenseOpen:  map[string]bool{},
 	}
-	// The body saving runs in the background, one mylist at a time.
+	// Until the settings load, the downloads fetch at the highest preset.
+	app.setAudioQuality(audioQualityPresets[0])
+	if ids, err := mylist.LoadBroken(); err != nil {
+		log.Printf("downloads: %v", err)
+	} else {
+		for _, id := range ids {
+			app.broken[id] = true
+		}
+	}
+	// Saving runs in the background: the bodies one mylist at a time, and the
+	// audio of the download-enabled mylists one track at a time.
 	go app.fillWorker()
+	go app.downloadWorker()
 	return app
 }
 
 func (app *nativeApp) view(c *ui.Context) {
+	// The window's thread takes the work the background handed over; without
+	// one this frame build is that thread.
+	app.runHeld()
 	c.SetTheme(app.theme)
 	ui.Column(c).Fill().Background(app.theme.Background).Padding(12).Gap(12).Children(func() {
 		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Gap(12).Children(func() {
@@ -1039,6 +1077,9 @@ func (app *nativeApp) refreshSaved(entry SavedIndexEntry) {
 			app.saved = saved
 			app.adoptShownBody(entry.ID)
 			app.setStatus(locales.StatusRefreshed())
+			// A refreshed body can hold new tracks: a download-enabled
+			// mylist fetches them without waiting for the next start.
+			app.enqueueSavedAudio(entry.ID)
 		})
 	}()
 }
