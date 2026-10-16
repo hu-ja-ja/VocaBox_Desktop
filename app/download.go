@@ -13,16 +13,17 @@ import (
 	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
-// audioSegmentInterval spaces the segment requests of one track. The delivery
-// edge is built for streaming, but a download runs as fast as the network
-// answers; a small pause keeps the burst a player-like one rather than a
-// crawl. It is a variable so that tests run the saves without the pauses.
-var audioSegmentInterval = 200 * time.Millisecond
+// audioSegmentInterval spaces the segment request starts of one track. The
+// delivery edge is built for streaming, but a download runs as fast as the
+// network answers; a small pause keeps the request rate a player's look-ahead
+// rather than a crawler's sweep, and the fetch window hides the edge's answer
+// under it. It is a variable so that tests run the saves without the pauses.
+var audioSegmentInterval = 100 * time.Millisecond
 
 // audioTrackInterval spaces the tracks of a download pass. The delivery edge
-// serves a track's segments one request at a time as a player does; a small
-// pause between tracks keeps a long mylist from looking like a crawler. It is
-// a variable so that tests run the passes without the pause.
+// serves one track in player-like bursts; a small pause between tracks keeps
+// a long mylist from looking like a crawler. It is a variable so that tests
+// run the passes without the pause.
 var audioTrackInterval = time.Second
 
 // audioState is how one track's offline saving stands, as the list marks it.

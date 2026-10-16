@@ -12,7 +12,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 // audioTestKey and audioTestIV are what the fixture's playlist names: the
@@ -51,6 +53,35 @@ type audioTestServer struct {
 	want map[string][]byte
 	// broken makes the segments answer 500, the way an asset that is gone does.
 	broken bool
+	// segmentDelay slows each segment answer, so a test can watch the fetch
+	// window overlap the requests.
+	segmentDelay time.Duration
+	// mu guards the in-flight count of the segment handlers.
+	mu          sync.Mutex
+	inFlight    int
+	maxInFlight int
+}
+
+// segmentBegin marks one segment fetch as in flight and hands back the mark
+// that ends it, so a test can read how many ran at once.
+func (s *audioTestServer) segmentBegin() func() {
+	s.mu.Lock()
+	s.inFlight++
+	if s.inFlight > s.maxInFlight {
+		s.maxInFlight = s.inFlight
+	}
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		s.inFlight--
+		s.mu.Unlock()
+	}
+}
+
+func (s *audioTestServer) maxConcurrentSegments() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maxInFlight
 }
 
 func newAudioTestServer(t *testing.T) *audioTestServer {
@@ -115,9 +146,14 @@ func newAudioTestServer(t *testing.T) *audioTestServer {
 		for i, segment := range plain[band] {
 			segment := segment
 			mux.HandleFunc(fmt.Sprintf("/%s-%d.m4s", band, i+1), func(w http.ResponseWriter, r *http.Request) {
+				done := s.segmentBegin()
+				defer done()
 				if s.broken {
 					http.Error(w, "gone", http.StatusInternalServerError)
 					return
+				}
+				if s.segmentDelay > 0 {
+					time.Sleep(s.segmentDelay)
 				}
 				_, _ = w.Write(encryptAudioSegment(t, segment))
 			})
@@ -204,4 +240,39 @@ func TestNicoDownloadAudioLeavesNoFileOnFailure(t *testing.T) {
 	if _, err := os.Stat(dest + audioPartExtension); !os.IsNotExist(err) {
 		t.Fatalf("a failed save left a part file: %v", err)
 	}
+}
+
+// TestNicoDownloadAudioFetchesSegmentsPaced checks how one track's segment
+// requests are made: with the pauses off a slow segment's fetch overlaps the
+// next request — the window, not one after the other — and with the pauses on
+// the request starts stay spaced, so a save keeps the edge's view of the
+// track player-like either way.
+func TestNicoDownloadAudioFetchesSegmentsPaced(t *testing.T) {
+	interval := audioSegmentInterval
+	t.Cleanup(func() { audioSegmentInterval = interval })
+	server := newAudioTestServer(t)
+	dest := func() string { return filepath.Join(t.TempDir(), "sm123.m4a") }
+
+	t.Run("the window overlaps the fetches", func(t *testing.T) {
+		audioSegmentInterval = 0
+		server.segmentDelay = 100 * time.Millisecond
+		if err := server.nico.DownloadAudio("sm123", 192, dest()); err != nil {
+			t.Fatal(err)
+		}
+		if got := server.maxConcurrentSegments(); got < 2 {
+			t.Fatalf("the segment fetches ran one after the other: %d in flight", got)
+		}
+	})
+
+	t.Run("the starts stay spaced", func(t *testing.T) {
+		server.segmentDelay = 0
+		audioSegmentInterval = 100 * time.Millisecond
+		start := time.Now()
+		if err := server.nico.DownloadAudio("sm123", 192, dest()); err != nil {
+			t.Fatal(err)
+		}
+		if got := time.Since(start); got < 90*time.Millisecond {
+			t.Fatalf("the segment requests of a track were not spaced: %v", got)
+		}
+	})
 }

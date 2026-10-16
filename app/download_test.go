@@ -14,7 +14,7 @@ func withoutPauses(t *testing.T) {
 	t.Helper()
 	audioSegmentInterval, audioTrackInterval = 0, 0
 	t.Cleanup(func() {
-		audioSegmentInterval, audioTrackInterval = 200*time.Millisecond, time.Second
+		audioSegmentInterval, audioTrackInterval = 100*time.Millisecond, time.Second
 	})
 }
 

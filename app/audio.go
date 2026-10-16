@@ -155,8 +155,8 @@ func (n *Nico) DownloadAudio(videoID string, targetKbps int, dest string) error 
 	if len(sources.URIs) == 0 {
 		return errors.New(locales.ErrNoAudio())
 	}
-	// The requests run one at a time, as the playback path's do: the edge
-	// sees a track fetched exactly the way a player fetches one.
+	// The segment requests stay paced, a small window of them in flight at
+	// once: the edge sees a track fetched the way a player fetches one.
 	playlistURL := sources.URIs[pickAudioBand(sources.BitRates, targetKbps)]
 	body, err := n.get(playlistURL)
 	if err != nil {
@@ -216,22 +216,85 @@ type audioKey struct {
 	key []byte
 }
 
+// audioWindow is how many segment fetches may be in flight at once. The paced
+// request starts keep the edge's view player-like; the window lets one
+// segment's answer arrive while the next request is already out, so a slow
+// answer adds to the pass only once the window is full.
+const audioWindow = 3
+
+// audioFetch is the outcome of one segment fetch, handed to the writer in
+// playlist order.
+type audioFetch struct {
+	body []byte
+	err  error
+}
+
+// fetchSegments starts the segment fetches of one playlist: the request
+// starts are spaced by audioSegmentInterval and at most audioWindow are in
+// flight, so the edge sees a paced, small look-ahead as it sees a player's
+// rather than a crawler's sweep. Each segment's outcome is handed over on its
+// own channel, in playlist order. A caller done early closes stop, which
+// abandons the fetches not started yet; one in flight ends on its own, its
+// outcome waiting in the buffered channel. The returned channel closes once
+// no further request will be started.
+func (n *Nico) fetchSegments(segments []*m3u8.MediaSegment, playlistURL string, stop <-chan struct{}) ([]chan audioFetch, <-chan struct{}) {
+	fetched := make([]chan audioFetch, len(segments))
+	for i := range fetched {
+		fetched[i] = make(chan audioFetch, 1)
+	}
+	inFlight := make(chan struct{}, audioWindow)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i, segment := range segments {
+			if i > 0 && audioSegmentInterval > 0 {
+				select {
+				case <-time.After(audioSegmentInterval):
+				case <-stop:
+					return
+				}
+			}
+			// shortcut: niconico's audio renditions use no byte ranges; the
+			// writer rejects a playlist that names one before it would read
+			// this fetch, so nothing is fetched for it here.
+			if segment.Limit > 0 {
+				continue
+			}
+			select {
+			case inFlight <- struct{}{}:
+			case <-stop:
+				return
+			}
+			go func(fetched chan audioFetch, uri string) {
+				defer func() { <-inFlight }()
+				body, err := n.get(uri)
+				fetched <- audioFetch{body: body, err: err}
+			}(fetched[i], audioResourceURL(playlistURL, segment.URI))
+		}
+	}()
+	return fetched, done
+}
+
 // copyAudio writes the media initialization section and the decrypted
-// segments of the playlist, in order. The segments come from GetAllSegments:
-// the playlist holds them in a ring buffer padded with nils.
+// segments of the playlist, in order, from fetches that run up to audioWindow
+// ahead of the writing. The segments come from GetAllSegments: the playlist
+// holds them in a ring buffer padded with nils.
 func (n *Nico) copyAudio(media *m3u8.MediaPlaylist, playlistURL string, out io.Writer) error {
 	segments := media.GetAllSegments()
 	if len(segments) == 0 {
 		return errors.New(locales.ErrAudioSourceMissing())
 	}
+	stop := make(chan struct{})
+	fetched, done := n.fetchSegments(segments, playlistURL, stop)
+	defer func() {
+		// The writer is done: no further request is started, and the
+		// fetcher has ended by the time this returns.
+		close(stop)
+		<-done
+	}()
 	var key audioKey
 	initURI := ""
 	for i, segment := range segments {
-		// The delivery edge sees one request at a time, spaced as a player's
-		// own fetches are.
-		if i > 0 && audioSegmentInterval > 0 {
-			time.Sleep(audioSegmentInterval)
-		}
 		// shortcut: niconico's audio renditions use no byte ranges; a
 		// playlist that does needs range requests rather than whole files.
 		if segment.Limit > 0 {
@@ -251,10 +314,11 @@ func (n *Nico) copyAudio(media *m3u8.MediaPlaylist, playlistURL string, out io.W
 			}
 			initURI = init.URI
 		}
-		body, err := n.get(audioResourceURL(playlistURL, segment.URI))
-		if err != nil {
-			return err
+		fetch := <-fetched[i]
+		if fetch.err != nil {
+			return fetch.err
 		}
+		body := fetch.body
 		segmentKey, ok := audioSegmentKey(segment, media)
 		if ok && segmentKey.Method != "" && segmentKey.Method != "NONE" {
 			if segmentKey.Method != "AES-128" {
@@ -270,10 +334,11 @@ func (n *Nico) copyAudio(media *m3u8.MediaPlaylist, playlistURL string, out io.W
 				}
 				key = audioKey{uri: segmentKey.URI, key: keyBody}
 			}
-			body, err = decryptAudioSegment(key.key, audioIV(segmentKey, segment), body)
+			decrypted, err := decryptAudioSegment(key.key, audioIV(segmentKey, segment), body)
 			if err != nil {
 				return err
 			}
+			body = decrypted
 		}
 		if _, err := out.Write(body); err != nil {
 			return errors.New(locales.ErrAudioSave())
