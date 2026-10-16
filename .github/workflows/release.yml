@@ -28,8 +28,8 @@ jobs:
           if ("v$version" -ne "$env:RELEASE_TAG") {
             throw "the release tag $env:RELEASE_TAG does not match the version $version of mygo.json (expected v$version)"
           }
-      # mise.toml is the only source of the tool versions (Go and Rust), so the
-      # release builds what a developer's mise install builds.
+      # mise.toml is the only source of the tool versions (Go, Rust and
+      # mr-boxington), so the release builds what a developer's mise install builds.
       - uses: jdx/mise-action@v5
       # mygo build downloads NSIS on a fresh runner; the cache keeps it.
       - uses: actions/cache@v6

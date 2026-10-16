@@ -9,8 +9,8 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      # mise.toml is the only source of the tool versions (Go, Rust and the
-      # licence tools), so CI installs what a developer's mise install does.
+      # mise.toml is the only source of the tool versions (Go, Rust, mr-boxington
+      # and the licence tools), so CI installs what a developer's mise install does.
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
       # The helper first: the app bundles resources/AmsHelper.exe, and its
