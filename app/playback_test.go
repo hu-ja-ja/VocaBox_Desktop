@@ -251,8 +251,9 @@ func TestPlaybackReportsQuality(t *testing.T) {
 }
 
 // TestPlaybackPlaysTheSavedAudio checks that a track this PC has saved plays
-// from disk: the helper is handed the file rather than a manifest, and the
-// bar says the track is offline.
+// from disk: the helper is handed the file rather than a manifest, the bar
+// says the track is offline, and an open that names no length (a saved file
+// from before the movie header carried one) leaves the track's own standing.
 func TestPlaybackPlaysTheSavedAudio(t *testing.T) {
 	p, helper, _ := newTestPlayback(t)
 	path, err := p.app.mylist.audioPath("sm1")
@@ -274,9 +275,12 @@ func TestPlaybackPlaysTheSavedAudio(t *testing.T) {
 	if play.File != savedAudioURI(path) || play.URL != "" || play.Cookie != "" {
 		t.Fatalf("play = %#v; want the saved file", play)
 	}
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120_000, Gen: play.Gen})
+	p.handleEvent(helperEvent{Event: "opened", Gen: play.Gen})
 	if quality := p.app.player.Quality; quality != locales.PlayerOffline() {
 		t.Fatalf("quality = %q; want %q", quality, locales.PlayerOffline())
+	}
+	if duration := p.app.player.DurationMS; duration != 120_000 {
+		t.Fatalf("duration = %vms; want the track's 120000", duration)
 	}
 }
 

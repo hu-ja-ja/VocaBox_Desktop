@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,6 +29,25 @@ var (
 // check accepts.
 func audioTestSegment(fill byte) []byte {
 	return append([]byte("\x00\x00\x00\x10moof"), bytes.Repeat([]byte{fill}, 96)...)
+}
+
+// mvhdInit is an initialization section holding one movie header of the given
+// version and timescale, its duration unset, as niconico's does.
+func mvhdInit(version byte, timescale uint32) []byte {
+	fields := 8
+	if version == 1 {
+		fields = 16
+	}
+	mvhd := make([]byte, 16+fields+4)
+	binary.BigEndian.PutUint32(mvhd[0:4], uint32(len(mvhd)))
+	copy(mvhd[4:8], "mvhd")
+	mvhd[8] = version
+	binary.BigEndian.PutUint32(mvhd[12+fields:], timescale)
+	moov := make([]byte, 8+len(mvhd))
+	binary.BigEndian.PutUint32(moov[0:4], uint32(len(moov)))
+	copy(moov[4:8], "moov")
+	copy(moov[8:], mvhd)
+	return append([]byte("\x00\x00\x00\x10ftyp"), moov...)
 }
 
 // encryptAudioSegment encrypts one segment the way the edge serves it.
@@ -86,14 +106,19 @@ func (s *audioTestServer) maxConcurrentSegments() int {
 
 func newAudioTestServer(t *testing.T) *audioTestServer {
 	t.Helper()
-	init := []byte("\x00\x00\x00\x10ftyp")
+	init := mvhdInit(0, 1000)
+	// The saved file's movie header carries the playlist's total (12.012s).
+	wantInit := append([]byte(nil), init...)
+	if at := bytes.Index(wantInit, []byte("mvhd")); at >= 0 {
+		binary.BigEndian.PutUint32(wantInit[at+20:at+24], 12_012)
+	}
 	bands := []string{"192", "64"}
 	plain := map[string][][]byte{}
 	s := &audioTestServer{want: map[string][]byte{}}
 	for _, band := range bands {
 		first, second := audioTestSegment(0x11), audioTestSegment(0x22)
 		plain[band] = [][]byte{first, second}
-		s.want[band] = bytes.Join([][]byte{init, first, second}, nil)
+		s.want[band] = bytes.Join([][]byte{wantInit, first, second}, nil)
 	}
 
 	mux := http.NewServeMux()
@@ -188,6 +213,50 @@ func TestPickAudioBand(t *testing.T) {
 				t.Fatalf("pickAudioBand(%v, %d) = %d; want %d", tc.bitrates, tc.target, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestWithMovieDuration checks the length the save writes into the movie
+// header: the version 0 and version 1 durations, and an initialization section
+// without a movie header left as it is.
+func TestWithMovieDuration(t *testing.T) {
+	cases := []struct {
+		name      string
+		version   byte
+		timescale uint32
+		want      uint64
+	}{
+		{"version 0", 0, 1000, 12_012},
+		{"version 1", 1, 600, 7_207},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			init := mvhdInit(tc.version, tc.timescale)
+			got := withMovieDuration(init, 12_012)
+			at := bytes.Index(got, []byte("mvhd"))
+			// The duration sits after the timescale, 4 bytes wide in version
+			// 0 and 8 in version 1.
+			var duration uint64
+			if tc.version == 0 {
+				duration = uint64(binary.BigEndian.Uint32(got[at+20 : at+24]))
+			} else {
+				duration = binary.BigEndian.Uint64(got[at+28 : at+36])
+			}
+			if duration != tc.want {
+				t.Fatalf("duration = %d; want %d", duration, tc.want)
+			}
+			if tc.version == 0 {
+				if d := binary.BigEndian.Uint32(init[at+20 : at+24]); d != 0 {
+					t.Fatalf("the input section was modified: %d", d)
+				}
+			} else if d := binary.BigEndian.Uint64(init[at+28 : at+36]); d != 0 {
+				t.Fatalf("the input section was modified: %d", d)
+			}
+		})
+	}
+	plain := []byte("\x00\x00\x00\x10ftyp")
+	if got := withMovieDuration(plain, 12_012); !bytes.Equal(got, plain) {
+		t.Fatalf("a section without a movie header was changed: %v", got)
 	}
 }
 

@@ -284,6 +284,14 @@ func (n *Nico) copyAudio(media *m3u8.MediaPlaylist, playlistURL string, out io.W
 	if len(segments) == 0 {
 		return errors.New(locales.ErrAudioSourceMissing())
 	}
+	// The saved file carries its own length: the media stack reads the movie
+	// header's duration, and a fragmented MP4 written without one leaves it no
+	// length to report.
+	durationMS := 0.0
+	for _, segment := range segments {
+		durationMS += segment.Duration
+	}
+	durationMS *= 1000
 	stop := make(chan struct{})
 	fetched, done := n.fetchSegments(segments, playlistURL, stop)
 	defer func() {
@@ -309,7 +317,7 @@ func (n *Nico) copyAudio(media *m3u8.MediaPlaylist, playlistURL string, out io.W
 			if err != nil {
 				return err
 			}
-			if _, err := out.Write(body); err != nil {
+			if _, err := out.Write(withMovieDuration(body, durationMS)); err != nil {
 				return errors.New(locales.ErrAudioSave())
 			}
 			initURI = init.URI
@@ -345,6 +353,55 @@ func (n *Nico) copyAudio(media *m3u8.MediaPlaylist, playlistURL string, out io.W
 		}
 	}
 	return nil
+}
+
+// withMovieDuration returns the initialization section with its movie header's
+// duration set to the playlist's total, so the saved file names its own length.
+// A section without an mvhd, or one whose timescale is unusable, is returned as
+// it is.
+func withMovieDuration(init []byte, durationMS float64) []byte {
+	mvhd := findBox(init, "mvhd")
+	if mvhd < 0 {
+		return init
+	}
+	out := append([]byte(nil), init...)
+	switch init[mvhd+8] {
+	case 0:
+		timescale := binary.BigEndian.Uint32(init[mvhd+20 : mvhd+24])
+		if timescale == 0 {
+			return init
+		}
+		binary.BigEndian.PutUint32(out[mvhd+24:mvhd+28], uint32(durationMS*float64(timescale)/1000))
+	case 1:
+		timescale := binary.BigEndian.Uint32(init[mvhd+28 : mvhd+32])
+		if timescale == 0 {
+			return init
+		}
+		binary.BigEndian.PutUint64(out[mvhd+32:mvhd+40], uint64(durationMS*float64(timescale)/1000))
+	}
+	return out
+}
+
+// findBox returns the offset of the first box of the given type in b, -1 when
+// there is none. It walks box boundaries and enters a moov to look at its
+// children, which is where an mvhd sits.
+func findBox(b []byte, kind string) int {
+	for off := 0; off+8 <= len(b); {
+		size := int(binary.BigEndian.Uint32(b[off : off+4]))
+		if size < 8 || off+size > len(b) {
+			return -1
+		}
+		switch string(b[off+4 : off+8]) {
+		case kind:
+			return off
+		case "moov":
+			if at := findBox(b[off+8:off+size], kind); at >= 0 {
+				return off + 8 + at
+			}
+		}
+		off += size
+	}
+	return -1
 }
 
 // audioSegmentKey is the key one segment is encrypted with: the last key its

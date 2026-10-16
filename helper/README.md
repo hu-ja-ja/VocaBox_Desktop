@@ -31,7 +31,7 @@ stdout（イベント、1行1オブジェクト）:
 
 | ev | フィールド | 意味 |
 |---|---|---|
-| `opened` | `durationMs` | 再生開始。`NaturalDuration` |
+| `opened` | `durationMs` | 再生開始。`NaturalDuration`。長さが取れない音源では付かない |
 | `ended` | | 最後まで再生した |
 | `failed` | `code`, `ext`, `msg` | 再生失敗。`code` は `MediaPlayerError` 名か `AdaptiveMediaSourceCreationStatus` 名（`NoSource` は `play` に `url` も `file` も無かったとき） |
 | `position` | `ms` | `position` への応答 |

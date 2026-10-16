@@ -176,6 +176,7 @@ func TestOfflineSaveE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	opened := waitHelperEvent(t, events, "opened", 30*time.Second)
+	// The saved file carries its own length, so the helper reports the track's.
 	if opened.DurationMS < 60_000 {
 		t.Fatalf("duration = %vms; want the track's", opened.DurationMS)
 	}

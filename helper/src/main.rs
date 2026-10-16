@@ -49,14 +49,15 @@ fn main() {
 
     let _ = player.MediaOpened(&TypedEventHandler::new(
         |sender: Ref<MediaPlayer>, _: Ref<IInspectable>| {
-            let ms = sender
+            let duration_ms = sender
                 .ok()
                 .and_then(|player| player.PlaybackSession())
                 .and_then(|session| session.NaturalDuration())
-                .map_or(0.0, |duration| duration.Duration as f64 / 10_000.0);
+                .ok()
+                .and_then(|duration| natural_duration_ms(duration.Duration));
             emit(Event {
                 ev: "opened",
-                duration_ms: Some(ms),
+                duration_ms,
                 r#gen: GEN.load(Ordering::SeqCst),
                 ..Default::default()
             });
@@ -458,6 +459,14 @@ fn millis(ms: f64) -> TimeSpan {
     }
 }
 
+// natural_duration_ms is NaturalDuration as the protocol's durationMs, none
+// when it names no length: a saved file is a fragmented MP4 with no movie
+// duration, and the media stack answers with TimeSpan's maximum rather than a
+// length. The app's own metadata is the truth there.
+fn natural_duration_ms(ticks: i64) -> Option<f64> {
+    (ticks > 0 && ticks != i64::MAX).then(|| ticks as f64 / 10_000.0)
+}
+
 // hresult_message is the system's text for a failure code, "" when there is
 // none to report.
 fn hresult_message(hr: HRESULT) -> String {
@@ -559,4 +568,17 @@ struct Event {
     #[serde(skip_serializing_if = "Option::is_none")]
     msg: Option<String>,
     r#gen: i32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn natural_duration_reports_only_a_length() {
+        assert_eq!(natural_duration_ms(99_150 * 10_000), Some(99_150.0));
+        assert_eq!(natural_duration_ms(0), None);
+        assert_eq!(natural_duration_ms(-1), None);
+        assert_eq!(natural_duration_ms(i64::MAX), None);
+    }
 }
