@@ -1284,7 +1284,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 		t.Fatalf("defaults = %#v; want %#v", got, defaultSettings())
 	}
 
-	want := Settings{Volume: 0.35, Shuffle: true, Repeat: true}
+	want := Settings{Volume: 0.35, Shuffle: true, Repeat: true, DiscordRPC: true}
 	if err := m.SaveSettings(want); err != nil {
 		t.Fatalf("SaveSettings() = %v", err)
 	}

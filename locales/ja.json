@@ -10,6 +10,8 @@
   "settingsQualityHigh": "高音質 320kbps（5分で約12MB）",
   "settingsQualityStandard": "標準 192kbps（5分で約7.2MB）",
   "settingsQualityLow": "低音質 64kbps（5分で約2.4MB）",
+  "settingsDiscordTitle": "Discord Rich Presence",
+  "settingsDiscordBody": "有効にすると、再生中の曲をDiscordのプロフィールに表示します。",
   "settingsLicense": "MPL-2.0 License (Mozilla Public License Version 2.0)",
   "settingsRepository": "リポジトリ",
   "settingsThirdPartyLicense": "サードパーティライセンス",

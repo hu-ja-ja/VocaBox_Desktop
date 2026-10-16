@@ -53,6 +53,7 @@ func main() {
 		app.player.Shuffle = settings.Shuffle
 		app.player.Repeat = settings.Repeat
 		app.setAudioQuality(audioQualityKbps(settings.DownloadQuality))
+		app.discordOn = settings.DiscordRPC
 	}
 	// The mylists the user keeps offline start fetching in the background,
 	// one track at a time, at the quality the settings named.
@@ -74,6 +75,7 @@ func main() {
 			Shuffle:         app.player.Shuffle,
 			Repeat:          app.player.Repeat,
 			DownloadQuality: audioQualityValue(int(app.audioKbps.Load())),
+			DiscordRPC:      app.discordOn,
 		}); err != nil {
 			log.Printf("settings: %v", err)
 		}

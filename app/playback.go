@@ -82,6 +82,10 @@ type playback struct {
 	// are dropped.
 	gen int
 
+	// discordKey is the presence last handed to Discord, so a renewal that
+	// changes nothing is skipped against it; "" with nothing sent yet.
+	discordKey string
+
 	// spawn launches the helper; acquire fetches a track's sources. Tests
 	// replace both with stubs.
 	spawn   func(onEvent func(helperEvent), onExit func(error)) (helperConn, error)
@@ -124,6 +128,7 @@ func newPlayback(app *nativeApp) *playback {
 		}
 		fn()
 	}
+	go p.resendDiscord()
 	return p
 }
 
@@ -703,6 +708,7 @@ func (p *playback) publish() {
 	p.polling.Store(!p.closing && p.proc != nil && st.Ready && st.Playing)
 	// The tray is the only place the app speaks while its window is hidden.
 	p.app.refreshTray()
+	p.syncDiscord(false)
 }
 
 // shutdown ends the helper for good, as the app quits.

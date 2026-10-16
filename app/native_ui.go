@@ -88,6 +88,10 @@ type nativeApp struct {
 	// playback is the player: the queue and the AmsHelper child process.
 	// Tests leave it nil and inspect the commands the UI sent instead.
 	playback *playback
+	// discordOn says the Discord Rich Presence is on, and discord the client
+	// that shows it; a test stands its own client in its place.
+	discordOn bool
+	discord   discordConn
 	// tray is the notification-area icon the app keeps playing behind: nil
 	// when none could be created, and a close then quits as it used to.
 	// quitting says the app is on its way out, so a close request closes
@@ -277,6 +281,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	app := &nativeApp{
 		mylist:       mylist,
 		nico:         NewNico(),
+		discord:      newDiscordRPC(discordClientID),
 		session:      sessionStore{mylist: mylist},
 		router:       router,
 		theme:        t,

@@ -131,6 +131,26 @@ func (msgs Messages) SettingsQualityLow() string {
 	return Catalog.Format(msgs.locale, "settingsQualityLow", nil)
 }
 
+// SettingsDiscordTitle says "Discord Rich Presence"
+// in the language the app shows.
+func SettingsDiscordTitle() string { return In(i18n.Locale()).SettingsDiscordTitle() }
+
+// SettingsDiscordTitle says "Discord Rich Presence"
+// in the language of msgs.
+func (msgs Messages) SettingsDiscordTitle() string {
+	return Catalog.Format(msgs.locale, "settingsDiscordTitle", nil)
+}
+
+// SettingsDiscordBody says "有効にすると、再生中の曲をDiscordのプロフィールに表示します。"
+// in the language the app shows.
+func SettingsDiscordBody() string { return In(i18n.Locale()).SettingsDiscordBody() }
+
+// SettingsDiscordBody says "有効にすると、再生中の曲をDiscordのプロフィールに表示します。"
+// in the language of msgs.
+func (msgs Messages) SettingsDiscordBody() string {
+	return Catalog.Format(msgs.locale, "settingsDiscordBody", nil)
+}
+
 // SettingsLicense says "MPL-2.0 License (Mozilla Public License Version 2.0)"
 // in the language the app shows.
 func SettingsLicense() string { return In(i18n.Locale()).SettingsLicense() }

@@ -10,6 +10,8 @@
   "settingsQualityHigh": "High 320kbps (about 12MB per 5 minutes)",
   "settingsQualityStandard": "Standard 192kbps (about 7.2MB per 5 minutes)",
   "settingsQualityLow": "Low 64kbps (about 2.4MB per 5 minutes)",
+  "settingsDiscordTitle": "Discord Rich Presence",
+  "settingsDiscordBody": "Show the track playing on your Discord profile.",
   "settingsLicense": "MPL-2.0 License (Mozilla Public License Version 2.0)",
   "settingsRepository": "Repository",
   "settingsThirdPartyLicense": "Third-party licenses",

@@ -53,6 +53,12 @@ func (app *nativeApp) settingsCard(c *ui.Context) {
 				app.startAudioDownloads()
 			}
 		})
+		app.settingRow(c, locales.SettingsDiscordTitle(), locales.SettingsDiscordBody(), func() {
+			control := ui.Switch(c, &app.discordOn).Label(locales.SettingsDiscordTitle())
+			if control.Changed() {
+				app.setDiscordRPC(app.discordOn)
+			}
+		})
 	})
 }
 

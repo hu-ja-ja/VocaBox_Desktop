@@ -80,6 +80,8 @@ type Settings struct {
 	// DownloadQuality is the kbps of audioQualityOptions saved audio is
 	// fetched at; empty means the highest.
 	DownloadQuality string `json:"downloadQuality,omitempty"`
+	// DiscordRPC shows the track playing on the user's Discord profile.
+	DiscordRPC bool `json:"discordRpc,omitempty"`
 }
 
 // defaultSettings is what a missing or reset settings file yields.
