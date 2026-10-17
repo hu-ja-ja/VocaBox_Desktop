@@ -112,9 +112,10 @@
   "statusDeleted": "Deleted the saved mylist.",
   "statusAudioQueued": "Offline saving started.",
   "statusAudioStopped": "Offline saving stopped.",
-  "statusSavingAudio": "Saving {done}/{total} for offline…",
+  "statusSavingAudio": "Saving “{name}” for offline ({done}/{total})…",
   "@statusSavingAudio": {
     "placeholders": {
+      "name": { "type": "String" },
       "done": { "type": "int" },
       "total": { "type": "int" }
     }

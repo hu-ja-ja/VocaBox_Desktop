@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/color"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	vocabox "github.com/hu-ja-ja/VocaBox_Desktop"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // savedApp returns an app over a temp config dir: nothing a saved-mylist
@@ -98,6 +100,9 @@ func TestNativeUITogglesSidebar(t *testing.T) {
 	if err := tester.Click("サイドバーを閉じる"); err != nil {
 		t.Fatal(err)
 	}
+	// The rail rises in as the sidebar slides out: past both, the rail's
+	// toggle sits where the sidebar's was.
+	tester.Advance(300 * time.Millisecond)
 	_, hasSection := tester.Find("マイリスト")
 	if _, hasLogo := tester.Find("V"); app.sidebarOpen || !hasLogo || hasSection {
 		t.Fatalf("sidebar did not close cleanly: open=%v texts=%q", app.sidebarOpen, tester.Texts())
@@ -113,6 +118,9 @@ func TestNativeUITogglesSidebar(t *testing.T) {
 	if err := tester.Click("サイドバーを開く"); err != nil {
 		t.Fatal(err)
 	}
+	// The sidebar slides in from the rail's side; past it, the toggle is
+	// back where it was.
+	tester.Advance(300 * time.Millisecond)
 	if !app.sidebarOpen || !tester.HasText("VocaBox") {
 		t.Fatalf("sidebar did not reopen: open=%v", app.sidebarOpen)
 	}
@@ -916,6 +924,9 @@ func TestNativeUIMylistMenuOpensAtPointer(t *testing.T) {
 	}
 	x, y := card.X+16, card.Y+card.H-16
 	tester.RightClickAt(x, y)
+	// The menu pops in at its scale of a moment ago; past the motion, it
+	// reads from the pointer's edge.
+	tester.Advance(300 * time.Millisecond)
 	panel, ok := tester.Find("マイリストのメニュー")
 	if !ok {
 		t.Fatalf("the menu did not open: %q", tester.Texts())
@@ -930,6 +941,9 @@ func TestNativeUIMylistMenuOpensAtPointer(t *testing.T) {
 		t.Fatalf("the second card was not found: %q", tester.Texts())
 	}
 	tester.RightClickAt(other.X+16, other.Y+16)
+	// The menu pops in again, moving at its entering scale; past the
+	// motion, it reads from the pointer.
+	tester.Advance(300 * time.Millisecond)
 	if app.menuEntry.ID != "71043761" {
 		t.Fatalf("the menu still belongs to %q", app.menuEntry.ID)
 	}
@@ -951,6 +965,7 @@ func TestNativeUIMylistMenuOpensAtPointer(t *testing.T) {
 	}
 	tester = narrow
 	tester.RightClickAt(card.X+card.W-4, card.Y+card.H-16)
+	tester.Advance(300 * time.Millisecond)
 	panel, ok = tester.Find("マイリストのメニュー")
 	if !ok {
 		t.Fatalf("the menu did not open in the narrow window: %q", tester.Texts())
@@ -1638,6 +1653,9 @@ func TestNativeUIHomeOpensMylistCards(t *testing.T) {
 
 	app.sidebarOpen = true
 	tester.Frame()
+	// The sidebar takes the rail's place sliding in; past it, its home
+	// item is where the pointer finds it.
+	tester.Advance(300 * time.Millisecond)
 	if err := tester.Click("ホーム"); err != nil {
 		t.Fatal(err)
 	}
@@ -1646,6 +1664,81 @@ func TestNativeUIHomeOpensMylistCards(t *testing.T) {
 	}
 	if app.page == nil || app.page.ID != "123" {
 		t.Fatalf("the opened mylist was dropped: %#v", app.page)
+	}
+}
+
+// TestNativeUIPinnedCardSlides checks that pinning a card slides it before
+// the first one rather than jumping: the pinned card starts where it was
+// and arrives only as the motion completes.
+func TestNativeUIPinnedCardSlides(t *testing.T) {
+	app := savedApp(t)
+	app.sidebarOpen = false
+	items := []MylistItem{{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120}}
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "一覧", Mine: true}, items)
+	indexSaved(t, app, SavedIndexEntry{ID: "222", Name: "二覧", Mine: true}, items)
+	tester := ui.NewTester(app.view, 1120, 760)
+	if _, ok := tester.Find("一覧"); !ok {
+		t.Fatalf("cards are not shown: %q", tester.Texts())
+	}
+	second, ok := tester.Find("二覧")
+	if !ok {
+		t.Fatalf("cards are not shown: %q", tester.Texts())
+	}
+	app.setPinned("222", true)
+	tester.Frame()
+	pinned, _ := tester.Find("二覧")
+	if pinned.X != second.X || pinned.Y != second.Y {
+		t.Fatalf("pinned card jumped rather than sliding: was=%v now=%v", second, pinned)
+	}
+	tester.Advance(300 * time.Millisecond)
+	pinned, _ = tester.Find("二覧")
+	other, _ := tester.Find("一覧")
+	if pinned.X >= other.X {
+		t.Fatalf("pinned card did not slide before the other: pinned=%v other=%v", pinned, other)
+	}
+}
+
+// TestNativeUIMenuPanelFadesIn checks that the card menu's panel enters
+// through its transition: its items show faintly at first, and fully once
+// the motion completes.
+func TestNativeUIMenuPanelFadesIn(t *testing.T) {
+	app := savedApp(t)
+	app.sidebarOpen = false
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "一覧", Mine: true},
+		[]MylistItem{{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120}})
+	tester := ui.NewTester(app.view, 1120, 760)
+	if err := tester.RightClick("一覧"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tester.Find(locales.MylistMenu()); !ok {
+		t.Fatalf("menu panel is not shown: %q", tester.Texts())
+	}
+	// The brightest pixel of the menu's first item reads as the panel's
+	// opacity there: the item's text against the panel's dark background.
+	item, ok := tester.Find(locales.ActionPin())
+	if !ok {
+		t.Fatalf("menu item is not shown: %q", tester.Texts())
+	}
+	bright := func(r ui.Rect) uint32 {
+		img := tester.Image()
+		var m uint32
+		for x := int(r.X); x < int(r.X+r.W); x += 2 {
+			for y := int(r.Y); y < int(r.Y+r.H); y += 2 {
+				c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+				if v := uint32(c.R) + uint32(c.G) + uint32(c.B); v > m {
+					m = v
+				}
+			}
+		}
+		return m
+	}
+	open := bright(item)
+	tester.Advance(100 * time.Millisecond)
+	rising := bright(item)
+	tester.Advance(200 * time.Millisecond)
+	done := bright(item)
+	if open >= done || rising >= done {
+		t.Fatalf("menu panel does not fade in: at open=%v rising=%v done=%v", open, rising, done)
 	}
 }
 

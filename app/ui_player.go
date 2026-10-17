@@ -60,7 +60,13 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 		controls.Children(func() {
 			// The track playing and the volume grow by the same amount,
 			// which keeps the transport buttons in the middle of the bar.
-			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Gap(10).AlignItems(ui.Center).Children(func() {
+			// The track playing keys its block, so one leaves as the next
+			// fades in.
+			track := "none"
+			if app.player.WatchID != "" {
+				track = app.player.WatchID
+			}
+			ui.Row(c).Key(track).Transition(panelIn).Grow(1).Basis(0).MinWidth(0).Gap(10).AlignItems(ui.Center).Children(func() {
 				if app.player.WatchID != "" {
 					app.thumbnail(c, app.playingTrack(), thumbBarHeight)
 					ui.Column(c).Grow(1).Gap(3).Children(func() {

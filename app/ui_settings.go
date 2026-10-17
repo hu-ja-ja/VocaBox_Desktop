@@ -35,6 +35,41 @@ func (app *nativeApp) settingsView(c *ui.Context) {
 	})
 }
 
+// qualitySelect is the quality drop-down: ui.Select's look, whose panel
+// pops in through the menu's transition, which ui.Select's popups cannot
+// take.
+func (app *nativeApp) qualitySelect(c *ui.Context, options []string) ui.Element {
+	t := app.theme
+	sel := ui.SelectBase(c, &app.qualityOption)
+	trigger := sel.Trigger.Label(locales.SettingsQualityTitle()).Role(ui.RolePopUpButton).
+		Padding(t.Space(1.5), t.Space(3.5)).Gap(t.Space(1.5)).Radius(t.Radius).
+		Justify(ui.SpaceBetween).MinWidth(t.Space(35)).
+		Background(t.Surface).TextColor(t.Text).Border(1, t.Border)
+	if trigger.Hovered() {
+		trigger.Background(t.SurfaceHover)
+	}
+	trigger.Children(func() {
+		ui.Text(c, app.qualityOption).SingleLine()
+		ui.Icon(c, iconArrowDown).FontSize(14).TextColor(t.TextMuted)
+	})
+	sel.Popup(func(panel ui.Element) {
+		panel.MinWidth(trigger.Bounds().W).Margin(t.Space(1), 0, 0, 0).Padding(t.Space(1)).
+			Radius(t.Radius+2).Background(t.Background).Border(1, t.Border).
+			Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).Transition(menuIn)
+		for _, opt := range options {
+			item := sel.Item(opt).Padding(t.Space(1.5), t.Space(2.5)).Radius(t.Radius)
+			switch {
+			case item.Highlighted():
+				item.Background(t.Accent).TextColor(t.AccentText)
+			case opt == app.qualityOption:
+				item.Background(t.Surface)
+			}
+			item.Children(func() { ui.Text(c, opt).SingleLine() })
+		}
+	})
+	return sel.Trigger
+}
+
 // settingsCard is the preferences the app keeps across runs: the quality the
 // audio saved for offline playing is fetched at.
 func (app *nativeApp) settingsCard(c *ui.Context) {
@@ -45,7 +80,7 @@ func (app *nativeApp) settingsCard(c *ui.Context) {
 	ui.Column(c).Gap(4).Padding(16).Radius(12).Background(app.theme.Background).
 		Border(1, app.theme.Border).Children(func() {
 		app.settingRow(c, locales.SettingsQualityTitle(), locales.SettingsQualityBody(), func() {
-			control := ui.Select(c, &app.qualityOption, options).Label(locales.SettingsQualityTitle())
+			control := app.qualitySelect(c, options)
 			if control.Changed() {
 				app.setAudioQuality(audioQualityOfLabel(app.qualityOption))
 				// The saved audio of the enabled mylists stands at the old

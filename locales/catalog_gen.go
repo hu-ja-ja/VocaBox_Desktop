@@ -1155,16 +1155,16 @@ func (msgs Messages) StatusAudioStopped() string {
 	return Catalog.Format(msgs.locale, "statusAudioStopped", nil)
 }
 
-// StatusSavingAudio says "オフライン保存中 {done}/{total}…"
+// StatusSavingAudio says "「{name}」をオフライン保存中 {done}/{total}…"
 // in the language the app shows.
-func StatusSavingAudio(done int, total int) string {
-	return In(i18n.Locale()).StatusSavingAudio(done, total)
+func StatusSavingAudio(name string, done int, total int) string {
+	return In(i18n.Locale()).StatusSavingAudio(name, done, total)
 }
 
-// StatusSavingAudio says "オフライン保存中 {done}/{total}…"
+// StatusSavingAudio says "「{name}」をオフライン保存中 {done}/{total}…"
 // in the language of msgs.
-func (msgs Messages) StatusSavingAudio(done int, total int) string {
-	return Catalog.Format(msgs.locale, "statusSavingAudio", map[string]any{"done": done, "total": total})
+func (msgs Messages) StatusSavingAudio(name string, done int, total int) string {
+	return Catalog.Format(msgs.locale, "statusSavingAudio", map[string]any{"name": name, "done": done, "total": total})
 }
 
 // StatusCombinedCreated says "結合マイリスト「{name}」を作成しました。"

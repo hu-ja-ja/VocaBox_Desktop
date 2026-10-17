@@ -200,7 +200,9 @@ func (app *nativeApp) importInput() {
 // line, its pin and lock marks. Clicking the card opens the mylist; the
 // right-click menu pins and unpins it.
 func (app *nativeApp) mylistCard(c *ui.Context, entry mylistEntry) {
-	card := ui.Button(c, "").Label(entry.Name).Width(mylistCardWidth).
+	card := ui.Button(c, "").Key(entry.ID).Transition(ui.ElementTransition{
+		Enter: motionRow, Exit: &ui.Motion{Opacity: 0, Collapse: true},
+	}).Label(entry.Name).Width(mylistCardWidth).
 		Padding(12).Radius(12).Border(1, app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 	if card.Hovered() {
 		card.Background(app.theme.SurfaceHover)
@@ -262,7 +264,7 @@ func (app *nativeApp) mylistMenu(c *ui.Context, anchor ui.Element, entry mylistE
 		panel.AttachTo(anchor, ui.AnchorTopLeft, ui.AnchorTopLeft).Margin(app.menuY, 0, 0, app.menuX).
 			Padding(4).Radius(app.theme.Radius+2).Background(app.theme.Background).
 			Border(1, app.theme.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).
-			Role(ui.RoleMenu).Label(locales.MylistMenu())
+			Role(ui.RoleMenu).Label(locales.MylistMenu()).Transition(menuIn)
 		// A combined list is pinned like any other; its pin keeps only its
 		// index line, as it has no body to save.
 		label := locales.ActionPin()
@@ -420,7 +422,7 @@ func (app *nativeApp) cardTiles(c *ui.Context, items []MylistItem) {
 // cardTile shows one track's picture as a square tile, a placeholder while
 // it loads or where the track has none.
 func (app *nativeApp) cardTile(c *ui.Context, item MylistItem) {
-	bitmap := app.thumbs[item.WatchID]
+	bitmap := app.thumbAt(item.WatchID)
 	if bitmap == nil && item.Available {
 		app.requestThumbnail(item)
 	}

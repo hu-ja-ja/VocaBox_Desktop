@@ -197,10 +197,10 @@ type nativeApp struct {
 	licenseOpenDialog bool
 	licenseTitle      string
 	licenseBody       string
-	page            *MylistPage
-	nextPage        int
-	hasMore         bool
-	loading         bool
+	page              *MylistPage
+	nextPage          int
+	hasMore           bool
+	loading           bool
 	// loadingID names the mylist a load is fetching, so a page waiting for it
 	// asks once rather than every frame.
 	loadingID   string
@@ -244,6 +244,11 @@ type nativeApp struct {
 	thumbs    map[string]*ui.Bitmap
 	thumbBusy map[string]bool
 	thumbFail map[string]bool
+	// thumbSeen is the frame build that last drew each picture, and
+	// thumbFrame the build being drawn: the memory cache trims the pictures
+	// no frame is drawing and keeps the ones a screen shows.
+	thumbSeen  map[string]uint64
+	thumbFrame uint64
 	// fillQueue holds the entries of the loaded mylist whose pictures are not
 	// cached yet; the view fills them one at a time in the background.
 	fillQueue  []MylistItem
@@ -271,8 +276,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	t.Radius = 8
 	t.Spacing = 4
 	router := ui.NewRouter(homePath)
-	// Pages show at once: the mylist a page waits for does not load twice.
-	router.Transition = ui.TransitionNone
+	router.Transition = ui.TransitionFade
 	// The card's theme is the app's, its background see-through: the root
 	// of a window fills all of it, and the card's rounded corners have to
 	// show what is behind them rather than a square of colour.
@@ -291,6 +295,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 		thumbs:       map[string]*ui.Bitmap{},
 		thumbBusy:    map[string]bool{},
 		thumbFail:    map[string]bool{},
+		thumbSeen:    map[string]uint64{},
 		fill:         newSavedFill(),
 		downloads:    newAudioDownloads(),
 		audioStats:   map[string]audioStat{},
@@ -316,10 +321,52 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	return app
 }
 
+// The motions the app's screens share: a panel rises in and sinks out,
+// a list row rises in, a menu pops in (the attach step gives the panel
+// its place every frame, so it moves by no offset), and the sidebar
+// slides in from and out to the rail's side. While the desktop asks for
+// less motion, the fades alone remain.
+var (
+	motionIn      = &ui.Motion{Opacity: 0, Y: 10}
+	motionOut     = &ui.Motion{Opacity: 0, Y: -10}
+	motionMenu    = &ui.Motion{Opacity: 0, Scale: 0.95}
+	motionFade    = &ui.Motion{Opacity: 0}
+	motionRow     = &ui.Motion{Opacity: 0, Y: 8}
+	motionSidebar = &ui.Motion{Opacity: 0, X: -262}
+)
+
+// panelIn is the transition a screen appearing inside the content panel
+// takes: it rises in, and sinks out as it leaves.
+var panelIn = ui.ElementTransition{Enter: motionIn, Exit: motionOut}
+
+// menuIn is the transition a popover's panel takes popping in.
+var menuIn = ui.ElementTransition{Enter: motionMenu}
+
+// dialogFade is the transition a dialog's backdrop takes: the whole
+// dialog, dimmed window and panel alike, fades in at once. Closing drops
+// the dialog from the view at once, so it has no way out to animate.
+var dialogFade = ui.ElementTransition{Enter: motionFade}
+
+// modalDialog shows fn's dialog the way ui.Modal does — the dimmed window
+// and the centered panel — and fades the whole of it in at once, as a
+// dialog is a new part of the interface that its transition does not move.
+func (app *nativeApp) modalDialog(c *ui.Context, open *bool, fn func()) {
+	ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
+		backdrop.Background(ui.RGBA(0, 0, 0, 0.4)).Transition(dialogFade)
+		panel.Padding(app.theme.Space(5)).Gap(app.theme.Space(3)).
+			Radius(app.theme.Space(2.5)).Background(app.theme.Background).
+			Shadow(0, 10, 30, 0, ui.RGBA(0, 0, 0, 0.3))
+		fn()
+	})
+}
+
 func (app *nativeApp) view(c *ui.Context) {
 	// The window's thread takes the work the background handed over; without
 	// one this frame build is that thread.
 	app.runHeld()
+	// One count for this build: the pictures it draws are what the memory
+	// cache keeps when it trims.
+	app.thumbFrame++
 	c.SetTheme(app.theme)
 	ui.Column(c).Fill().Background(app.theme.Background).Padding(12).Gap(12).Children(func() {
 		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Gap(12).Children(func() {
@@ -343,21 +390,30 @@ func (app *nativeApp) view(c *ui.Context) {
 		})
 		app.playerBar(c)
 	})
-	ui.Modal(c, &app.importing, func() { app.importDialog(c) })
-	ui.Modal(c, &app.combining, func() { app.combineDialog(c) })
-	ui.Modal(c, &app.confirmLogout, func() { app.logoutDialog(c) })
-	ui.Modal(c, &app.confirmDelete, func() { app.deleteDialog(c) })
-	ui.Modal(c, &app.licenseOpenDialog, func() { app.licenseDialog(c) })
+	app.modalDialog(c, &app.importing, func() { app.importDialog(c) })
+	app.modalDialog(c, &app.combining, func() { app.combineDialog(c) })
+	app.modalDialog(c, &app.confirmLogout, func() { app.logoutDialog(c) })
+	app.modalDialog(c, &app.confirmDelete, func() { app.deleteDialog(c) })
+	app.modalDialog(c, &app.licenseOpenDialog, func() { app.licenseDialog(c) })
 	// A menu whose mylist left the screen, as after a refresh, does not stay
 	// open on the element that took its place.
 	if app.menuOpen && !app.menuBuilt {
 		app.menuOpen = false
 	}
 	app.menuBuilt = false
+	// The overlay layer is here every frame, so a popover or dialog opening
+	// later finds a parent that was there before it, and enters through its
+	// transition rather than showing at once.
+	ui.Overlay(c, func() {})
 }
 
 func (app *nativeApp) sidebar(c *ui.Context) {
-	ui.Column(c).Width(250).FillHeight().Padding(12, 20, 20, 12).Gap(16).
+	// The rail takes the sidebar's place as the sidebar folds its width
+	// away, and yields it back as the sidebar grows out of the rail's side.
+	ui.Column(c).Key("sidebar").Transition(ui.ElementTransition{
+		Enter: &ui.Motion{Collapse: true, Opacity: 0},
+		Exit:  &ui.Motion{Collapse: true, Opacity: 0},
+	}).Width(250).FillHeight().Padding(12, 20, 20, 12).Gap(16).
 		Background(app.theme.Surface).Border(1, app.theme.Border).Radius(12).
 		Children(func() {
 			ui.Row(c).FillWidth().Height(48).AlignItems(ui.Center).Gap(12).Children(func() {
@@ -507,7 +563,9 @@ func (app *nativeApp) accountAvatar(c *ui.Context) {
 // the way to the home and to the pinned mylists, and the account — rather
 // than only reopening the sidebar.
 func (app *nativeApp) sidebarRail(c *ui.Context) {
-	ui.Column(c).Width(64).FillHeight().PaddingY(12).Gap(12).
+	ui.Column(c).Key("rail").Transition(ui.ElementTransition{
+		Enter: motionIn, Exit: motionIn,
+	}).Width(64).FillHeight().PaddingY(12).Gap(12).
 		Background(app.theme.Surface).Border(1, app.theme.Border).Radius(12).
 		Children(func() {
 			ui.Row(c).FillWidth().Height(48).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
@@ -579,7 +637,7 @@ func (app *nativeApp) railMylist(c *ui.Context, entry mylistEntry) {
 func (app *nativeApp) railTile(c *ui.Context, items []MylistItem) {
 	if len(items) > 0 {
 		item := items[0]
-		bitmap := app.thumbs[item.WatchID]
+		bitmap := app.thumbAt(item.WatchID)
 		if bitmap == nil && item.Available {
 			app.requestThumbnail(item)
 		}
@@ -647,7 +705,7 @@ func (app *nativeApp) railAccountMenu(c *ui.Context, anchor ui.Element) {
 	ui.PopoverBase(c, anchor, &app.railAccountOpen, func(panel ui.Element) {
 		panel.Padding(4).Radius(app.theme.Radius+2).Background(app.theme.Background).
 			Border(1, app.theme.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).
-			Role(ui.RoleMenu).Label(locales.AccountMenu())
+			Role(ui.RoleMenu).Label(locales.AccountMenu()).Transition(menuIn)
 		name := app.accountName
 		if name == "" {
 			name = locales.SignedIn()
@@ -710,7 +768,8 @@ func (app *nativeApp) statusLine(c *ui.Context) {
 	if app.statusError {
 		color = app.theme.Danger
 	}
-	ui.Text(c, app.status).FontSize(12).TextColor(color)
+	ui.Text(c, app.status).FontSize(12).TextColor(color).
+		Transition(ui.ElementTransition{Enter: motionIn, Exit: motionIn})
 }
 
 // currentSaved returns the index line of the mylist shown, when there is one.

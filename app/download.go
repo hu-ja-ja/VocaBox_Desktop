@@ -417,12 +417,17 @@ func (app *nativeApp) savedAudioPath(watchID string) string {
 }
 
 // reportAudioTrack shows the track a pass is fetching now, which the list
-// marks as in progress, and how far the pass is.
+// marks as in progress, and how far the pass is. The mylist's name goes in,
+// as the line shows on pages the pass is not about.
 func (app *nativeApp) reportAudioTrack(id, watchID string, done, total int) {
 	app.update(func() {
 		app.audioProgress = true
 		app.audioNow, app.audioNowList = watchID, id
-		app.setStatus(locales.StatusSavingAudio(done, total))
+		name := id
+		if entry := app.savedEntry(id); entry != nil && entry.Name != "" {
+			name = entry.Name
+		}
+		app.setStatus(locales.StatusSavingAudio(name, done, total))
 	})
 }
 

@@ -32,10 +32,11 @@ const (
 	thumbConcurrency = 2
 	thumbInterval    = 100 * time.Millisecond
 	thumbCooldown    = 30 * time.Second
-	// maxThumbsInMemory caps the decoded pictures kept in memory; at the cap
-	// the whole map is dropped and pictures reload from the disk cache as rows
-	// ask again. Pictures are halved as they are decoded (decodeThumbnail),
-	// so a screenful of rows and the home's cards are the room a cache needs.
+	// maxThumbsInMemory is where the memory cache trims: past it, the pictures
+	// no frame is drawing are dropped, and the ones a screen shows stay,
+	// whatever their count. Pictures are halved as they are decoded
+	// (decodeThumbnail), so a screenful of rows and the home's cards are the
+	// room a cache needs.
 	maxThumbsInMemory = 80
 	// thumbDecodeHalfW is the width from which a picture is halved while it
 	// is decoded: a .M picture is 320×180, and half of it still covers a
@@ -320,7 +321,7 @@ func isSafeID(id string) bool {
 // follows the picture's aspect ratio, inside a slot that keeps titles lined
 // up however narrow the picture is.
 func (app *nativeApp) thumbnail(c *ui.Context, item MylistItem, h float32) {
-	bitmap := app.thumbs[item.WatchID]
+	bitmap := app.thumbAt(item.WatchID)
 	width := thumbWidth(h, 0, 0)
 	if bitmap != nil {
 		w, hh := bitmap.Size()
@@ -430,32 +431,51 @@ func decodeThumbnail(body []byte) (*ui.Bitmap, error) {
 	return ui.NewBitmap(img), nil
 }
 
+// thumbAt returns the picture the memory cache holds for watchID, marking
+// it as one of the frame's: the cache trims the pictures no frame draws.
+func (app *nativeApp) thumbAt(watchID string) *ui.Bitmap {
+	bitmap := app.thumbs[watchID]
+	if bitmap != nil {
+		app.thumbSeen[watchID] = app.thumbFrame
+	}
+	return bitmap
+}
+
+// trimThumbs makes room once the memory cache is at its cap: the pictures
+// the last frame drew stay, and only those no frame is drawing go. Dropping
+// what a screen is showing would only make it decode them again.
+func (app *nativeApp) trimThumbs() {
+	if len(app.thumbs) < maxThumbsInMemory {
+		return
+	}
+	for id := range app.thumbs {
+		if app.thumbSeen[id] < app.thumbFrame-1 {
+			delete(app.thumbs, id)
+			delete(app.thumbSeen, id)
+		}
+	}
+}
+
 // requestThumbnail loads item's picture in the background: the memory
 // cache, the disk cache, then the CDN. Loads of one video collapse into one
-// goroutine, and a failure is remembered until the mylist is loaded anew.
+// goroutine, a failure is remembered until the mylist is loaded anew, and
+// the picture is decoded there rather than on the view's thread, so a
+// screenful arriving at once does not stall the frames behind the batch.
 func (app *nativeApp) requestThumbnail(item MylistItem) {
 	if app.window == nil || item.WatchID == "" || app.thumbBusy[item.WatchID] || app.thumbFail[item.WatchID] {
 		return
 	}
-	if len(app.thumbs) >= maxThumbsInMemory {
-		// ponytail: drop the whole memory cache at the cap; pictures reload from
-		// the disk cache, so an LRU can wait for a profile that asks for it.
-		app.thumbs = map[string]*ui.Bitmap{}
-	}
+	app.trimThumbs()
 	app.thumbBusy[item.WatchID] = true
 	watchID, thumbURL := item.WatchID, item.ThumbURL
 	go func() {
 		body, err := app.mylist.Thumbnail(watchID, thumbURL)
-		if err != nil {
-			app.window.Update(func() {
-				delete(app.thumbBusy, watchID)
-				app.thumbFail[watchID] = true
-			})
-			return
+		var bitmap *ui.Bitmap
+		if err == nil {
+			bitmap, err = decodeThumbnail(body)
 		}
 		app.window.Update(func() {
 			delete(app.thumbBusy, watchID)
-			bitmap, err := decodeThumbnail(body)
 			if err != nil || !thumbSizeOK(bitmap) {
 				app.thumbFail[watchID] = true
 				return

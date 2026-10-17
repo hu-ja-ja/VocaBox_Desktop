@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // TestDecodeThumbnailHalvesOversizedPictures pins what the memory cache
@@ -43,4 +46,37 @@ func encodeJPEG(t *testing.T, w, h int) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+// TestTrimThumbsKeepsWhatTheFramesDraw pins the memory cache's trim: a
+// screen showing more pictures than the cap keeps them, a picture the last
+// frame drew stays as the cap comes, and the ones no frame is drawing go.
+func TestTrimThumbsKeepsWhatTheFramesDraw(t *testing.T) {
+	app := savedApp(t)
+	app.thumbFrame = 10
+	for i := 0; i <= maxThumbsInMemory; i++ {
+		id := fmt.Sprintf("sm%d", i)
+		app.thumbs[id] = &ui.Bitmap{}
+		if app.thumbAt(id) == nil {
+			t.Fatalf("thumbAt(%q) = nil; want the cached picture", id)
+		}
+	}
+	// The frame after the one that drew them keeps them: the cap yields
+	// rather than making the screen decode them all again.
+	app.thumbFrame++
+	app.trimThumbs()
+	if len(app.thumbs) != maxThumbsInMemory+1 {
+		t.Fatalf("%d pictures left after the trim; want the %d the screen drew",
+			len(app.thumbs), maxThumbsInMemory+1)
+	}
+	// A later frame drawing one picture keeps it and drops the rest.
+	app.thumbFrame++
+	app.thumbAt("sm0")
+	app.trimThumbs()
+	if app.thumbs["sm0"] == nil {
+		t.Error("the trim dropped the picture the frame drew")
+	}
+	if len(app.thumbs) != 1 {
+		t.Fatalf("%d pictures left; want only the one the frame drew", len(app.thumbs))
+	}
 }

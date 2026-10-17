@@ -133,9 +133,10 @@
   "statusDeleted": "保存したマイリストを削除しました。",
   "statusAudioQueued": "オフライン保存を開始しました。",
   "statusAudioStopped": "オフライン保存を停止しました。",
-  "statusSavingAudio": "オフライン保存中 {done}/{total}…",
+  "statusSavingAudio": "「{name}」をオフライン保存中 {done}/{total}…",
   "@statusSavingAudio": {
     "placeholders": {
+      "name": { "type": "String" },
       "done": { "type": "int" },
       "total": { "type": "int" }
     }

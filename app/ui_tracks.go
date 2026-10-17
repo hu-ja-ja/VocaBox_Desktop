@@ -139,7 +139,9 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		label := trackLabel(item)
 		// The mylist carries no playback state: the player's own screens show
 		// what plays, and a row here only reacts to the pointer.
-		row := ui.Button(c, "").Label(label).FillWidth().Padding(8, 12).Radius(8).
+		row := ui.Button(c, "").Label(label).
+			Transition(ui.ElementTransition{Enter: motionRow}).
+			FillWidth().Padding(8, 12).Radius(8).
 			BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 		if row.Hovered() {
 			row.Background(app.theme.SurfaceHover)
@@ -191,7 +193,11 @@ func (app *nativeApp) queueView(c *ui.Context) {
 // first under shuffle, labelled with the mylist the queue came from and its
 // size.
 func (app *nativeApp) queuePanel(c *ui.Context) {
-	ui.Column(c).Grow(1).FillHeight().Gap(4).Padding(18, 26, 12).Children(func() {
+	// The queue rises up from under the player bar, and sinks back down
+	// when it closes.
+	ui.Column(c).Transition(ui.ElementTransition{
+		Enter: &ui.Motion{Y: 40, Opacity: 0}, Exit: &ui.Motion{Y: 40, Opacity: 0},
+	}).Grow(1).FillHeight().Gap(4).Padding(18, 26, 12).Children(func() {
 		ui.Column(c).Gap(3).Children(func() {
 			ui.Text(c, locales.PlayerQueue()).FontSize(21).Bold().SingleLine().Ellipsis("…")
 			ui.Text(c, app.queueMeta()).FontSize(12).TextColor(app.theme.TextMuted)
@@ -251,7 +257,8 @@ func (app *nativeApp) queueRows(c *ui.Context) {
 func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 	playable := isPlayable(item)
 	playing := item.WatchID != "" && item.WatchID == app.player.WatchID
-	row := ui.Box(c).FillWidth().Padding(8, 12).Justify(ui.Start).AlignItems(ui.Center).
+	row := ui.Box(c).Transition(ui.ElementTransition{Enter: motionRow}).
+		FillWidth().Padding(8, 12).Justify(ui.Start).AlignItems(ui.Center).
 		BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border)
 	hovered := row.Hovered()
 	switch {

@@ -105,6 +105,20 @@ func TestIsPlayable(t *testing.T) {
 	}
 }
 
+// TestReportAudioTrackNamesTheMylist checks the progress line names the
+// mylist being saved: the line shows on pages the pass is not about.
+func TestReportAudioTrackNamesTheMylist(t *testing.T) {
+	app, _ := downloadTestApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "朝のリスト"}, nil)
+
+	app.reportAudioTrack("111", "sm1", 2, 5)
+	app.runHeld()
+
+	if want := "「朝のリスト」をオフライン保存中 2/5…"; app.status != want {
+		t.Fatalf("status = %q; want %q", app.status, want)
+	}
+}
+
 // TestDownloadMylistSavesWhatIsMissing checks one pass: the track the mylist
 // holds and this PC has not saved is fetched at the preset's band, and a
 // track already saved is left alone.
