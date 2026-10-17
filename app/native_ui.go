@@ -421,10 +421,15 @@ func (app *nativeApp) sidebar(c *ui.Context) {
 		})
 }
 
-// sidebarMylistItem is one mylist of the sidebar: the way to it, its pin
-// badge, and its right-click menu. It reports a click.
+// sidebarMylistItem is one mylist of the sidebar: the way to it, its saving
+// mark and pin badge as the home's card carries them, and its right-click
+// menu. It reports a click.
 func (app *nativeApp) sidebarMylistItem(c *ui.Context, entry mylistEntry) bool {
 	item := ui.SidebarItem(c, mylistPath(entry.ID), nil, entry.Name)
+	if entry.Download {
+		// The sidebar is narrow: the chip's mark alone, without its count.
+		item.Children(func() { app.audioBadge(c, app.audioMylistState(entry.ID), 20, 11) })
+	}
 	if entry.Pinned {
 		item.Children(func() { app.pinBadge(c) })
 	}

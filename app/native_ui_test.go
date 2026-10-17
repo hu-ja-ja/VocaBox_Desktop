@@ -722,6 +722,54 @@ func TestNativeUISidebarMylistsLikeHome(t *testing.T) {
 	}
 }
 
+// TestNativeUISidebarMylistSavingMark checks the sidebar's mylists carry the
+// home's saving mark without its count: a mylist saved for offline playing
+// shows the round mark on the row, the count stays on the home's chip, and
+// turning the saving off takes the mark away.
+func TestNativeUISidebarMylistSavingMark(t *testing.T) {
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "オフラインのリスト"}, []MylistItem{
+		{WatchID: "sm1", Title: "保存の曲", Available: true, Duration: 120},
+	})
+	if saved, err := app.mylist.SetDownload("111", true); err != nil {
+		t.Fatal(err)
+	} else {
+		app.saved = saved
+	}
+	app.audioStats["111"] = audioStat{saved: 1, total: 2}
+	tester := ui.NewTester(app.view, 1120, 760)
+
+	item, ok := tester.Find("オフラインのリスト")
+	if !ok || item.X > 250 {
+		t.Fatalf("the downloading mylist is missing from the sidebar: %v, %v", item, ok)
+	}
+	// The mark sits on the item's row, to the right of its name.
+	mark, ok := tester.Find("オフライン保存予定")
+	if !ok || mark.X < item.X || mark.X > 250 || mark.Y >= item.Y+item.H || item.Y >= mark.Y+mark.H {
+		t.Fatalf("the sidebar item carries no saving mark: mark=%v item=%v", mark, item)
+	}
+	counts := 0
+	for _, text := range tester.Texts() {
+		if text == "1/2" {
+			counts++
+		}
+	}
+	if counts != 1 {
+		t.Fatalf("the saving count shows %d times; want the home's chip only: %q", counts, tester.Texts())
+	}
+
+	// Turning the saving off takes the mark from the sidebar and the home.
+	if saved, err := app.mylist.SetDownload("111", false); err != nil {
+		t.Fatal(err)
+	} else {
+		app.saved = saved
+	}
+	tester.Frame()
+	if _, ok := tester.Find("オフライン保存予定"); ok {
+		t.Fatalf("the saving mark stayed on the turned-off mylist: %q", tester.Texts())
+	}
+}
+
 // TestNativeUISidebarUnpinsFromMenu checks the sidebar's right-click menu:
 // choosing ピン留めを外す unpins the mylist, keeping its saved copy in the
 // sidebar and the home.
