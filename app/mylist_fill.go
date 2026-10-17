@@ -5,13 +5,20 @@ import (
 	"sync"
 )
 
+// fillTask is one queued mylist body: force fetches a body already saved
+// again, which is how a mylist that grew on niconico catches up.
+type fillTask struct {
+	id    string
+	force bool
+}
+
 // savedFill queues the mylists whose bodies the background saving still has
 // to fetch, and feeds them to one worker: the metadata API sees one mylist at
 // a time, however many the account has. add is safe to call from the UI
 // thread while the worker runs.
 type savedFill struct {
 	mu      sync.Mutex
-	pending []string
+	pending []fillTask
 	queued  map[string]bool
 	wake    chan struct{}
 }
@@ -21,7 +28,10 @@ func newSavedFill() *savedFill {
 }
 
 // add queues a mylist; one already queued or being saved is left alone.
-func (f *savedFill) add(id string) {
+//
+//	shortcut: a force request for a mylist already queued without it is
+//	dropped, and its saved body is left standing; upgrade if that shows up.
+func (f *savedFill) add(id string, force bool) {
 	f.mu.Lock()
 	if f.queued[id] {
 		f.mu.Unlock()
@@ -31,7 +41,7 @@ func (f *savedFill) add(id string) {
 		f.queued = map[string]bool{}
 	}
 	f.queued[id] = true
-	f.pending = append(f.pending, id)
+	f.pending = append(f.pending, fillTask{id: id, force: force})
 	f.mu.Unlock()
 	select {
 	case f.wake <- struct{}{}:
@@ -39,16 +49,16 @@ func (f *savedFill) add(id string) {
 	}
 }
 
-// take returns the next queued mylist, "" when none is left.
-func (f *savedFill) take() string {
+// take returns the next queued mylist, an empty task when none is left.
+func (f *savedFill) take() fillTask {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.pending) == 0 {
-		return ""
+		return fillTask{}
 	}
-	id := f.pending[0]
+	task := f.pending[0]
 	f.pending = f.pending[1:]
-	return id
+	return task
 }
 
 // done forgets a mylist the worker finished, so a later add queues it again.
@@ -64,27 +74,33 @@ func (app *nativeApp) saveBody(id string) {
 	if app.mylist.HasSavedBody(id) {
 		return
 	}
-	app.fill.add(id)
+	app.fill.add(id, false)
+}
+
+// refreshBody queues the mylist's body to be fetched again in the background,
+// replacing the snapshot a mylist that grew on niconico still shows.
+func (app *nativeApp) refreshBody(id string) {
+	app.fill.add(id, true)
 }
 
 // fillWorker saves the queued mylists' bodies, one at a time.
 func (app *nativeApp) fillWorker() {
 	for {
-		id := app.fill.take()
-		if id == "" {
+		task := app.fill.take()
+		if task.id == "" {
 			<-app.fill.wake
 			continue
 		}
-		app.fillSavedBody(id)
-		app.fill.done(id)
+		app.fillSavedBody(task.id, task.force)
+		app.fill.done(task.id)
 	}
 }
 
-// fillSavedBody saves one mylist's body, skipping one already saved, and
-// shows the refreshed index in the view. A failure is only worth a line on
-// the log: the mylist opens from the API without a body.
-func (app *nativeApp) fillSavedBody(id string) {
-	if app.mylist.HasSavedBody(id) {
+// fillSavedBody saves one mylist's body — replacing the one already saved
+// when force is set — and shows the refreshed index in the view. A failure is
+// only worth a line on the log: the mylist opens from the API without a body.
+func (app *nativeApp) fillSavedBody(id string, force bool) {
+	if !force && app.mylist.HasSavedBody(id) {
 		return
 	}
 	if _, err := app.mylist.RefreshMylist(id); err != nil {

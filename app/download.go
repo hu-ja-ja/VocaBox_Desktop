@@ -167,7 +167,7 @@ func (app *nativeApp) queueAudio(id string) {
 		app.downloads.add(id)
 		return
 	}
-	app.fill.add(id)
+	app.fill.add(id, false)
 }
 
 // enqueueSavedAudio queues the audio of a mylist the index says is enabled.

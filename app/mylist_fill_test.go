@@ -80,9 +80,9 @@ func TestOwnMylistsFillBodiesInBackground(t *testing.T) {
 		t.Errorf("the view holds %d saved mylists; want 2", len(app.saved))
 	}
 
-	// A saved body is never fetched again.
+	// A saved body is never fetched again unless the fetch is forced.
 	before := atomic.LoadInt32(&pages)
-	app.fillSavedBody("200")
+	app.fillSavedBody("200", false)
 	if got := atomic.LoadInt32(&pages); got != before {
 		t.Errorf("filling a saved body made %d requests; want none", got-before)
 	}
@@ -138,4 +138,47 @@ func TestPinSavedBodyFetchesNothing(t *testing.T) {
 	if got := atomic.LoadInt32(hits); got != before {
 		t.Errorf("pinning a saved mylist made %d requests; want none", got-before)
 	}
+}
+
+// TestOwnMylistGrowthRefreshesItsBody checks that a mylist which grew on
+// niconico has its saved body fetched again by the sign-in sync, so opening
+// it shows the new entry rather than the older snapshot.
+func TestOwnMylistGrowthRefreshesItsBody(t *testing.T) {
+	var count int32 = 1
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/users/me/mylists", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"meta":{"status":200},"data":{"mylists":[`+
+			`{"id":200,"isPublic":true,"name":"自分のA","itemsCount":%d,"sampleItems":[]}]}}`,
+			atomic.LoadInt32(&count))
+	})
+	mux.HandleFunc("/v2/mylists/200", func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.LoadInt32(&count)
+		items := `{"watchId":"sm1","video":{"id":"sm1","title":"曲A","duration":125}}`
+		if n > 1 {
+			items += `,{"watchId":"sm2","video":{"id":"sm2","title":"曲B","duration":130}}`
+		}
+		_, _ = fmt.Fprintf(w, `{"meta":{"status":200},"data":{"mylist":{"name":"自分のA",`+
+			`"items":[%s],"totalItemCount":%d,"hasNext":false}}}`, items, n)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	m := &Mylist{client: srv.Client(), baseURL: srv.URL, configDir: t.TempDir()}
+	app := newNativeApp(m)
+	app.loggedIn = true
+
+	app.loadOwnMylists()
+	waitForApp(t, app, "the mylist's first body", func() bool { return m.HasSavedBody("200") })
+	fillIdle(t, app)
+	if body, err := m.LoadSavedBody("200"); err != nil || len(body.Items) != 1 {
+		t.Fatalf("LoadSavedBody = %+v, %v; want the one-entry body", body, err)
+	}
+
+	// The mylist grew on niconico: the next sync fetches its body again.
+	atomic.StoreInt32(&count, 2)
+	app.loadOwnMylists()
+	waitForApp(t, app, "the mylist's body to catch up", func() bool {
+		body, err := m.LoadSavedBody("200")
+		return err == nil && len(body.Items) == 2
+	})
+	fillIdle(t, app)
 }

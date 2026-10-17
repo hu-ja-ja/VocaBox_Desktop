@@ -154,7 +154,8 @@ func (app *nativeApp) loadOwnMylists() {
 			log.Printf("mylists: %v", err)
 			return
 		}
-		if _, err := app.mylist.SyncOwn(own); err != nil {
+		synced, err := app.mylist.SyncOwn(own)
+		if err != nil {
 			log.Printf("mylists: %v", err)
 			return
 		}
@@ -162,16 +163,42 @@ func (app *nativeApp) loadOwnMylists() {
 			if !app.loggedIn {
 				return
 			}
+			// The view still holds the index the sync just replaced, so a
+			// mylist it lists at another size is one whose saved body is a
+			// snapshot from before the change.
+			oldSize := sizeBefore(app.saved, synced)
 			app.reloadSaved()
 			// Every own mylist gets a saved body, so the home opens offline;
-			// the ones already saved are skipped by saveBody.
+			// one that grew has its snapshot fetched again, and the ones that
+			// stand are skipped by saveBody.
 			for _, entry := range app.saved {
-				if entry.Mine {
+				if !entry.Mine {
+					continue
+				}
+				if oldSize[entry.ID] {
+					app.refreshBody(entry.ID)
+				} else {
 					app.saveBody(entry.ID)
 				}
 			}
 		})
 	}()
+}
+
+// sizeBefore reports which mylists synced lists with another item count than
+// before: their saved body holds the entries from before the change.
+func sizeBefore(before, synced []SavedIndexEntry) map[string]bool {
+	was := make(map[string]int, len(before))
+	for _, entry := range before {
+		was[entry.ID] = entry.TotalItemCount
+	}
+	changed := map[string]bool{}
+	for _, entry := range synced {
+		if count, ok := was[entry.ID]; ok && count != entry.TotalItemCount {
+			changed[entry.ID] = true
+		}
+	}
+	return changed
 }
 
 // loadAccount fetches the signed-in account's name and picture in the
