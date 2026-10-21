@@ -31,7 +31,7 @@ var Entries = []Entry{
 	{Name: "Lucide", Version: "", Group: GroupLucideIcons, License: "ISC, MIT", Copyright: "", URL: "https://lucide.dev", TextIndex: 0},
 	{Name: "github.com/Eyevinn/hls-m3u8", Version: "v0.6.5", Group: GroupGoModules, License: "BSD-3-Clause", Copyright: "", URL: "https://github.com/Eyevinn/hls-m3u8/blob/v0.6.5/LICENSE", TextIndex: 1},
 	{Name: "github.com/ebitengine/purego", Version: "v0.11.1", Group: GroupGoModules, License: "Apache-2.0", Copyright: "", URL: "https://github.com/ebitengine/purego/blob/v0.11.1/LICENSE", TextIndex: 2},
-	{Name: "github.com/egoist/mygo", Version: "v0.5.5", Group: GroupGoModules, License: "MIT", Copyright: "", URL: "https://github.com/egoist/mygo/blob/v0.5.5/LICENSE", TextIndex: 3},
+	{Name: "github.com/egoist/mygo", Version: "v0.6.0", Group: GroupGoModules, License: "MIT", Copyright: "", URL: "https://github.com/egoist/mygo/blob/v0.6.0/LICENSE", TextIndex: 3},
 	{Name: "github.com/go-text/typesetting", Version: "v0.3.5", Group: GroupGoModules, License: "BSD-3-Clause, Unlicense", Copyright: "", URL: "https://github.com/go-text/typesetting/blob/v0.3.5/LICENSE", TextIndex: 4},
 	{Name: "golang.org/x/image", Version: "v0.47.0", Group: GroupGoModules, License: "BSD-3-Clause", Copyright: "", URL: "https://cs.opensource.google/go/x/image/+/v0.47.0:LICENSE", TextIndex: 5},
 	{Name: "golang.org/x/text", Version: "v0.43.0", Group: GroupGoModules, License: "BSD-3-Clause", Copyright: "", URL: "https://cs.opensource.google/go/x/text/+/v0.43.0:LICENSE", TextIndex: 5},

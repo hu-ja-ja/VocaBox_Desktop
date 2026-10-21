@@ -211,7 +211,7 @@ func TestNativeUIShowsLicenses(t *testing.T) {
 	}
 	// The list names a Go module by the package it ends in; opening the row
 	// spells the module out.
-	if got := licenseTitle(entry); got != "mygo v0.5.5  ·  MIT" {
+	if got := licenseTitle(entry); got != "mygo v0.6.0  ·  MIT" {
 		t.Fatalf("the list names the module %q; want its package name", got)
 	}
 	tester.Scroll(560, 500, 0, 160)

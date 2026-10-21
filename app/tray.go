@@ -38,7 +38,9 @@ const (
 // be created leaves the app as it was: a close then quits rather than
 // leaving no way back.
 func (app *nativeApp) setupTray() {
-	tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIconPNG(false)})
+	// The ID keeps the choice the user made in the taskbar's settings, to
+	// show the icon or keep it in the overflow, at the next launch.
+	tray, err := mygo.NewTray(mygo.TrayOptions{ID: "main", Icon: trayIconPNG(false)})
 	if err != nil {
 		log.Printf("tray: %v", err)
 		return

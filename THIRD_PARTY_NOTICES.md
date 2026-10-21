@@ -421,7 +421,7 @@ For more information, please refer to <https://unlicense.org/>
 
 Used by:
 
-- github.com/egoist/mygo v0.5.5
+- github.com/egoist/mygo v0.6.0
 
 ```
 MIT License
