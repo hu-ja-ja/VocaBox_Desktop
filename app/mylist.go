@@ -33,7 +33,7 @@ const (
 	// hasNext cannot loop forever (200 pages * 100 items).
 	maxMylistPages = 200
 	// mylistUserAgent identifies this client, as the community docs ask.
-	mylistUserAgent = "VocaBox/0.1.0"
+	mylistUserAgent = "VocaBox/0.2.0"
 )
 
 // errMylistInput is returned when the input is neither a numeric mylist ID

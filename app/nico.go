@@ -45,7 +45,7 @@ const (
 	// playbackUserAgent identifies the app to niconico and to the delivery
 	// edge. The browser-like prefix keeps niconico from redirecting API
 	// calls to its SPA page.
-	playbackUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) VocaBox/0.1.0"
+	playbackUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) VocaBox/0.2.0"
 	// maxNicoBody bounds every playback API and playlist response.
 	maxNicoBody = 8 << 20
 )
