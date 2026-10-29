@@ -25,10 +25,33 @@ var (
 	audioTestIV  = bytes.Repeat([]byte{0x2a}, aes.BlockSize)
 )
 
-// audioTestSegment is one plaintext segment: a CMAF box the downloader's
-// check accepts.
+// audioTestBox is one box: its size, type, and payload.
+func audioTestBox(kind string, payload []byte) []byte {
+	box := make([]byte, 8+len(payload))
+	binary.BigEndian.PutUint32(box[0:4], uint32(len(box)))
+	copy(box[4:8], kind)
+	copy(box[8:], payload)
+	return box
+}
+
+// audioTestSegment is one plaintext segment as the edge serves it: a type box,
+// a segment index, and one movie fragment.
 func audioTestSegment(fill byte) []byte {
-	return append([]byte("\x00\x00\x00\x10moof"), bytes.Repeat([]byte{fill}, 96)...)
+	return bytes.Join([][]byte{
+		audioTestBox("styp", nil),
+		audioTestBox("sidx", bytes.Repeat([]byte{0x5a}, 12)),
+		audioTestFragment(fill),
+	}, nil)
+}
+
+// audioTestFragment is the part of a segment the saved file keeps.
+func audioTestFragment(fill byte) []byte {
+	return audioTestBox("moof", bytes.Repeat([]byte{fill}, 96))
+}
+
+// audioTestSavedSegment is what the save writes for one segment.
+func audioTestSavedSegment(fill byte) []byte {
+	return bytes.Join([][]byte{audioTestBox("styp", nil), audioTestFragment(fill)}, nil)
 }
 
 // mvhdInit is an initialization section holding one movie header of the given
@@ -118,7 +141,7 @@ func newAudioTestServer(t *testing.T) *audioTestServer {
 	for _, band := range bands {
 		first, second := audioTestSegment(0x11), audioTestSegment(0x22)
 		plain[band] = [][]byte{first, second}
-		s.want[band] = bytes.Join([][]byte{wantInit, first, second}, nil)
+		s.want[band] = bytes.Join([][]byte{wantInit, audioTestSavedSegment(0x11), audioTestSavedSegment(0x22)}, nil)
 	}
 
 	mux := http.NewServeMux()
@@ -287,6 +310,51 @@ func TestWithMovieDuration(t *testing.T) {
 	plain := []byte("\x00\x00\x00\x10ftyp")
 	if got := withMovieDuration(plain, 12_012); !bytes.Equal(got, plain) {
 		t.Fatalf("a section without a movie header was changed: %v", got)
+	}
+}
+
+// TestDropSegmentIndexes checks the segment write: the per-segment index is
+// left out, and a segment without one is kept as it is.
+func TestDropSegmentIndexes(t *testing.T) {
+	if got := dropSegmentIndexes(audioTestSegment(0x33)); !bytes.Equal(got, audioTestSavedSegment(0x33)) {
+		t.Fatalf("saved %v; want the segment without its index", got)
+	}
+	plain := audioTestSavedSegment(0x33)
+	if got := dropSegmentIndexes(plain); !bytes.Equal(got, plain) || len(got) != len(plain) {
+		t.Fatalf("a segment without an index was rewritten: %v", got)
+	}
+}
+
+// TestRepairSavedAudio checks the one-time repair of a track saved with the
+// per-segment indexes: the file keeps everything but them, and a second pass
+// leaves it alone.
+func TestRepairSavedAudio(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sm1.m4a")
+	init := mvhdInit(0, 1000)
+	old := bytes.Join([][]byte{init, audioTestSegment(0x11), audioTestSegment(0x22)}, nil)
+	if err := os.WriteFile(path, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repairSavedAudio(path)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := bytes.Join([][]byte{init, audioTestSavedSegment(0x11), audioTestSavedSegment(0x22)}, nil)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("repaired file holds %d bytes; want %d", len(got), len(want))
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repairSavedAudio(path)
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Fatal("a repaired track was rewritten again")
 	}
 }
 

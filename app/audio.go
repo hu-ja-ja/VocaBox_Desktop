@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"log"
 	"math"
 	"net/url"
 	"os"
@@ -393,7 +394,9 @@ func (n *Nico) copyAudio(media *m3u8.MediaPlaylist, playlistURL string, out io.W
 			}
 			body = decrypted
 		}
-		if _, err := out.Write(body); err != nil {
+		// A segment's own index box would have the media stack end the saved
+		// track before its last fragment.
+		if _, err := out.Write(dropSegmentIndexes(body)); err != nil {
 			return errors.New(locales.ErrAudioSave())
 		}
 	}
@@ -447,6 +450,57 @@ func findBox(b []byte, kind string) int {
 		off += size
 	}
 	return -1
+}
+
+// dropSegmentIndexes returns b without the top-level sidx boxes a segment
+// carries. A saved track is one file, and the media stack indexes it from the
+// first segment's sidx: kept per segment, they make it stop before the last
+// fragment, a few seconds short. b itself comes back when it holds none.
+func dropSegmentIndexes(b []byte) []byte {
+	var out []byte
+	off := 0
+	for off+8 <= len(b) {
+		size := int64(binary.BigEndian.Uint32(b[off : off+4]))
+		if size == 1 {
+			if off+16 > len(b) {
+				break
+			}
+			size = int64(binary.BigEndian.Uint64(b[off+8 : off+16]))
+		}
+		if size < 8 || size > int64(len(b)-off) {
+			break
+		}
+		end := off + int(size)
+		if string(b[off+4:off+8]) == "sidx" {
+			if out == nil {
+				out = append([]byte(nil), b[:off]...)
+			}
+		} else if out != nil {
+			out = append(out, b[off:end]...)
+		}
+		off = end
+	}
+	if out == nil {
+		return b
+	}
+	return append(out, b[off:]...)
+}
+
+// repairSavedAudio drops the per-segment indexes a track saved before they were
+// left out carries, so the whole track plays. The file is rewritten once; one
+// already without them is left alone.
+func repairSavedAudio(path string) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	stripped := dropSegmentIndexes(body)
+	if len(stripped) == len(body) {
+		return
+	}
+	if err := writeFileAtomic(path, stripped, 0o644, locales.ErrAudioSave()); err != nil {
+		log.Printf("audio: repairing %s: %v", path, err)
+	}
 }
 
 // audioSegmentKey is the key one segment is encrypted with: the last key its

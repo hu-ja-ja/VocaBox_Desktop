@@ -345,6 +345,9 @@ func (p *playback) skippable(item MylistItem) (MylistItem, bool) {
 func (p *playback) prepareSources(item MylistItem) (playbackSources, error) {
 	if p.app != nil && p.app.mylist != nil {
 		if file := p.app.savedAudioPath(item.WatchID); file != "" {
+			// A track saved before the segment indexes were dropped plays a
+			// few seconds short; the rewrite happens once, off the UI thread.
+			repairSavedAudio(file)
 			return playbackSources{File: file, FileQuality: savedAudioQuality(file, float64(item.Duration)*1000)}, nil
 		}
 	}
