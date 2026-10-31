@@ -321,6 +321,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Used by:
 
 - golang.org/x/image v0.47.0
+- golang.org/x/net v0.59.0
 - golang.org/x/text v0.43.0
 
 ```
@@ -421,7 +422,7 @@ For more information, please refer to <https://unlicense.org/>
 
 Used by:
 
-- github.com/egoist/mygo v0.6.0
+- github.com/egoist/mygo v0.7.3
 
 ```
 MIT License
