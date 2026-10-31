@@ -71,7 +71,7 @@ The app links the modules below.
 
 Used by:
 
-- github.com/ebitengine/purego v0.11.1
+- github.com/ebitengine/purego v0.11.2
 
 ```
                                  Apache License
@@ -321,7 +321,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Used by:
 
 - golang.org/x/image v0.47.0
-- golang.org/x/net v0.59.0
+- golang.org/x/net v0.62.0
 - golang.org/x/text v0.43.0
 
 ```
