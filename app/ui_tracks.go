@@ -139,8 +139,11 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 		label := trackLabel(item)
 		// The mylist carries no playback state: the player's own screens show
 		// what plays, and a row here only reacts to the pointer.
+		// Width is laid out at the panel's current size each frame, not
+		// animated by the row: a row chasing a moving width makes the
+		// time and saving marks beside it jitter.
 		row := ui.Button(c, "").Label(label).
-			Transition(ui.ElementTransition{Enter: motionRow}).
+			Transition(ui.ElementTransition{Animation: &sidebarShift, Position: true, Colors: true, Enter: motionRow}).
 			FillWidth().Padding(8, 12).Radius(8).
 			BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 		if row.Hovered() {
@@ -196,7 +199,9 @@ func (app *nativeApp) queuePanel(c *ui.Context) {
 	// The queue rises up from under the player bar, and sinks back down
 	// when it closes.
 	ui.Column(c).Transition(ui.ElementTransition{
-		Enter: &ui.Motion{Y: 40, Opacity: 0}, Exit: &ui.Motion{Y: 40, Opacity: 0},
+		Animation: &sidebarShift,
+		Colors:    true,
+		Enter:     &ui.Motion{Y: 40, Opacity: 0}, Exit: &ui.Motion{Y: 40, Opacity: 0},
 	}).Grow(1).FillHeight().Gap(4).Padding(18, 26, 12).Children(func() {
 		ui.Column(c).Gap(3).Children(func() {
 			ui.Text(c, locales.PlayerQueue()).FontSize(21).Bold().SingleLine().Ellipsis("…")
@@ -257,7 +262,7 @@ func (app *nativeApp) queueRows(c *ui.Context) {
 func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 	playable := isPlayable(item)
 	playing := item.WatchID != "" && item.WatchID == app.player.WatchID
-	row := ui.Box(c).Transition(ui.ElementTransition{Enter: motionRow}).
+	row := ui.Box(c).Transition(ui.ElementTransition{Animation: &sidebarShift, Position: true, Colors: true, Enter: motionRow}).
 		FillWidth().Padding(8, 12).Justify(ui.Start).AlignItems(ui.Center).
 		BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border)
 	hovered := row.Hovered()

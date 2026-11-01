@@ -323,17 +323,42 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 
 // The motions the app's screens share: a panel rises in and sinks out,
 // a list row rises in, a menu pops in (the attach step gives the panel
-// its place every frame, so it moves by no offset), and the sidebar
-// slides in from and out to the rail's side. While the desktop asks for
-// less motion, the fades alone remain.
+// its place every frame, so it moves by no offset). While the desktop
+// asks for less motion, the fades alone remain.
 var (
-	motionIn      = &ui.Motion{Opacity: 0, Y: 10}
-	motionOut     = &ui.Motion{Opacity: 0, Y: -10}
-	motionMenu    = &ui.Motion{Opacity: 0, Scale: 0.95}
-	motionFade    = &ui.Motion{Opacity: 0}
-	motionRow     = &ui.Motion{Opacity: 0, Y: 8}
-	motionSidebar = &ui.Motion{Opacity: 0, X: -262}
+	motionIn   = &ui.Motion{Opacity: 0, Y: 10}
+	motionOut  = &ui.Motion{Opacity: 0, Y: -10}
+	motionMenu = &ui.Motion{Opacity: 0, Scale: 0.95}
+	motionFade = &ui.Motion{Opacity: 0}
+	motionRow  = &ui.Motion{Opacity: 0, Y: 8}
 )
+
+// railWidth is the width of the sidebar closed, sidebarWidth its width
+// open, and sidebarPad the inset of its content.
+const (
+	railWidth             = 64
+	sidebarWidth  float32 = 250
+	sidebarPad    float32 = 12
+	sidebarGutter float32 = 20
+)
+
+// The width below which the sidebar's content is the rail: the open
+// content fades out down to it, and only one of the two is built at a
+// time.
+const sidebarSwitchWidth float32 = 160
+
+// The toggle keeps its place on the surface while the content under it
+// fades: its size is fixed so the content can hold the same place.
+const (
+	sidebarToggleWidth  float32 = 36
+	sidebarToggleHeight float32 = 30
+	accountRowHeight    float32 = 36
+)
+
+// sidebarShift is the curve of the sidebar folding between its full width
+// and the rail: the content panel follows the width, and the rows that
+// enter or reorder keep the same curve.
+var sidebarShift = ui.Animation{Duration: 240 * time.Millisecond, Ease: ui.EaseInOut}
 
 // panelIn is the transition a screen appearing inside the content panel
 // takes: it rises in, and sinks out as it leaves.
@@ -374,12 +399,11 @@ func (app *nativeApp) view(c *ui.Context) {
 				// The rail's account menu goes with the rail; one left open
 				// would show again when the sidebar closes.
 				app.railAccountOpen = false
-				app.sidebar(c)
-			} else {
-				app.sidebarRail(c)
 			}
+			app.sidebar(c)
+			// The panel takes the width the sidebar yields as it folds.
 			panel := ui.Column(c).Grow(1).FillHeight().MinWidth(0).Radius(12).
-				Background(app.theme.Surface).Border(1, app.theme.Border)
+				ClipX().Background(app.theme.Surface).Border(1, app.theme.Border)
 			panel.Children(func() {
 				if app.queueOpen {
 					app.queueView(c)
@@ -408,73 +432,155 @@ func (app *nativeApp) view(c *ui.Context) {
 }
 
 func (app *nativeApp) sidebar(c *ui.Context) {
-	// The rail takes the sidebar's place as the sidebar folds its width
-	// away, and yields it back as the sidebar grows out of the rail's side.
-	ui.Column(c).Key("sidebar").Transition(ui.ElementTransition{
-		Enter: &ui.Motion{Collapse: true, Opacity: 0},
-		Exit:  &ui.Motion{Collapse: true, Opacity: 0},
-	}).Width(250).FillHeight().Padding(12, 20, 20, 12).Gap(16).
-		Background(app.theme.Surface).Border(1, app.theme.Border).Radius(12).
-		Children(func() {
-			ui.Row(c).FillWidth().Height(48).AlignItems(ui.Center).Gap(12).Children(func() {
-				app.sidebarToggle(c, false)
-				lockup := ui.ButtonBase(c).Label(locales.NavSettings()).Tooltip(locales.NavSettings()).
-					Grow(1).Justify(ui.Center).Gap(12)
-				if lockup.Hovered() {
-					lockup.Background(app.theme.SurfaceHover).Radius(10)
-				}
-				lockup.Children(func() {
-					app.brandMark(c)
-					ui.Column(c).Gap(2).Children(func() {
-						ui.Text(c, "VocaBox").FontSize(25).Bold()
-						ui.Text(c, "NICONICO MUSIC").FontSize(10).FontWeight(700).LetterSpacing(1.2).TextColor(app.theme.TextMuted)
-					})
+	// The sidebar is one surface that folds between its full width and
+	// the rail's: the width it takes is animated in the layout, so the
+	// panel and the sidebar stay together, and the content fades to the
+	// rail as the width comes down rather than showing beside it.
+	target := float32(railWidth)
+	if app.sidebarOpen {
+		target = sidebarWidth
+	}
+	area := ui.Column(c).Key("sidebar").FillHeight().ClipX().
+		Background(app.theme.Surface).Border(1, app.theme.Border).Radius(12)
+	width := area.AnimateTo("width", target, sidebarShift)
+	area.Width(width)
+	details, alpha := sidebarContent(width)
+	area.Children(func() {
+		if details {
+			app.sidebarDetails(c, alpha)
+		} else {
+			app.sidebarRail(c, alpha)
+		}
+		app.accountLine(c, width)
+		app.sidebarToggleOverlay(c)
+		app.accountOverlay(c)
+	})
+}
+
+// accountLine is the line above the account: it runs with the surface
+// rather than fading with the content, shrinking as the sidebar closes.
+func (app *nativeApp) accountLine(c *ui.Context, width float32) {
+	left, length := accountLineBox(width)
+	ui.Box(c).Absolute().Left(left).Bottom(sidebarGutter + accountRowHeight + sidebarPad).
+		Width(length).Height(1).Background(app.theme.Border)
+}
+
+// accountLineBox is where the account line runs at a sidebar width: from
+// the details' left inset, inside its right padding, and the full inner
+// width once the rail takes over.
+func accountLineBox(width float32) (left, length float32) {
+	t := (sidebarWidth - width) / (sidebarWidth - railWidth)
+	t = max(0, min(1, t))
+	left = sidebarPad * (1 - t)
+	length = width - 2 - (sidebarPad+sidebarGutter)*(1-t)
+	return left, length
+}
+
+// sidebarToggleOverlay keeps the toggle itself out of the content that
+// fades under it, so the menu stays whole while the sidebar folds.
+func (app *nativeApp) sidebarToggleOverlay(c *ui.Context) {
+	ui.Row(c).Absolute().Left(sidebarPad).Top(sidebarPad).Width(sidebarToggleWidth).Height(48).
+		AlignItems(ui.Center).Children(func() {
+		app.sidebarToggle(c, !app.sidebarOpen)
+	})
+}
+
+// accountOverlay keeps the signed-in account's picture on the surface, at
+// the same place in both states, clear of the content fading under it.
+func (app *nativeApp) accountOverlay(c *ui.Context) {
+	if !app.loggedIn {
+		return
+	}
+	size := app.accountAvatarSize()
+	ui.Row(c).Absolute().Left(app.accountAvatarInset()).Bottom(sidebarGutter).Width(size).Height(accountRowHeight).
+		AlignItems(ui.Center).Children(func() {
+		if app.sidebarOpen {
+			app.accountAvatar(c)
+			return
+		}
+		app.railAvatar(c)
+	})
+}
+
+// sidebarContent says whether the sidebar shows its open content at the
+// width, and how opaque it is: the open content fades out as the surface
+// folds, the rail fades in once the open content is gone, so the two are
+// never shown together.
+func sidebarContent(width float32) (details bool, alpha float32) {
+	if width > sidebarSwitchWidth {
+		alpha = (width - sidebarSwitchWidth) / (sidebarWidth - sidebarSwitchWidth)
+		return true, max(0, min(1, alpha))
+	}
+	alpha = (sidebarSwitchWidth - width) / (sidebarSwitchWidth - railWidth)
+	return false, max(0, min(1, alpha))
+}
+
+// sidebarDetails is the sidebar open: the full width its surface folds
+// out to.
+func (app *nativeApp) sidebarDetails(c *ui.Context, alpha float32) {
+	ui.Column(c).Key("details").Width(sidebarWidth-2).FillHeight().Padding(sidebarPad, sidebarGutter, sidebarGutter, sidebarPad).Gap(16).
+		Opacity(alpha).Children(func() {
+		ui.Row(c).FillWidth().Height(48).AlignItems(ui.Center).Gap(12).Children(func() {
+			// The toggle rides the surface; the box holds its place in
+			// the content fading under it.
+			ui.Box(c).Size(sidebarToggleWidth, sidebarToggleHeight).Shrink(0)
+			lockup := ui.ButtonBase(c).Label(locales.NavSettings()).Tooltip(locales.NavSettings()).
+				Grow(1).Justify(ui.Center).Gap(12)
+			if lockup.Hovered() {
+				lockup.Background(app.theme.SurfaceHover).Radius(10)
+			}
+			lockup.Children(func() {
+				app.brandMark(c)
+				ui.Column(c).Gap(2).Children(func() {
+					ui.Text(c, "VocaBox").FontSize(25).Bold()
+					ui.Text(c, "NICONICO MUSIC").FontSize(10).FontWeight(700).LetterSpacing(1.2).TextColor(app.theme.TextMuted)
 				})
-				if lockup.Clicked() {
-					app.navigate(settingsPath)
+			})
+			if lockup.Clicked() {
+				app.navigate(settingsPath)
+			}
+		})
+
+		ui.Divider(c)
+		page := app.router.Path()
+		// Choosing a destination leaves the queue screen for it, even the
+		// mylist already showing, whose click changes no route of its own.
+		// The sidebar lists the same destinations as the home: the
+		// mylists, and the combined ones under their own heading.
+		pinned, own, combined, read := app.mylistGroups()
+		entries := append(append(pinned, own...), read...)
+		homeClicked, mylistClicked := false, false
+		sidebar := ui.Sidebar(c, &page, func() {
+			item := ui.SidebarItem(c, homePath, nil, locales.NavHome())
+			homeClicked = item.Clicked()
+			ui.SidebarSection(c, locales.NavMylists(), nil, func() {
+				for _, entry := range entries {
+					if app.sidebarMylistItem(c, entry) {
+						mylistClicked = true
+					}
 				}
 			})
-
-			ui.Divider(c)
-			page := app.router.Path()
-			// Choosing a destination leaves the queue screen for it, even the
-			// mylist already showing, whose click changes no route of its own.
-			// The sidebar lists the same destinations as the home: the
-			// mylists, and the combined ones under their own heading.
-			pinned, own, combined, read := app.mylistGroups()
-			entries := append(append(pinned, own...), read...)
-			homeClicked, mylistClicked := false, false
-			sidebar := ui.Sidebar(c, &page, func() {
-				item := ui.SidebarItem(c, homePath, nil, locales.NavHome())
-				homeClicked = item.Clicked()
-				ui.SidebarSection(c, locales.NavMylists(), nil, func() {
-					for _, entry := range entries {
+			if len(combined) > 0 {
+				ui.SidebarSection(c, locales.NavCombined(), nil, func() {
+					for _, entry := range combined {
 						if app.sidebarMylistItem(c, entry) {
 							mylistClicked = true
 						}
 					}
 				})
-				if len(combined) > 0 {
-					ui.SidebarSection(c, locales.NavCombined(), nil, func() {
-						for _, entry := range combined {
-							if app.sidebarMylistItem(c, entry) {
-								mylistClicked = true
-							}
-						}
-					})
-				}
-			}).Grow(1)
-			if homeClicked || mylistClicked {
-				app.queueOpen = false
 			}
-			if sidebar.Changed() {
-				app.router.Push(page)
-			}
-			if len(entries) == 0 && len(combined) == 0 {
-				ui.Text(c, locales.SidebarEmpty()).FontSize(12).TextColor(app.theme.TextMuted)
-			}
-			app.accountRow(c)
-		})
+		}).Grow(1)
+		if homeClicked || mylistClicked {
+			app.queueOpen = false
+		}
+		if sidebar.Changed() {
+			app.router.Push(page)
+		}
+		if len(entries) == 0 && len(combined) == 0 {
+			ui.Text(c, locales.SidebarEmpty()).FontSize(12).TextColor(app.theme.TextMuted)
+		}
+		app.accountRow(c)
+	})
 }
 
 // sidebarMylistItem is one mylist of the sidebar: the way to it, its saving
@@ -505,10 +611,14 @@ func (app *nativeApp) sidebarMylistItem(c *ui.Context, entry mylistEntry) bool {
 // in while signed out, and the way out while signed in, with the account's
 // picture and name once they are fetched.
 func (app *nativeApp) accountRow(c *ui.Context) {
-	ui.Divider(c)
 	if app.loggedIn {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			app.accountAvatar(c)
+		ui.Row(c).FillWidth().Height(accountRowHeight).Gap(8).AlignItems(ui.Center).Children(func() {
+			// The picture rides the surface, centered in the rail; the
+			// boxes hold its place in the content fading under it.
+			size := app.accountAvatarSize()
+			inset := max(0, app.accountAvatarInset()-sidebarPad)
+			ui.Box(c).Width(inset).Shrink(0)
+			ui.Box(c).Size(size, size).Shrink(0)
 			label := locales.SignedIn()
 			if app.accountName != "" {
 				label = locales.SignedInAs(app.accountName)
@@ -525,7 +635,7 @@ func (app *nativeApp) accountRow(c *ui.Context) {
 	if app.loginWindow != nil {
 		label = locales.LoginOpening()
 	}
-	if button := ui.Button(c, label).FillWidth().Disabled(app.loginWindow != nil); button.Clicked() {
+	if button := ui.Button(c, label).FillWidth().Height(accountRowHeight).Disabled(app.loginWindow != nil); button.Clicked() {
 		app.openLogin()
 	}
 }
@@ -548,6 +658,16 @@ func (app *nativeApp) logoutDialog(c *ui.Context) {
 	})
 }
 
+// accountAvatarSize is the side of the account's picture, as Avatar draws
+// it.
+func (app *nativeApp) accountAvatarSize() float32 { return app.theme.Rem(2.25) }
+
+// accountAvatarInset is the picture's left in the closed surface: the
+// rail's width less its borders, less the picture, halved.
+func (app *nativeApp) accountAvatarInset() float32 {
+	return (railWidth - 2 - app.accountAvatarSize()) / 2
+}
+
 // accountAvatar shows the signed-in account's picture: an empty circle of
 // the same size until it arrives, so the row does not shift when it does.
 func (app *nativeApp) accountAvatar(c *ui.Context) {
@@ -555,49 +675,45 @@ func (app *nativeApp) accountAvatar(c *ui.Context) {
 		ui.Avatar(c, app.accountName, app.accountIcon)
 		return
 	}
-	size := app.theme.Rem(2.25)
+	size := app.accountAvatarSize()
 	ui.Box(c).Size(size, size).Radius(size / 2).Shrink(0).Background(app.theme.SurfaceHover)
 }
 
 // sidebarRail is the sidebar closed: a narrow strip that still navigates —
 // the way to the home and to the pinned mylists, and the account — rather
 // than only reopening the sidebar.
-func (app *nativeApp) sidebarRail(c *ui.Context) {
-	ui.Column(c).Key("rail").Transition(ui.ElementTransition{
-		Enter: motionIn, Exit: motionIn,
-	}).Width(64).FillHeight().PaddingY(12).Gap(12).
-		Background(app.theme.Surface).Border(1, app.theme.Border).Radius(12).
-		Children(func() {
-			ui.Row(c).FillWidth().Height(48).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Width(12).Shrink(0)
-				app.sidebarToggle(c, true)
-			})
-			ui.Row(c).FillWidth().Justify(ui.Start).Children(func() {
-				ui.Box(c).Width(12).Shrink(0)
-				mark := ui.ButtonBase(c).Label(locales.NavSettings()).Tooltip(locales.NavSettings()).Size(36, 36)
-				if mark.Hovered() {
-					mark.Background(app.theme.SurfaceHover).Radius(10)
-				}
-				mark.Children(func() { app.brandMark(c) })
-				if mark.Clicked() {
-					app.navigate(settingsPath)
-				}
-			})
-			ui.Divider(c)
-			// The same destinations as the open sidebar's list, the pinned
-			// ones: each mylist shows as the picture of its first track.
-			ui.Scroll(c).Grow(1).Children(func() {
-				ui.Column(c).FillWidth().PaddingX(12).Gap(6).Children(func() {
-					app.railHome(c)
-					for _, entry := range app.mylistEntries() {
-						if entry.Pinned {
-							app.railMylist(c, entry)
-						}
-					}
-				})
-			})
-			app.railAccount(c)
+func (app *nativeApp) sidebarRail(c *ui.Context, alpha float32) {
+	ui.Column(c).Key("rail").FillWidth().FillHeight().Padding(sidebarPad, 0, sidebarGutter, 0).Gap(12).
+		Opacity(alpha).Children(func() {
+		// The toggle rides the surface; the row keeps its place in the
+		// content fading under it.
+		ui.Box(c).Height(48)
+		ui.Row(c).FillWidth().Justify(ui.Start).Children(func() {
+			ui.Box(c).Width(sidebarPad).Shrink(0)
+			mark := ui.ButtonBase(c).Label(locales.NavSettings()).Tooltip(locales.NavSettings()).Size(36, 36)
+			if mark.Hovered() {
+				mark.Background(app.theme.SurfaceHover).Radius(10)
+			}
+			mark.Children(func() { app.brandMark(c) })
+			if mark.Clicked() {
+				app.navigate(settingsPath)
+			}
 		})
+		ui.Divider(c)
+		// The same destinations as the open sidebar's list, the pinned
+		// ones: each mylist shows as the picture of its first track.
+		ui.Scroll(c).Grow(1).Children(func() {
+			ui.Column(c).FillWidth().PaddingX(sidebarPad).Gap(6).Children(func() {
+				app.railHome(c)
+				for _, entry := range app.mylistEntries() {
+					if entry.Pinned {
+						app.railMylist(c, entry)
+					}
+				}
+			})
+		})
+		app.railAccount(c)
+	})
 }
 
 // railHome is the rail's way back to the home, lit while the home shows.
@@ -666,11 +782,12 @@ func (app *nativeApp) navigate(path string) {
 // railAccount is the rail's foot: the avatar opening the account menu
 // while signed in, the way in while not.
 func (app *nativeApp) railAccount(c *ui.Context) {
-	ui.Divider(c)
-	ui.Row(c).FillWidth().Justify(ui.Start).Children(func() {
-		ui.Box(c).Width(12).Shrink(0)
+	ui.Row(c).FillWidth().Height(accountRowHeight).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Width(sidebarPad).Shrink(0)
 		if app.loggedIn {
-			app.railAvatar(c)
+			// The picture rides the surface; the box holds its place in
+			// the content fading under it.
+			ui.Box(c).Size(app.accountAvatarSize(), app.accountAvatarSize()).Shrink(0)
 			return
 		}
 		label := locales.LoginWithNiconico()
@@ -690,8 +807,9 @@ func (app *nativeApp) railAvatar(c *ui.Context) {
 	if tip == "" {
 		tip = locales.Account()
 	}
+	avatar := app.accountAvatarSize()
 	button := ui.Button(c, "").Label(locales.Account()).Tooltip(tip).
-		Size(36, 36).Padding(0).BorderWidth(0).Radius(10)
+		Size(avatar, avatar).Padding(0).BorderWidth(0).Radius(10)
 	button.Children(func() { app.accountAvatar(c) })
 	if button.Clicked() {
 		app.railAccountOpen = !app.railAccountOpen
@@ -735,7 +853,8 @@ func (app *nativeApp) sidebarToggle(c *ui.Context, opening bool) {
 	if opening {
 		label = locales.SidebarOpen()
 	}
-	button := ui.Button(c, "").Label(label).Tooltip(label).BorderWidth(0).Padding(6, 9).Children(func() {
+	button := ui.Button(c, "").Label(label).Tooltip(label).BorderWidth(0).Padding(6, 9).
+		Size(sidebarToggleWidth, sidebarToggleHeight).Children(func() {
 		ui.Icon(c, iconMenu).FontSize(18)
 	})
 	if button.Clicked() {

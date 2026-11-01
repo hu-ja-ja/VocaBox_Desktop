@@ -93,16 +93,28 @@ func TestNativeUITogglesSidebar(t *testing.T) {
 	if !hasWordmark || !hasTagline || wordmark.X != tagline.X {
 		t.Fatalf("sidebar lockup is not left-aligned: wordmark=%v tagline=%v", wordmark, tagline)
 	}
-	closeButton, ok := tester.Find("サイドバーを閉じる")
+	subtitle, ok := tester.Find(locales.HomeSubtitleEmpty())
 	if !ok {
-		t.Fatal("close button is missing")
+		t.Fatalf("the home subtitle is not shown: %q", tester.Texts())
 	}
+	openX := subtitle.X
 	if err := tester.Click("サイドバーを閉じる"); err != nil {
 		t.Fatal(err)
 	}
-	// The rail rises in as the sidebar slides out: past both, the rail's
-	// toggle sits where the sidebar's was.
-	tester.Advance(300 * time.Millisecond)
+	// The panel moves with the sidebar rather than after it: halfway, its
+	// content is between where it was and where it settles.
+	tester.Advance(150 * time.Millisecond)
+	moving, ok := tester.Find(locales.HomeSubtitleEmpty())
+	if !ok || moving.X >= openX {
+		t.Fatalf("the content did not follow the sidebar: open=%v moving=%v", openX, moving)
+	}
+	tester.Advance(200 * time.Millisecond)
+	settled, ok := tester.Find(locales.HomeSubtitleEmpty())
+	if !ok || settled.X >= moving.X {
+		t.Fatalf("the content stopped before the sidebar: moving=%v settled=%v", moving, settled)
+	}
+	// The sidebar folds down to the rail: past it, only the rail content
+	// is built and the toggle offers the way back.
 	_, hasSection := tester.Find("マイリスト")
 	if _, hasLogo := tester.Find("V"); app.sidebarOpen || !hasLogo || hasSection {
 		t.Fatalf("sidebar did not close cleanly: open=%v texts=%q", app.sidebarOpen, tester.Texts())
@@ -111,21 +123,39 @@ func TestNativeUITogglesSidebar(t *testing.T) {
 	if _, hasHome := tester.Find("ホーム"); !hasHome {
 		t.Fatalf("the closed sidebar has no way home: %q", tester.Texts())
 	}
-	openButton, ok := tester.Find("サイドバーを開く")
-	if !ok || openButton.X != closeButton.X || openButton.Y != closeButton.Y {
-		t.Fatalf("toggle moved while closing: was=%v now=%v", closeButton, openButton)
+	if _, ok := tester.Find("サイドバーを開く"); !ok {
+		t.Fatalf("the toggle did not turn to open: %q", tester.Texts())
 	}
 	if err := tester.Click("サイドバーを開く"); err != nil {
 		t.Fatal(err)
 	}
-	// The sidebar slides in from the rail's side; past it, the toggle is
-	// back where it was.
-	tester.Advance(300 * time.Millisecond)
+	// The sidebar unfolds from the rail; past it, the toggle offers the
+	// way back.
+	tester.Advance(350 * time.Millisecond)
 	if !app.sidebarOpen || !tester.HasText("VocaBox") {
 		t.Fatalf("sidebar did not reopen: open=%v", app.sidebarOpen)
 	}
-	if reopenedButton, ok := tester.Find("サイドバーを閉じる"); !ok || reopenedButton.X != closeButton.X || reopenedButton.Y != closeButton.Y {
-		t.Fatalf("toggle moved while reopening: was=%v now=%v", closeButton, reopenedButton)
+	if _, ok := tester.Find("サイドバーを閉じる"); !ok {
+		t.Fatalf("the toggle did not turn to close: %q", tester.Texts())
+	}
+}
+
+// TestSidebarAccountLineBox checks where the line above the account runs:
+// inside the open content's insets, and the full inner width at the rail.
+func TestSidebarAccountLineBox(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		width, left float32
+		length      float32
+	}{
+		{"open", sidebarWidth, sidebarPad, sidebarWidth - 2 - sidebarPad - sidebarGutter},
+		{"rail", railWidth, 0, railWidth - 2},
+		{"half", 157, 6, 139},
+	} {
+		left, length := accountLineBox(tc.width)
+		if left != tc.left || length != tc.length {
+			t.Errorf("%s: line at %v, length %v; want %v, %v", tc.name, left, length, tc.left, tc.length)
+		}
 	}
 }
 
@@ -302,6 +332,21 @@ func TestNativeUISignInRow(t *testing.T) {
 	if !ok || avatar.W != avatar.H || avatar.W < 20 {
 		t.Fatalf("the fetched picture did not land in the avatar: %v", avatar)
 	}
+
+	// The account icon keeps its place as the sidebar folds to the rail:
+	// the two states carry the avatar at the same corner.
+	if err := tester.Click("サイドバーを閉じる"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Advance(400 * time.Millisecond)
+	closedAvatar, ok := tester.Find("テストユーザー")
+	if !ok || closedAvatar.X != avatar.X || closedAvatar.Y != avatar.Y {
+		t.Fatalf("the account icon moved with the rail: open=%v closed=%v", avatar, closedAvatar)
+	}
+	if err := tester.Click("サイドバーを開く"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Advance(400 * time.Millisecond)
 
 	// The way out asks first: cancelling keeps the session, confirming
 	// forgets it.
@@ -1653,9 +1698,9 @@ func TestNativeUIHomeOpensMylistCards(t *testing.T) {
 
 	app.sidebarOpen = true
 	tester.Frame()
-	// The sidebar takes the rail's place sliding in; past it, its home
-	// item is where the pointer finds it.
-	tester.Advance(300 * time.Millisecond)
+	// The sidebar unfolds from the rail; past it, its home item is where
+	// the pointer finds it.
+	tester.Advance(350 * time.Millisecond)
 	if err := tester.Click("ホーム"); err != nil {
 		t.Fatal(err)
 	}
