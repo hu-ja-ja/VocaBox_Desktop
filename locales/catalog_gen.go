@@ -594,6 +594,126 @@ func (msgs Messages) PlayerQueue() string {
 	return Catalog.Format(msgs.locale, "playerQueue", nil)
 }
 
+// LyricsTitle says "歌詞"
+// in the language the app shows.
+func LyricsTitle() string { return In(i18n.Locale()).LyricsTitle() }
+
+// LyricsTitle says "歌詞"
+// in the language of msgs.
+func (msgs Messages) LyricsTitle() string {
+	return Catalog.Format(msgs.locale, "lyricsTitle", nil)
+}
+
+// LyricsOpen says "歌詞を表示"
+// in the language the app shows.
+func LyricsOpen() string { return In(i18n.Locale()).LyricsOpen() }
+
+// LyricsOpen says "歌詞を表示"
+// in the language of msgs.
+func (msgs Messages) LyricsOpen() string {
+	return Catalog.Format(msgs.locale, "lyricsOpen", nil)
+}
+
+// LyricsClose says "歌詞を閉じる"
+// in the language the app shows.
+func LyricsClose() string { return In(i18n.Locale()).LyricsClose() }
+
+// LyricsClose says "歌詞を閉じる"
+// in the language of msgs.
+func (msgs Messages) LyricsClose() string {
+	return Catalog.Format(msgs.locale, "lyricsClose", nil)
+}
+
+// LyricsLoading says "歌詞を読み込んでいます…"
+// in the language the app shows.
+func LyricsLoading() string { return In(i18n.Locale()).LyricsLoading() }
+
+// LyricsLoading says "歌詞を読み込んでいます…"
+// in the language of msgs.
+func (msgs Messages) LyricsLoading() string {
+	return Catalog.Format(msgs.locale, "lyricsLoading", nil)
+}
+
+// LyricsNotFound says "この作品には歌詞が登録されていません"
+// in the language the app shows.
+func LyricsNotFound() string { return In(i18n.Locale()).LyricsNotFound() }
+
+// LyricsNotFound says "この作品には歌詞が登録されていません"
+// in the language of msgs.
+func (msgs Messages) LyricsNotFound() string {
+	return Catalog.Format(msgs.locale, "lyricsNotFound", nil)
+}
+
+// LyricsLogin says "歌詞を表示するにはニコニコにログインしてください"
+// in the language the app shows.
+func LyricsLogin() string { return In(i18n.Locale()).LyricsLogin() }
+
+// LyricsLogin says "歌詞を表示するにはニコニコにログインしてください"
+// in the language of msgs.
+func (msgs Messages) LyricsLogin() string {
+	return Catalog.Format(msgs.locale, "lyricsLogin", nil)
+}
+
+// LyricsLimit says "…"
+// in the language the app shows.
+func LyricsLimit() string { return In(i18n.Locale()).LyricsLimit() }
+
+// LyricsLimit says "…"
+// in the language of msgs.
+func (msgs Messages) LyricsLimit() string {
+	return Catalog.Format(msgs.locale, "lyricsLimit", nil)
+}
+
+// LyricsForbidden says "この作品では歌詞を表示できません"
+// in the language the app shows.
+func LyricsForbidden() string { return In(i18n.Locale()).LyricsForbidden() }
+
+// LyricsForbidden says "この作品では歌詞を表示できません"
+// in the language of msgs.
+func (msgs Messages) LyricsForbidden() string {
+	return Catalog.Format(msgs.locale, "lyricsForbidden", nil)
+}
+
+// LyricsFailed says "歌詞の表示に失敗しました。"
+// in the language the app shows.
+func LyricsFailed() string { return In(i18n.Locale()).LyricsFailed() }
+
+// LyricsFailed says "歌詞の表示に失敗しました。"
+// in the language of msgs.
+func (msgs Messages) LyricsFailed() string {
+	return Catalog.Format(msgs.locale, "lyricsFailed", nil)
+}
+
+// LyricsUntimed says "この歌詞には再生位置の情報がありません"
+// in the language the app shows.
+func LyricsUntimed() string { return In(i18n.Locale()).LyricsUntimed() }
+
+// LyricsUntimed says "この歌詞には再生位置の情報がありません"
+// in the language of msgs.
+func (msgs Messages) LyricsUntimed() string {
+	return Catalog.Format(msgs.locale, "lyricsUntimed", nil)
+}
+
+// LyricsRetry says "再読み込み"
+// in the language the app shows.
+func LyricsRetry() string { return In(i18n.Locale()).LyricsRetry() }
+
+// LyricsRetry says "再読み込み"
+// in the language of msgs.
+func (msgs Messages) LyricsRetry() string {
+	return Catalog.Format(msgs.locale, "lyricsRetry", nil)
+}
+
+// LyricsSource says "歌詞提供: {source}"
+// in the language the app shows.
+func LyricsSource(source string) string { return In(i18n.Locale()).LyricsSource(source) }
+
+// LyricsSource says "歌詞提供: {source}"
+// in the language of msgs.
+func (msgs Messages) LyricsSource(source string) string {
+	return Catalog.Format(msgs.locale, "lyricsSource", map[string]any{"source": source})
+}
+
 // PlayerOffline says "オフライン"
 // in the language the app shows.
 func PlayerOffline() string { return In(i18n.Locale()).PlayerOffline() }

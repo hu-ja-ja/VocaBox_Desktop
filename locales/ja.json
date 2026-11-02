@@ -56,6 +56,23 @@
   "playerPrevious": "前へ",
   "playerNext": "次へ",
   "playerQueue": "再生キュー",
+  "lyricsTitle": "歌詞",
+  "lyricsOpen": "歌詞を表示",
+  "lyricsClose": "歌詞を閉じる",
+  "lyricsLoading": "歌詞を読み込んでいます…",
+  "lyricsNotFound": "この作品には歌詞が登録されていません",
+  "lyricsLogin": "歌詞を表示するにはニコニコにログインしてください",
+  "lyricsLimit": "歌詞の表示回数が今月の上限に達しています。ニコニコプレミアムに登録すると歌詞を無制限に表示できます。",
+  "lyricsForbidden": "この作品では歌詞を表示できません",
+  "lyricsFailed": "歌詞の表示に失敗しました。",
+  "lyricsUntimed": "この歌詞には再生位置の情報がありません",
+  "lyricsRetry": "再読み込み",
+  "lyricsSource": "歌詞提供: {source}",
+  "@lyricsSource": {
+    "placeholders": {
+      "source": { "type": "String" }
+    }
+  },
   "playerOffline": "オフライン",
   "playerOfflineQuality": "オフライン（{quality}）",
   "audioSavedLabel": "オフライン保存済み",

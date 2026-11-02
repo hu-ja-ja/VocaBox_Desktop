@@ -107,10 +107,14 @@ type helperConn interface {
 	shutdown()
 }
 
-// positionPollInterval is how often the app pulls the helper's position:
-// often enough for a smooth seek bar, rare enough that each pull's window
-// rebuild does not crowd the player.
-const positionPollInterval = 250 * time.Millisecond
+// positionPollInterval is how often the app pulls the helper's position
+// while a timed lyrics document shows: often enough for the lyrics to turn
+// with the vocal. positionPollIdleInterval is the rate otherwise, rare enough
+// that each pull's window rebuild does not crowd the player.
+const (
+	positionPollInterval     = 100 * time.Millisecond
+	positionPollIdleInterval = 250 * time.Millisecond
+)
 
 // previousRestartMS is how far into a track the previous button restarts it
 // rather than going to the one before, as most players do: a press a short
@@ -292,9 +296,14 @@ func (p *playback) play(item MylistItem) {
 	p.restarted = false
 	st := &p.app.player
 	st.WatchID = item.WatchID
+	st.VideoID = item.VideoID
+	if st.VideoID == "" {
+		st.VideoID = item.WatchID
+	}
 	st.Title = item.Title
 	st.Uploader = item.Uploader
 	st.ThumbURL = item.ThumbURL
+	st.HasLyrics, st.LyricsKnown = false, false
 	st.Ready = false
 	st.Playing = false
 	st.PositionMS = 0
@@ -318,6 +327,9 @@ func (p *playback) play(item MylistItem) {
 			p.uris, p.bitrates, p.cookie, p.ua, p.file = sources.URIs, sources.BitRates, sources.Cookie, sources.UserAgent, sources.File
 			p.fileQuality = sources.FileQuality
 			p.variant = 0
+			st := &p.app.player
+			st.HasLyrics = sources.HasLyrics
+			st.LyricsKnown = sources.File == ""
 			p.sendPlay()
 		})
 	}()
@@ -429,13 +441,26 @@ func helperExecutable() (string, error) {
 	return path, nil
 }
 
+// pollInterval is how often the position pull runs now: the fast rate while
+// a timed lyrics document follows the track, the idle one otherwise.
+func (p *playback) pollInterval() time.Duration {
+	if p.app.lyricsSync.Load() {
+		return positionPollInterval
+	}
+	return positionPollIdleInterval
+}
+
 // pollPosition pulls the helper's position while a track is playing: the app
 // asks, the helper answers with a position event.
 func (p *playback) pollPosition() {
-	for range time.Tick(positionPollInterval) {
-		if !p.polling.Load() {
+	// The tick is the fast rate; the idle rate skips its ticks until enough
+	// time passed, so the window rebuilds less while no lyrics follow.
+	last := time.Time{}
+	for now := range time.Tick(positionPollInterval) {
+		if !p.polling.Load() || (!last.IsZero() && now.Sub(last) < p.pollInterval()) {
 			continue
 		}
+		last = now
 		p.post(func() {
 			if p.closing || p.proc == nil || !p.app.player.Ready || !p.app.player.Playing {
 				return
@@ -663,7 +688,8 @@ func (p *playback) remove(watchID string) {
 			_ = p.proc.send(helperCommand{Cmd: "stop"})
 		}
 		st := &p.app.player
-		st.WatchID, st.Title, st.Uploader, st.ThumbURL = "", "", "", ""
+		st.WatchID, st.VideoID, st.Title, st.Uploader, st.ThumbURL = "", "", "", "", ""
+		st.HasLyrics, st.LyricsKnown = false, false
 		st.Ready, st.Playing, st.PositionMS, st.DurationMS = false, false, 0, 0
 	}
 	p.publish()

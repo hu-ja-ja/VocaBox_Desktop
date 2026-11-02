@@ -192,7 +192,13 @@ func (app *nativeApp) queueView(c *ui.Context, slide float32) {
 		Background(app.theme.Surface).
 		Shadow(0, -4, 18, 0, ui.RGBA(0, 0, 0, 0.18)).
 		AlignItems(ui.Stretch).Children(func() {
+		// The lyrics card floats over the queue in the same sheet, so the
+		// sheet's rise and fall carries both, and the queue stays behind
+		// the card on its left.
 		app.queuePanel(c)
+		if app.lyricsOpen {
+			app.lyricsPanel(c)
+		}
 	})
 }
 
@@ -200,7 +206,7 @@ func (app *nativeApp) queueView(c *ui.Context, slide float32) {
 // first under shuffle, labelled with the mylist the queue came from and its
 // size.
 func (app *nativeApp) queuePanel(c *ui.Context) {
-	ui.Column(c).Grow(1).FillHeight().Gap(4).Padding(18, 26, 12).Children(func() {
+	ui.Column(c).Grow(1).FillWidth().FillHeight().MinWidth(0).Gap(4).Padding(18, 26, 12).Children(func() {
 		ui.Column(c).Gap(3).Children(func() {
 			ui.Text(c, locales.PlayerQueue()).FontSize(21).Bold().SingleLine().Ellipsis("…")
 			ui.Text(c, app.queueMeta()).FontSize(12).TextColor(app.theme.TextMuted)
@@ -291,10 +297,14 @@ func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 					ui.Text(c, item.Uploader).FontSize(12).TextColor(app.theme.TextMuted).SingleLine().Ellipsis("…")
 				}
 			})
-			ui.Spacer(c).Grow(1)
-			app.trackAudioMark(c, item, app.savesForOffline(app.player.MylistID))
-			if item.Duration > 0 {
-				ui.Text(c, formatDuration(item.Duration)).Width(46).FontSize(12).TextAlign(ui.End).TextColor(app.theme.TextMuted)
+			// The title takes all the room left up to the save mark; with the
+			// lyrics card over the queue, neither the mark nor the length earns
+			// its space, so the title takes that too.
+			if !app.lyricsOpen {
+				app.trackAudioMark(c, item, app.savesForOffline(app.player.MylistID))
+				if item.Duration > 0 {
+					ui.Text(c, formatDuration(item.Duration)).Width(46).FontSize(12).TextAlign(ui.End).TextColor(app.theme.TextMuted)
+				}
 			}
 			app.queueMenu(c, item, i, hovered)
 		})

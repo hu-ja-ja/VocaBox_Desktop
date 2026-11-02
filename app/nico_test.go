@@ -74,6 +74,7 @@ func TestNicoPrepareFollowsThePlaybackFlow(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"meta": map[string]any{"status": 200},
 			"data": map[string]any{
+				"video":  map[string]any{"hasLyrics": true},
 				"client": map[string]any{"watchTrackId": "track-1"},
 				"media": map[string]any{"domand": map[string]any{
 					"accessRightKey": "jwt",
@@ -134,6 +135,9 @@ func TestNicoPrepareFollowsThePlaybackFlow(t *testing.T) {
 	}
 	if srcs.UserAgent == "" {
 		t.Fatal("sources carry no user agent")
+	}
+	if !srcs.HasLyrics {
+		t.Fatal("the watch response's hasLyrics was not carried")
 	}
 	// Only the playable and permitted bands are requested: no 320 (guest),
 	// no 576 (96kHz), no unavailable video, and video and audio are paired.

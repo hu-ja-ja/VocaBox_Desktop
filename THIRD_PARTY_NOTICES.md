@@ -17,8 +17,9 @@ unmodified apart from line breaks, except the pin, which is used filled and
 with a thinner stroke than the original:
 
 arrow-down-to-line, download, ellipsis-vertical, file-exclamation-point,
-github, house, layers-2, lock, log-in, log-out, menu, pause, pin, play, plus,
-queue, repeat, shuffle, skip-back, skip-forward, trash-2, volume-2, volume-x
+file-text, github, house, layers-2, lock, log-in, log-out, menu, pause, pin,
+play, plus, queue, repeat, shuffle, skip-back, skip-forward, trash-2,
+volume-2, volume-x
 
 ISC License
 

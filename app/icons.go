@@ -42,6 +42,9 @@ var plusSVG []byte
 //go:embed icons/queue.svg
 var queueSVG []byte
 
+//go:embed icons/file-text.svg
+var fileTextSVG []byte
+
 //go:embed icons/ellipsis-vertical.svg
 var ellipsisSVG []byte
 
@@ -90,6 +93,7 @@ var (
 	iconMenu        = ui.MustParseSVG(menuSVG)
 	iconPlus        = ui.MustParseSVG(plusSVG)
 	iconQueue       = ui.MustParseSVG(queueSVG)
+	iconLyrics      = ui.MustParseSVG(fileTextSVG)
 	iconMore        = ui.MustParseSVG(ellipsisSVG)
 	iconPin         = ui.MustParseSVG(pinSVG)
 	iconLock        = ui.MustParseSVG(lockSVG)

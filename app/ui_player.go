@@ -56,17 +56,18 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			app.seekHeld = held
 			ui.Text(c, formatMillis(app.player.DurationMS)).Width(42).FontSize(11).TextAlign(ui.End).TextColor(app.theme.TextMuted)
 		})
-		controls := ui.Row(c).Gap(16).AlignItems(ui.Center)
+		// The grid keeps the transport in the middle of the bar: its side
+		// tracks are equal, and only the middle one takes its content's
+		// width. The track playing keys its block, so one leaves as the next
+		// fades in.
+		controls := ui.Grid(c).ColumnTracks(ui.Fr(1), ui.FitContent(), ui.Fr(1)).
+			FillWidth().Gap(16).AlignItems(ui.Center)
 		controls.Children(func() {
-			// The track playing and the volume grow by the same amount,
-			// which keeps the transport buttons in the middle of the bar.
-			// The track playing keys its block, so one leaves as the next
-			// fades in.
 			track := "none"
 			if app.player.WatchID != "" {
 				track = app.player.WatchID
 			}
-			ui.Row(c).Key(track).Transition(panelIn).Grow(1).Basis(0).MinWidth(0).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Key(track).Transition(panelIn).MinWidth(0).Gap(10).AlignItems(ui.Center).Children(func() {
 				if app.player.WatchID != "" {
 					app.thumbnail(c, app.playingTrack(), thumbBarHeight)
 					ui.Column(c).Grow(1).Gap(3).Children(func() {
@@ -84,91 +85,110 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				}
 			})
 
-			shuffle := ui.Toggle(c, &app.player.Shuffle, "").Label(locales.PlayerShuffle()).Tooltip(locales.PlayerShuffle()).Children(func() {
-				ui.Icon(c, iconShuffle).FontSize(18)
-			})
-			if shuffle.Changed() {
-				app.sendPlayer(PlayerCommand{Action: "shuffle", Enabled: app.player.Shuffle})
-				// A shuffle lays the queue out anew: the next report brings
-				// the queue back to the track playing.
-				app.queueFollowTrack = ""
-			}
-			app.transportButtons(c)
-			repeat := ui.Toggle(c, &app.player.Repeat, "").Label(locales.PlayerRepeat()).Tooltip(locales.PlayerRepeat()).Children(func() {
-				ui.Icon(c, iconRepeat).FontSize(18)
-			})
-			if repeat.Changed() {
-				app.sendPlayer(PlayerCommand{Action: "repeat", Enabled: app.player.Repeat})
-			}
-
-			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Gap(8).Justify(ui.End).AlignItems(ui.Center).Children(func() {
-				// The bar shows the player's level, except while the user
-				// drags it: then it keeps its own level, so the reports of
-				// the track playing never tug the thumb from under the
-				// pointer.
-				app.player.Volume = clampVolume(app.player.Volume)
-				if !app.volumeHeld {
-					app.volumeValue, app.volumeSent = app.player.Volume, app.player.Volume
-				}
-				// The icon silences the player and comes back to the level
-				// the mute was taken at. It sits on the bar's left, sized a
-				// touch above the bar's own height, and shows the silence of
-				// either way: the mute it took, or a level pulled to zero.
-				muteLabel := app.muteLabel()
-				muteIcon := iconVolume
-				if app.silent() {
-					muteIcon = iconVolumeMuted
-				}
-				mute := ui.Button(c, "").Label(muteLabel).Tooltip(muteLabel).Padding(4, 6).BorderWidth(0)
-				mute.Children(func() {
-					ui.Icon(c, muteIcon).FontSize(16).TextColor(app.theme.TextMuted)
+			ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
+				shuffle := ui.Toggle(c, &app.player.Shuffle, "").Label(locales.PlayerShuffle()).Tooltip(locales.PlayerShuffle()).Children(func() {
+					ui.Icon(c, iconShuffle).FontSize(18)
 				})
-				if mute.Clicked() {
-					app.toggleMute()
+				if shuffle.Changed() {
+					app.sendPlayer(PlayerCommand{Action: "shuffle", Enabled: app.player.Shuffle})
+					// A shuffle lays the queue out anew: the next report brings
+					// the queue back to the track playing.
+					app.queueFollowTrack = ""
 				}
-				volumeSlider := ui.Slider(c, &app.volumeValue, 0, 1).Label(locales.PlayerVolume()).Width(110)
-				// A drag tells the player in volumeSendStep steps rather than
-				// on every pointer frame, which floods the page with commands
-				// and the window with the reports they bring; letting go sends
-				// the exact level. Dragged keeps the hold past the bar's thin
-				// strip, so a drag that leaves it still commits.
-				_, _, held := volumeSlider.Dragged()
-				switch {
-				case held:
-					if math.Abs(app.volumeValue-app.volumeSent) >= volumeSendStep &&
-						time.Since(app.volumeSentAt) >= volumeSendInterval {
-						app.volumeSent, app.volumeSentAt = app.volumeValue, time.Now()
-						app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.volumeValue})
-					}
-				case app.volumeHeld || volumeSlider.Changed():
-					if app.volumeValue != app.volumeSent {
-						app.volumeSent, app.volumeSentAt = app.volumeValue, time.Now()
-						app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.volumeValue})
-					}
+				app.transportButtons(c)
+				repeat := ui.Toggle(c, &app.player.Repeat, "").Label(locales.PlayerRepeat()).Tooltip(locales.PlayerRepeat()).Children(func() {
+					ui.Icon(c, iconRepeat).FontSize(18)
+				})
+				if repeat.Changed() {
+					app.sendPlayer(PlayerCommand{Action: "repeat", Enabled: app.player.Repeat})
 				}
-				// A level the user raises by hand while muted is them wanting
-				// sound back: the icon follows rather than keeping the
-				// silence on. Only their own drag counts, so a report of the
-				// level before the mute never unmutes it.
-				if (held || volumeSlider.Changed()) && app.volumeValue > 0 {
-					app.muted = false
-				}
-				app.volumeHeld = held
 			})
 
-			queue := ui.Button(c, "").Label(locales.PlayerQueue()).Tooltip(locales.PlayerQueue()).Padding(6, 9).BorderWidth(0)
-			if app.queueOpen {
-				queue.Background(app.theme.SurfacePressed)
-			}
-			queue.Children(func() {
-				ui.Icon(c, iconQueue).FontSize(18)
+			ui.Row(c).MinWidth(0).Gap(8).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).Grow(1).Basis(0).MinWidth(0).Gap(8).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+					// The bar shows the player's level, except while the user
+					// drags it: then it keeps its own level, so the reports of
+					// the track playing never tug the thumb from under the
+					// pointer.
+					app.player.Volume = clampVolume(app.player.Volume)
+					if !app.volumeHeld {
+						app.volumeValue, app.volumeSent = app.player.Volume, app.player.Volume
+					}
+					// The icon silences the player and comes back to the level
+					// the mute was taken at. It sits on the bar's left, sized a
+					// touch above the bar's own height, and shows the silence of
+					// either way: the mute it took, or a level pulled to zero.
+					muteLabel := app.muteLabel()
+					muteIcon := iconVolume
+					if app.silent() {
+						muteIcon = iconVolumeMuted
+					}
+					mute := ui.Button(c, "").Label(muteLabel).Tooltip(muteLabel).Padding(4, 6).BorderWidth(0)
+					mute.Children(func() {
+						ui.Icon(c, muteIcon).FontSize(16).TextColor(app.theme.TextMuted)
+					})
+					if mute.Clicked() {
+						app.toggleMute()
+					}
+					volumeSlider := ui.Slider(c, &app.volumeValue, 0, 1).Label(locales.PlayerVolume()).Width(110)
+					// A drag tells the player in volumeSendStep steps rather than
+					// on every pointer frame, which floods the page with commands
+					// and the window with the reports they bring; letting go sends
+					// the exact level. Dragged keeps the hold past the bar's thin
+					// strip, so a drag that leaves it still commits.
+					_, _, held := volumeSlider.Dragged()
+					switch {
+					case held:
+						if math.Abs(app.volumeValue-app.volumeSent) >= volumeSendStep &&
+							time.Since(app.volumeSentAt) >= volumeSendInterval {
+							app.volumeSent, app.volumeSentAt = app.volumeValue, time.Now()
+							app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.volumeValue})
+						}
+					case app.volumeHeld || volumeSlider.Changed():
+						if app.volumeValue != app.volumeSent {
+							app.volumeSent, app.volumeSentAt = app.volumeValue, time.Now()
+							app.sendPlayer(PlayerCommand{Action: "volume", Volume: app.volumeValue})
+						}
+					}
+					// A level the user raises by hand while muted is them wanting
+					// sound back: the icon follows rather than keeping the
+					// silence on. Only their own drag counts, so a report of the
+					// level before the mute never unmutes it.
+					if (held || volumeSlider.Changed()) && app.volumeValue > 0 {
+						app.muted = false
+					}
+					app.volumeHeld = held
+				})
+
+				lyricsLabel := locales.LyricsOpen()
+				if app.lyricsOpen {
+					lyricsLabel = locales.LyricsClose()
+				}
+				lyrics := ui.Button(c, "").Label(lyricsLabel).Tooltip(lyricsLabel).Padding(6, 9).
+					BorderWidth(0).Disabled(app.player.WatchID == "")
+				if app.lyricsOpen {
+					lyrics.Background(app.theme.SurfacePressed)
+				}
+				lyrics.Children(func() {
+					ui.Icon(c, iconLyrics).FontSize(18)
+				})
+				if lyrics.Clicked() {
+					app.toggleLyrics()
+				}
+				queue := ui.Button(c, "").Label(locales.PlayerQueue()).Tooltip(locales.PlayerQueue()).Padding(6, 9).BorderWidth(0)
+				if app.queueOpen {
+					queue.Background(app.theme.SurfacePressed)
+				}
+				queue.Children(func() {
+					ui.Icon(c, iconQueue).FontSize(18)
+				})
+				if queue.Clicked() {
+					app.toggleQueue()
+				}
 			})
-			if queue.Clicked() {
-				app.queueOpen = !app.queueOpen
-			}
 		})
 		if controls.Clicked() {
-			app.queueOpen = !app.queueOpen
+			app.toggleQueue()
 		}
 		if app.playerError != "" {
 			ui.Text(c, app.playerError).FontSize(12).TextColor(app.theme.Danger)

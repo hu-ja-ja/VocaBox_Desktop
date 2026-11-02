@@ -134,6 +134,47 @@ func selectPlayed(t *testing.T, p *playback, helper *fakeHelper, sm string) help
 	return helperPlay(t, helper)
 }
 
+// TestPlaybackCarriesTheWatchLyricsAnswer checks the watch API's answer
+// reaches the player state: known for a fetched track, unknown for a saved
+// file, whose playback never asks.
+func TestPlaybackCarriesTheWatchLyricsAnswer(t *testing.T) {
+	p, helper, _ := newTestPlayback(t)
+	p.acquire = func(MylistItem) (playbackSources, error) {
+		return playbackSources{URIs: []string{"https://x/hi.m3u8"}, HasLyrics: true}, nil
+	}
+	p.setItems("111", "A", []MylistItem{{
+		WatchID: "sm1", VideoID: "sm1", Title: "曲", Available: true, Duration: 120,
+	}})
+	selectPlayed(t, p, helper, "sm1")
+	player := p.app.player
+	if !player.LyricsKnown || !player.HasLyrics || player.VideoID != "sm1" {
+		t.Fatalf("player = %#v; want the watch answer known", player)
+	}
+
+	// A saved file plays without the watch call: its answer is unknown.
+	p.acquire = func(MylistItem) (playbackSources, error) {
+		return playbackSources{File: filepath.Join(t.TempDir(), "saved.m4a")}, nil
+	}
+	p.selectTrack("sm1")
+	waitFor(t, "the saved play command", func() bool { return helper.count("play") == 2 })
+	if p.app.player.LyricsKnown {
+		t.Fatal("a saved file's lyrics answer reads as known")
+	}
+}
+
+// TestPositionPollIntervalFollowsTheLyrics checks the position pull keeps the
+// slow rate until a timed document follows the track.
+func TestPositionPollIntervalFollowsTheLyrics(t *testing.T) {
+	p, _, _ := newTestPlayback(t)
+	if got := p.pollInterval(); got != positionPollIdleInterval {
+		t.Fatalf("poll interval = %v; want the idle %v", got, positionPollIdleInterval)
+	}
+	p.app.lyricsSync.Store(true)
+	if got := p.pollInterval(); got != positionPollInterval {
+		t.Fatalf("poll interval = %v; want the lyrics %v", got, positionPollInterval)
+	}
+}
+
 func TestPlaybackSelectAcquiresAndPlaysTopBand(t *testing.T) {
 	p, helper, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
@@ -423,9 +464,12 @@ func TestPlaybackForgetsExpiredSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
+	// The playback's periodic Discord resend posts through the same hook
+	// after this test's own post, so the channel closes once.
+	var once sync.Once
 	p.post = func(fn func()) {
 		fn()
-		close(done)
+		once.Do(func() { close(done) })
 	}
 	p.acquire = func(MylistItem) (playbackSources, error) {
 		return playbackSources{}, errSessionExpired

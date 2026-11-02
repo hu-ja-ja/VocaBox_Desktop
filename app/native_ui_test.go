@@ -1471,7 +1471,13 @@ func TestNativeUIPlayerBarBlankAreaTogglesQueue(t *testing.T) {
 	if !ok {
 		t.Fatal("queue button is missing")
 	}
-	x := volume.X + volume.W + (queue.X-volume.X-volume.W)/2
+	lyrics, ok := tester.Find("歌詞を表示")
+	if !ok {
+		t.Fatal("lyrics button is missing")
+	}
+	// The gap between the volume and the lyrics button is the bar's blank
+	// space now that the lyrics button sits beside the queue.
+	x := volume.X + volume.W + (lyrics.X-volume.X-volume.W)/2
 	y := queue.Y + queue.H/2
 	tester.ClickAt(x, y)
 	if !app.queueOpen {
@@ -1574,8 +1580,16 @@ func TestNativeUISidebarMylistLeavesQueueScreen(t *testing.T) {
 	if err := tester.Click("マイリストA"); err != nil {
 		t.Fatal(err)
 	}
+	// The queue folds the sidebar away; open it again to choose a mylist.
+	openSidebar := func() {
+		if err := tester.Click("サイドバーを開く"); err != nil {
+			t.Fatal(err)
+		}
+		tester.Advance(300 * time.Millisecond)
+	}
 	app.queueOpen = true
 	tester.Frame()
+	openSidebar()
 	if err := tester.Click("マイリストB"); err != nil {
 		t.Fatal(err)
 	}
@@ -1588,11 +1602,55 @@ func TestNativeUISidebarMylistLeavesQueueScreen(t *testing.T) {
 
 	app.queueOpen = true
 	tester.Frame()
+	openSidebar()
 	if err := tester.Click("マイリストB"); err != nil {
 		t.Fatal(err)
 	}
 	if app.queueOpen {
 		t.Fatal("choosing the shown mylist again left the queue screen open")
+	}
+}
+
+// TestNativeUIQueueFoldsAndRestoresTheSidebar checks the queue takes the
+// sidebar away while it shows, and closing it brings back the layout the
+// queue was opened in.
+func TestNativeUIQueueFoldsAndRestoresTheSidebar(t *testing.T) {
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "キューの元"},
+		[]MylistItem{{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120}})
+	tester := ui.NewTester(app.view, 1120, 760)
+	if !app.sidebarOpen {
+		t.Fatal("the sidebar does not start open")
+	}
+	app.queueOpen = true
+	tester.Frame()
+	tester.Advance(300 * time.Millisecond)
+	if app.sidebarOpen {
+		t.Fatal("the queue left the sidebar open")
+	}
+	app.queueOpen = false
+	tester.Frame()
+	tester.Advance(300 * time.Millisecond)
+	if !app.sidebarOpen {
+		t.Fatal("closing the queue did not bring back the sidebar")
+	}
+
+	// A queue opened with the sidebar already folded leaves it folded.
+	if err := tester.Click("サイドバーを閉じる"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Advance(300 * time.Millisecond)
+	app.queueOpen = true
+	tester.Frame()
+	tester.Advance(300 * time.Millisecond)
+	if app.sidebarOpen {
+		t.Fatal("the queue opened the folded sidebar")
+	}
+	app.queueOpen = false
+	tester.Frame()
+	tester.Advance(300 * time.Millisecond)
+	if app.sidebarOpen {
+		t.Fatal("closing the queue opened a sidebar it did not take")
 	}
 }
 
@@ -1713,7 +1771,7 @@ func TestNativeUIPlayerBarFitsMinimumWidth(t *testing.T) {
 		Uploader: "投稿者", Ready: true, Volume: 1,
 	}
 	tester := ui.NewTester(app.view, 760, 560)
-	for _, label := range []string{"前へ", "再生", "次へ", "音量", "再生キュー"} {
+	for _, label := range []string{"前へ", "再生", "次へ", "音量", "歌詞を表示", "再生キュー"} {
 		bounds, ok := tester.Find(label)
 		if !ok || bounds.X < 0 || bounds.X+bounds.W > 760 {
 			t.Fatalf("%q is missing or outside the minimum-width window: bounds=%v", label, bounds)

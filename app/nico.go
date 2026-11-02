@@ -215,6 +215,10 @@ type playbackSources struct {
 	// FileQuality is the band a saved File plays at, "192kbps"; "" when its
 	// size and the track's length name none.
 	FileQuality string
+	// HasLyrics is the watch API's answer for the track. It is meaningless
+	// for a saved File, whose playback never asked: the caller reads it as
+	// known only when File is empty.
+	HasLyrics bool
 }
 
 // nicoAudio is one audio rendition of the watch API. SamplingRate keeps the
@@ -237,6 +241,7 @@ type nicoWatch struct {
 	Audios         []nicoAudio
 	AccessRightKey string
 	TrackID        string
+	HasLyrics      bool
 }
 
 // Prepare fetches a track's playable sources: the watch metadata, the
@@ -274,6 +279,7 @@ func (n *Nico) Prepare(videoID string) (playbackSources, error) {
 		BitRates:  bitrates,
 		Cookie:    n.cookieHeader(master),
 		UserAgent: n.userAgent,
+		HasLyrics: watch.HasLyrics,
 	}, nil
 }
 
@@ -335,6 +341,9 @@ func (n *Nico) fetchWatch(videoID string, noSideEffect bool) (nicoWatch, error) 
 			ErrorCode string `json:"errorCode"`
 		} `json:"meta"`
 		Data struct {
+			Video struct {
+				HasLyrics bool `json:"hasLyrics"`
+			} `json:"video"`
 			Client struct {
 				WatchTrackID string `json:"watchTrackId"`
 			} `json:"client"`
@@ -363,6 +372,7 @@ func (n *Nico) fetchWatch(videoID string, noSideEffect bool) (nicoWatch, error) 
 		Audios:         resp.Data.Media.Domand.Audios,
 		AccessRightKey: resp.Data.Media.Domand.AccessRightKey,
 		TrackID:        resp.Data.Client.WatchTrackID,
+		HasLyrics:      resp.Data.Video.HasLyrics,
 	}, nil
 }
 

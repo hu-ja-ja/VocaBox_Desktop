@@ -12,6 +12,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/app/lyrics"
 	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
@@ -41,6 +42,9 @@ type PlayerCommand struct {
 // playing, and its position.
 type playerState struct {
 	WatchID string
+	// VideoID is the video's ID at niconico, which the lyrics lookup asks by.
+	// WatchID is the mylist item's own; the two usually match.
+	VideoID string
 	// MylistID names the mylist the playback queue was built from; it can differ
 	// from the mylist shown while its track keeps playing.
 	MylistID string
@@ -54,11 +58,16 @@ type playerState struct {
 	Uploader string
 	ThumbURL string
 	Quality  string
-	Ready    bool
-	Playing  bool
-	CanNext  bool
-	Shuffle  bool
-	Repeat   bool
+	// HasLyrics is the watch API's answer for the track; LyricsKnown says the
+	// API was asked. A saved file plays without asking, so its answer is
+	// unknown and the lyrics lookup may still try.
+	HasLyrics   bool
+	LyricsKnown bool
+	Ready       bool
+	Playing     bool
+	CanNext     bool
+	Shuffle     bool
+	Repeat      bool
 	// PositionMS and DurationMS are the track's, and Volume the 0..1 level.
 	PositionMS float64
 	DurationMS float64
@@ -77,7 +86,10 @@ type nativeApp struct {
 	mylist *Mylist
 	// nico is the app's one client to niconico: playback, the mylist
 	// lookups, and the audio saving all ride the same session cookies.
-	nico   *Nico
+	nico *Nico
+	// lyrics is the app's one lyrics lookup: the cache and the sources, the
+	// official niconico one for now.
+	lyrics *lyrics.Service
 	window *mygo.Window
 	// held is the work the background goroutines handed over while no window
 	// was there to run it: the UI thread takes it when it builds a frame, and
@@ -133,6 +145,39 @@ type nativeApp struct {
 	sidebarOpen bool
 	// queueOpen shows the queue in place of the home and mylist pages.
 	queueOpen bool
+	// queueWasOpen and sidebarBeforeQueue fold the sidebar while the queue
+	// shows, and bring back the sidebar the queue was opened in.
+	queueWasOpen       bool
+	sidebarBeforeQueue bool
+	// lyricsOpen shows the lyrics card floating over the queue.
+	// lyricsVideoID is the track the document or error belongs to,
+	// lyricsDoc the document, and lyricsErr the failure to show.
+	// lyricsFollow is the line the line view last glided to, per
+	// lyricsFollowVideo. lyricsToken drops the answer of a lookup the next
+	// track replaced.
+	lyricsOpen      bool
+	lyricsVideoID   string
+	lyricsDoc       *lyrics.Doc
+	lyricsErr       error
+	lyricsLoading   bool
+	lyricsNeedLogin bool
+	// lyricsLoginWhenFailed is the login state when the failure was shown:
+	// the lookup retries by itself only once a login has happened since.
+	lyricsLoginWhenFailed bool
+	lyricsFollow          int
+	lyricsFollowVideo     string
+	lyricsToken           uint64
+	// lyricsSync mirrors whether the card shows a timed document, for the
+	// position pull: it runs off the UI thread, so it cannot read the state
+	// above.
+	lyricsSync atomic.Bool
+	// lyricsScroll is the line view's place, and lyricsLineCenter where
+	// the last frame laid each line out, as its center in the scroll's
+	// content: the follow glides a line to the middle of lyricsViewH.
+	lyricsScroll     ui.ScrollState
+	lyricsLineCenter []float32
+	lyricsViewY      float32
+	lyricsViewH      float32
 	// queueMenuRow is the queue row whose menu is open, -1 for none, and
 	// queueMenuOpen drives the popover until it is dismissed.
 	queueMenuRow  int
@@ -282,9 +327,10 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	// show what is behind them rather than a square of colour.
 	cardTheme := *t
 	cardTheme.Background = ui.RGBA(0, 0, 0, 0)
+	nico := NewNico()
 	app := &nativeApp{
 		mylist:       mylist,
-		nico:         NewNico(),
+		nico:         nico,
 		discord:      newDiscordRPC(discordClientID),
 		session:      sessionStore{mylist: mylist},
 		router:       router,
@@ -304,7 +350,9 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 		queueFollow:  -2,
 		queueChoice:  -1,
 		licenseOpen:  map[string]bool{},
+		lyricsFollow: -1,
 	}
+	app.lyrics = newLyricsService(mylist, nico)
 	// Until the settings load, the downloads fetch at the highest preset.
 	app.setAudioQuality(audioQualityPresets[0])
 	if ids, err := mylist.LoadBroken(); err != nil {
@@ -328,6 +376,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 var (
 	motionIn   = &ui.Motion{Opacity: 0, Y: 10}
 	motionOut  = &ui.Motion{Opacity: 0, Y: -10}
+	motionRise = &ui.Motion{Opacity: 0, Y: 48}
 	motionMenu = &ui.Motion{Opacity: 0, Scale: 0.95}
 	motionFade = &ui.Motion{Opacity: 0}
 	motionRow  = &ui.Motion{Opacity: 0, Y: 8}
@@ -397,6 +446,20 @@ func (app *nativeApp) view(c *ui.Context) {
 	// cache keeps when it trims.
 	app.thumbFrame++
 	c.SetTheme(app.theme)
+	// The position pull runs off this thread: tell it whether a timed
+	// document follows the track, so it asks at the fast rate only then.
+	app.lyricsSync.Store(app.lyricsOpen && app.lyricsDoc != nil && app.lyricsDoc.Timed)
+	// The queue takes the window: opening it folds the sidebar away, and
+	// closing it brings back the sidebar the queue was opened in.
+	if app.queueOpen != app.queueWasOpen {
+		if app.queueOpen {
+			app.sidebarBeforeQueue = app.sidebarOpen
+			app.sidebarOpen = false
+		} else {
+			app.sidebarOpen = app.sidebarBeforeQueue
+		}
+		app.queueWasOpen = app.queueOpen
+	}
 	ui.Column(c).Fill().Background(app.theme.Background).Padding(12).Gap(12).Children(func() {
 		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Gap(12).Children(func() {
 			if app.sidebarOpen {
@@ -588,6 +651,7 @@ func (app *nativeApp) sidebarDetails(c *ui.Context, alpha float32) {
 		}).Grow(1)
 		if homeClicked || mylistClicked {
 			app.queueOpen = false
+			app.lyricsOpen = false
 		}
 		if sidebar.Changed() {
 			app.router.Push(page)
@@ -783,12 +847,22 @@ func (app *nativeApp) railTile(c *ui.Context, items []MylistItem) {
 	})
 }
 
+// toggleQueue opens or closes the queue sheet. Closing it also closes the
+// lyrics beside it: the two are one screen.
+func (app *nativeApp) toggleQueue() {
+	app.queueOpen = !app.queueOpen
+	if !app.queueOpen {
+		app.lyricsOpen = false
+	}
+}
+
 // navigate goes to a destination chosen by the logo, the rail's home or a
 // rail mylist, leaving the queue screen for it even the destination already
 // showing.
 func (app *nativeApp) navigate(path string) {
 	app.menuOpen = false
 	app.queueOpen = false
+	app.lyricsOpen = false
 	app.loadingID = ""
 	if app.router.Path() != path {
 		app.router.Push(path)
@@ -973,6 +1047,7 @@ func (app *nativeApp) openMylist(id string) {
 	}
 	// Opening a mylist leaves the playing screen for it, as home does.
 	app.queueOpen = false
+	app.lyricsOpen = false
 	// A combined list is built from its members' saved copies: there is no
 	// body and no niconico mylist behind it.
 	if entry := app.savedEntry(id); entry != nil && entry.IsCombined() {
@@ -991,6 +1066,7 @@ func (app *nativeApp) openMylist(id string) {
 func (app *nativeApp) playMylist(entry mylistEntry, shuffle bool) {
 	app.menuOpen = false
 	app.queueOpen = false
+	app.lyricsOpen = false
 	app.loadingID = ""
 	if route := mylistPath(entry.ID); app.router.Path() != route {
 		app.router.Push(route)

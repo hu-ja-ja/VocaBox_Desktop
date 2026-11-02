@@ -56,6 +56,23 @@
   "playerPrevious": "Previous",
   "playerNext": "Next",
   "playerQueue": "Playback queue",
+  "lyricsTitle": "Lyrics",
+  "lyricsOpen": "Show lyrics",
+  "lyricsClose": "Hide lyrics",
+  "lyricsLoading": "Loading lyrics…",
+  "lyricsNotFound": "No lyrics are registered for this work.",
+  "lyricsLogin": "Sign in to niconico to see the lyrics.",
+  "lyricsLimit": "The monthly lyrics limit has been reached. Niconico Premium shows lyrics without a limit.",
+  "lyricsForbidden": "Lyrics cannot be shown for this work.",
+  "lyricsFailed": "Failed to show the lyrics.",
+  "lyricsUntimed": "These lyrics have no playback timing.",
+  "lyricsRetry": "Reload",
+  "lyricsSource": "Lyrics from {source}",
+  "@lyricsSource": {
+    "placeholders": {
+      "source": { "type": "String" }
+    }
+  },
   "playerOffline": "Offline",
   "playerOfflineQuality": "Offline ({quality})",
   "audioSavedLabel": "Saved for offline",

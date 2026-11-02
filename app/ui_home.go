@@ -192,6 +192,7 @@ func (app *nativeApp) importInput() {
 	}
 	app.importing = false
 	app.queueOpen = false
+	app.lyricsOpen = false
 	app.fetchMylist(strings.TrimSpace(app.input))
 }
 
@@ -223,6 +224,7 @@ func (app *nativeApp) mylistCard(c *ui.Context, entry mylistEntry) {
 	if card.Clicked() {
 		app.menuOpen = false
 		app.queueOpen = false
+		app.lyricsOpen = false
 		app.loadingID = ""
 		app.router.Push(mylistPath(entry.ID))
 	}
