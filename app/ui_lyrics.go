@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"math"
 	"strings"
 	"time"
 
@@ -51,14 +50,38 @@ func (app *nativeApp) lyricsPanel(c *ui.Context) {
 		Transition(ui.ElementTransition{Enter: motionRise, Exit: motionFade}).
 		Padding(18, 24, 12).Gap(12).Children(func() {
 		app.lyricsHeader(c)
+		app.lyricsSources(c)
 		app.lyricsBody(c)
 		app.lyricsFooter(c)
 	})
 }
 
+// lyricsSources is the provider tabs: the source that answered, or the one
+// the user picked. The card starts in the automatic priority order; a tab
+// asks for one provider alone, and a new track returns to the automatic one.
+func (app *nativeApp) lyricsSources(c *ui.Context) {
+	if app.lyrics == nil {
+		return
+	}
+	sources := app.lyrics.Sources()
+	if len(sources) == 0 {
+		return
+	}
+	labels := make([]string, len(sources))
+	for i, source := range sources {
+		labels[i] = source.Name
+	}
+	tabs := ui.Segmented(c, &app.lyricsTab, labels...).Label(locales.LyricsSourceLabel())
+	if !tabs.Changed() {
+		return
+	}
+	app.beginLyricsSource(app.lyricsTrack(), sources[app.lyricsTab].ID)
+}
+
 // lyricsHeader names the panel and the track. The view below it follows from
-// the document: word timing shows characters, line timing shows lines, and
-// no timing shows the whole sheet, so there is no unit to choose.
+// the document: timed lyrics are one list whose current line colors its
+// words when the source timed them, and an untimed document the whole sheet,
+// so there is no unit to choose.
 func (app *nativeApp) lyricsHeader(c *ui.Context) {
 	ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Start).Children(func() {
 		ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(3).Children(func() {
@@ -94,7 +117,9 @@ func (app *nativeApp) lyricsMeta() string {
 }
 
 // lyricsBody shows the state of the lookup, or the lyrics in the view the
-// document's timing picks. An untimed document has only the whole to show.
+// document's timing picks: timed documents are one list, and an untimed one
+// the whole sheet. The list colors the current line's words only when the
+// source timed them.
 func (app *nativeApp) lyricsBody(c *ui.Context) {
 	if app.lyricsTrack() == "" {
 		app.lyricsMessage(c, locales.PlayerPickTrack(), false)
@@ -111,8 +136,6 @@ func (app *nativeApp) lyricsBody(c *ui.Context) {
 		app.lyricsMessage(c, locales.LyricsNotFound(), true)
 	case !app.lyricsDoc.Timed:
 		app.lyricsPlain(c, app.lyricsDoc)
-	case app.lyricsDoc.WordTimed():
-		app.lyricsSpotlight(c, app.lyricsDoc)
 	default:
 		app.lyricsLines(c, app.lyricsDoc)
 	}
@@ -138,7 +161,13 @@ func (app *nativeApp) lyricsError(c *ui.Context) {
 	message := locales.LyricsFailed()
 	switch {
 	case errors.Is(app.lyricsErr, lyrics.ErrNotFound):
-		message = locales.LyricsNotFound()
+		// The official source knows the work has none; the fallback
+		// databases only know they did not find it.
+		if app.lyricsSource == lyrics.SourceNiconico {
+			message = locales.LyricsNotFound()
+		} else {
+			message = locales.LyricsNotFoundSource()
+		}
 	case errors.Is(app.lyricsErr, lyrics.ErrLogin):
 		message = locales.LyricsLogin()
 	case errors.Is(app.lyricsErr, lyrics.ErrLimit):
@@ -171,84 +200,22 @@ func (app *nativeApp) lyricsPlain(c *ui.Context, doc *lyrics.Doc) {
 	})
 }
 
-// lyricsSpotlight shows the line playing, large and centered, with the lines
-// around it faint. The part already played is white; the rest waits in the
-// muted color. The source decides how fine that goes: a word-timed source
-// colors whole words, and the fallback spreads the line's progress over its
-// characters.
-func (app *nativeApp) lyricsSpotlight(c *ui.Context, doc *lyrics.Doc) {
-	current := doc.LineAt(app.player.PositionMS)
-	at := current
-	if at < 0 {
-		at = 0
-	}
-	if at >= len(doc.Lines) {
-		at = len(doc.Lines) - 1
-	}
-	ui.Column(c).Grow(1).FillWidth().Justify(ui.Center).Gap(20).PaddingX(12).Children(func() {
-		if at > 0 {
-			app.lyricsNeighbor(c, doc.Lines[at-1])
-		}
-		app.lyricsCurrentLine(c, doc.Lines[at])
-		if at+1 < len(doc.Lines) {
-			app.lyricsNeighbor(c, doc.Lines[at+1])
-		}
-	})
-}
-
-// lyricsCurrentLine is the line playing, large and centered. A click seeks to
-// it, as a line of the line view does.
-func (app *nativeApp) lyricsCurrentLine(c *ui.Context, line lyrics.Line) {
-	button := ui.ButtonBase(c).Label(line.Text).FillWidth().BorderWidth(0).Padding(0).
-		Disabled(!app.player.Ready)
-	button.Children(func() {
-		ui.RichText(c, app.lyricSpans(line)...).FillWidth().FontSize(30).Bold().TextAlign(ui.Center)
-	})
-	if button.Clicked() {
-		app.seekLyrics(line)
-	}
-}
-
-// lyricsNeighbor is one of the lines around the spotlight: faint and small,
-// cut to two lines so a long block cannot push the current line off screen.
-// A click seeks to it too.
-func (app *nativeApp) lyricsNeighbor(c *ui.Context, line lyrics.Line) {
-	button := ui.ButtonBase(c).Label(line.Text).FillWidth().BorderWidth(0).Padding(0).
-		Disabled(!app.player.Ready)
-	button.Children(func() {
-		ui.Text(c, line.Text).FillWidth().FontSize(15).MaxLines(2).Ellipsis("…").
-			TextAlign(ui.Center).TextColor(app.theme.TextMuted)
-	})
-	if button.Clicked() {
-		app.seekLyrics(line)
-	}
-}
-
-// lyricSpans colors one line to the position: the words a word-timed source
-// gave, or the characters the fallback implies.
+// lyricSpans colors one line to the position by the words its source timed.
+// A line the source timed only as a whole keeps one color: the app never
+// guesses a character-level split.
 func (app *nativeApp) lyricSpans(line lyrics.Line) []ui.Span {
 	done, rest := app.theme.Text, app.theme.TextMuted
 	position := app.player.PositionMS
-	if len(line.Words) > 0 && wordsText(line.Words) == line.Text {
-		spans := make([]ui.Span, 0, len(line.Words))
-		for _, word := range line.Words {
-			color := rest
-			if position >= word.StartMS {
-				color = done
-			}
-			spans = append(spans, ui.Span{Text: word.Text, Color: color})
+	if len(line.Words) == 0 || wordsText(line.Words) != line.Text {
+		return []ui.Span{{Text: line.Text, Color: done}}
+	}
+	spans := make([]ui.Span, 0, len(line.Words))
+	for _, word := range line.Words {
+		color := rest
+		if position >= word.StartMS {
+			color = done
 		}
-		return spans
-	}
-	runes := []rune(line.Text)
-	complete := int(math.Round(line.Progress(position) * float64(len(runes))))
-	complete = max(0, min(complete, len(runes)))
-	spans := make([]ui.Span, 0, 2)
-	if complete > 0 {
-		spans = append(spans, ui.Span{Text: string(runes[:complete]), Color: done})
-	}
-	if complete < len(runes) {
-		spans = append(spans, ui.Span{Text: string(runes[complete:]), Color: rest})
+		spans = append(spans, ui.Span{Text: word.Text, Color: color})
 	}
 	return spans
 }
@@ -264,8 +231,10 @@ func wordsText(words []lyrics.Word) string {
 }
 
 // lyricsLines is the line view: the document as a list, every line played so
-// far white and the current one bold, the rest faint. The list glides to the
-// current line as the track moves on.
+// far white and the current one bold, the rest faint. The current line colors
+// its words to the position when the source timed them; a line-timed
+// document keeps the whole line white rather than guessing a split. The list
+// glides to the current line as the track moves on.
 func (app *nativeApp) lyricsLines(c *ui.Context, doc *lyrics.Doc) {
 	// The rows' bounds and the viewport are the frame before's, drawn with
 	// this offset: measure against it, not the offset this frame's glide sets.
@@ -294,7 +263,11 @@ func (app *nativeApp) lyricsLines(c *ui.Context, doc *lyrics.Doc) {
 					row.Background(app.theme.Surface)
 				}
 				row.Children(func() {
-					text := ui.Text(c, line.Text).FontSize(21)
+					if i == current && len(line.Words) > 0 && wordsText(line.Words) == line.Text {
+						ui.RichText(c, app.lyricSpans(line)...).FillWidth().FontSize(21).Bold()
+						return
+					}
+					text := ui.Text(c, line.Text).FillWidth().FontSize(21)
 					switch {
 					case i == current:
 						text.Bold().TextColor(app.theme.Text)
@@ -378,7 +351,20 @@ func (app *nativeApp) lyricsFooter(c *ui.Context) {
 	if doc == nil || doc.Source == "" {
 		return
 	}
-	ui.Text(c, locales.LyricsSource(doc.Source)).FontSize(11).TextColor(app.theme.TextMuted)
+	ui.Text(c, locales.LyricsSource(app.lyricsSourceName(doc.Source))).FontSize(11).TextColor(app.theme.TextMuted)
+}
+
+// lyricsSourceName is the display name of a source ID, the ID itself for a
+// source the service does not list.
+func (app *nativeApp) lyricsSourceName(id string) string {
+	if app.lyrics != nil {
+		for _, source := range app.lyrics.Sources() {
+			if source.ID == id {
+				return source.Name
+			}
+		}
+	}
+	return id
 }
 
 // lyricsTrack is the video the lyrics lookup asks by: its niconico video ID
@@ -392,7 +378,7 @@ func (app *nativeApp) lyricsTrack() string {
 
 // syncLyrics starts the lookup for the track playing when the panel shows a
 // document of another track, and tries again once a login the failure asked
-// for has completed.
+// for has completed. A new track starts over from the automatic order.
 func (app *nativeApp) syncLyrics() {
 	if !app.lyricsOpen {
 		return
@@ -401,22 +387,39 @@ func (app *nativeApp) syncLyrics() {
 	if track == "" {
 		return
 	}
-	if app.lyricsVideoID != track ||
-		(app.lyricsNeedLogin && app.loggedIn && !app.lyricsLoginWhenFailed) {
+	if app.lyricsVideoID != track {
+		app.lyricsSource = ""
+		app.beginLyrics(track)
+		return
+	}
+	if app.lyricsNeedLogin && app.loggedIn && !app.lyricsLoginWhenFailed {
 		app.beginLyrics(track)
 	}
 }
 
-// beginLyrics looks the track's lyrics up in the background, under a token
-// the next track invalidates, and shows the answer, the failure, or the
-// login it asks for.
+// beginLyrics looks the track's lyrics up in the mode the card is in.
 func (app *nativeApp) beginLyrics(track string) {
+	app.beginLyricsSource(track, app.lyricsSource)
+}
+
+// beginLyricsSource looks the track's lyrics up in the background, under a
+// token the next lookup invalidates, and shows the answer, the failure, or
+// the login it asks for. An empty source follows the automatic priority
+// order; any other asks that provider alone.
+func (app *nativeApp) beginLyricsSource(track, source string) {
+	if track == "" || app.lyrics == nil {
+		return
+	}
+	app.lyricsSource = source
 	app.lyricsVideoID = track
 	app.lyricsDoc = nil
 	app.lyricsErr = nil
 	app.lyricsNeedLogin = false
 	app.lyricsLoginWhenFailed = false
 	app.lyricsLoading = true
+	if source == "" {
+		app.lyricsTab = 0
+	}
 	app.lyricsFollow, app.lyricsFollowVideo = -1, ""
 	// A new document starts at its top, with no line measured yet.
 	app.lyricsScroll = ui.ScrollState{}
@@ -433,7 +436,13 @@ func (app *nativeApp) beginLyrics(track string) {
 	}
 	service := app.lyrics
 	go func() {
-		doc, err := service.Load(query)
+		var doc lyrics.Doc
+		var err error
+		if source == "" {
+			doc, err = service.Load(query)
+		} else {
+			doc, err = service.LoadSource(source, query)
+		}
 		if err == nil {
 			leadFirstLyricLine(&doc)
 		}
@@ -456,8 +465,23 @@ func (app *nativeApp) beginLyrics(track string) {
 				return
 			}
 			app.lyricsDoc = &doc
+			if source == "" {
+				app.lyricsTab = app.lyricsTabOf(doc.Source)
+			}
 		})
 	}()
+}
+
+// lyricsTabOf is the tab of the provider that answered.
+func (app *nativeApp) lyricsTabOf(id string) int {
+	if app.lyrics != nil {
+		for i, source := range app.lyrics.Sources() {
+			if source.ID == id {
+				return i
+			}
+		}
+	}
+	return app.lyricsTab
 }
 
 // retryLyrics asks again for the track playing, after a failure or a login.

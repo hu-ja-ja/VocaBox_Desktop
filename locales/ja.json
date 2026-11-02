@@ -73,6 +73,8 @@
       "source": { "type": "String" }
     }
   },
+  "lyricsSourceLabel": "歌詞の提供元",
+  "lyricsNotFoundSource": "歌詞が見つかりませんでした",
   "playerOffline": "オフライン",
   "playerOfflineQuality": "オフライン（{quality}）",
   "audioSavedLabel": "オフライン保存済み",

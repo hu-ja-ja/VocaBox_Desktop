@@ -67,6 +67,8 @@ type fakeProvider struct {
 	calls int
 }
 
+func (f *fakeProvider) ID() string { return f.name }
+
 func (f *fakeProvider) Name() string { return f.name }
 
 func (f *fakeProvider) Fetch(Query) (Doc, error) {
@@ -74,13 +76,14 @@ func (f *fakeProvider) Fetch(Query) (Doc, error) {
 	return f.doc, f.err
 }
 
-// TestCachePathNamesTheFormatVersion checks the format version is part of the
-// cache key, so bumping it leaves old answers behind.
+// TestCachePathNamesTheFormatVersion checks the format version and the
+// source are part of the cache key, so bumping it leaves old answers behind
+// and two sources do not overwrite each other.
 func TestCachePathNamesTheFormatVersion(t *testing.T) {
 	c := &cache{dir: "cache"}
-	path, ok := c.path("sm1")
-	if !ok || filepath.Base(path) != cacheVersion+"-sm1.json" {
-		t.Fatalf("cache path = %q, %v; want the format version in the name", path, ok)
+	path, ok := c.path("sm1", SourceNiconico)
+	if !ok || filepath.Base(path) != cacheVersion+"-sm1-"+SourceNiconico+".json" {
+		t.Fatalf("cache path = %q, %v; want the format version and source in the name", path, ok)
 	}
 }
 
@@ -144,5 +147,56 @@ func TestServiceSkipsAnEmptyAnswer(t *testing.T) {
 	}
 	if doc.Source != "second" {
 		t.Fatalf("doc = %#v; want the empty answer passed over", doc)
+	}
+}
+
+func TestServiceSourcesAreInPriorityOrder(t *testing.T) {
+	s := NewService("",
+		&fakeProvider{name: SourceNiconico},
+		&fakeProvider{name: SourceKugou},
+		&fakeProvider{name: SourceNetease},
+	)
+	sources := s.Sources()
+	if len(sources) != 3 {
+		t.Fatalf("sources = %#v; want three", sources)
+	}
+	for i, want := range []string{SourceNiconico, SourceKugou, SourceNetease} {
+		if sources[i].ID != want {
+			t.Fatalf("source %d = %q; want %q", i, sources[i].ID, want)
+		}
+	}
+}
+
+func TestServiceLoadSourceFetchesOnlyThatSource(t *testing.T) {
+	nico := &fakeProvider{name: SourceNiconico, doc: Doc{Lines: []Line{{Text: "公式"}}}}
+	kugou := &fakeProvider{name: SourceKugou, err: ErrNotFound}
+	s := NewService("", nico, kugou)
+	if _, err := s.LoadSource(SourceKugou, Query{VideoID: "sm1"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("LoadSource error = %v; want the chosen source's error", err)
+	}
+	if nico.calls != 0 {
+		t.Fatalf("the official source was called %d times; want the chosen source alone", nico.calls)
+	}
+	if kugou.calls != 1 {
+		t.Fatalf("the chosen source was called %d times; want once", kugou.calls)
+	}
+}
+
+func TestServiceCachesEachSourceSeparately(t *testing.T) {
+	nico := &fakeProvider{name: SourceNiconico, err: ErrNotFound}
+	kugou := &fakeProvider{name: SourceKugou, doc: Doc{Lines: []Line{{Text: "歌詞", StartMS: 1000}}}}
+	s := NewService(t.TempDir(), nico, kugou)
+	if _, err := s.LoadSource(SourceKugou, Query{VideoID: "sm1"}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := s.Load(Query{VideoID: "sm1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Source != SourceKugou {
+		t.Fatalf("doc = %#v; want the cached fallback answer", doc)
+	}
+	if kugou.calls != 1 {
+		t.Fatalf("the fallback source was called %d times; want the cache to answer", kugou.calls)
 	}
 }

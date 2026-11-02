@@ -714,6 +714,26 @@ func (msgs Messages) LyricsSource(source string) string {
 	return Catalog.Format(msgs.locale, "lyricsSource", map[string]any{"source": source})
 }
 
+// LyricsSourceLabel says "歌詞の提供元"
+// in the language the app shows.
+func LyricsSourceLabel() string { return In(i18n.Locale()).LyricsSourceLabel() }
+
+// LyricsSourceLabel says "歌詞の提供元"
+// in the language of msgs.
+func (msgs Messages) LyricsSourceLabel() string {
+	return Catalog.Format(msgs.locale, "lyricsSourceLabel", nil)
+}
+
+// LyricsNotFoundSource says "歌詞が見つかりませんでした"
+// in the language the app shows.
+func LyricsNotFoundSource() string { return In(i18n.Locale()).LyricsNotFoundSource() }
+
+// LyricsNotFoundSource says "歌詞が見つかりませんでした"
+// in the language of msgs.
+func (msgs Messages) LyricsNotFoundSource() string {
+	return Catalog.Format(msgs.locale, "lyricsNotFoundSource", nil)
+}
+
 // PlayerOffline says "オフライン"
 // in the language the app shows.
 func PlayerOffline() string { return In(i18n.Locale()).PlayerOffline() }

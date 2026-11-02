@@ -15,11 +15,19 @@ import (
 // fakeLyricsProvider is one source the lyrics UI tests control. onFetch
 // answers per call where a test needs the first failure and the next answer.
 type fakeLyricsProvider struct {
+	id      string
 	name    string
 	doc     lyrics.Doc
 	err     error
 	calls   int
 	onFetch func(call int) (lyrics.Doc, error)
+}
+
+func (f *fakeLyricsProvider) ID() string {
+	if f.id != "" {
+		return f.id
+	}
+	return f.name
 }
 
 func (f *fakeLyricsProvider) Name() string { return f.name }
@@ -41,11 +49,15 @@ func timedLyricsDoc() lyrics.Doc {
 }
 
 // lyricsUIApp is an app with a track at 6.5 seconds and a lyrics service
-// over the test's provider, in a throwaway config directory.
-func lyricsUIApp(t *testing.T, provider *fakeLyricsProvider) *nativeApp {
+// over the test's providers, in a throwaway config directory.
+func lyricsUIApp(t *testing.T, providers ...*fakeLyricsProvider) *nativeApp {
 	t.Helper()
 	app := newNativeApp(&Mylist{configDir: t.TempDir()})
-	app.lyrics = lyrics.NewService("", provider)
+	list := make([]lyrics.Provider, 0, len(providers))
+	for _, provider := range providers {
+		list = append(list, provider)
+	}
+	app.lyrics = lyrics.NewService("", list...)
 	app.player = playerState{
 		WatchID: "sm1", VideoID: "sm1", Title: "歌詞の曲", Uploader: "投稿者",
 		Ready: true, Playing: true, Volume: 1, PositionMS: 6500,
@@ -110,35 +122,41 @@ func TestNativeUILyricsFloatsOverTheQueue(t *testing.T) {
 // TestNativeUILyricsWordTimingShowsTheCharacterView checks the view the
 // document picks: word timing shows the large character view, and line
 // timing the line list.
-func TestNativeUILyricsWordTimingShowsTheCharacterView(t *testing.T) {
-	doc := timedLyricsDoc()
-	doc.Lines[1].Words = []lyrics.Word{
-		{Text: "二", StartMS: 6000, EndMS: 8000},
-		{Text: "行目", StartMS: 8000, EndMS: 10000},
+// TestNativeUILyricsWordTimingUsesTheLineList checks a word-timed document
+// takes the line list like every other timed document: its current line
+// colors its words, and lines far from it stay in the list.
+func TestNativeUILyricsWordTimingUsesTheLineList(t *testing.T) {
+	doc := lyrics.Doc{Timed: true}
+	for i := range 40 {
+		doc.Lines = append(doc.Lines, lyrics.Line{
+			Text:    fmt.Sprintf("歌詞の行 %d", i),
+			StartMS: float64(i * 2000),
+			EndMS:   float64(i*2000 + 1500),
+		})
+	}
+	doc.Lines[3].Words = []lyrics.Word{
+		{Text: "歌詞", StartMS: 6000, EndMS: 7000},
+		{Text: "の行 3", StartMS: 7000, EndMS: 7500},
 	}
 	provider := &fakeLyricsProvider{name: "niconico", doc: doc}
 	app := lyricsUIApp(t, provider)
+	app.player.PositionMS = 6500
 	tester := openLyricsUI(t, app)
-	current, ok := tester.Find("二行目")
-	if !ok {
-		t.Fatalf("the current line is not shown: %q", tester.Texts())
+	// The line list keeps lines far from the current one; a centered view
+	// would show only the neighbors.
+	if !tester.HasText(doc.Lines[0].Text) || !tester.HasText(doc.Lines[39].Text) {
+		t.Fatalf("the word-timed document is not the line list: %q", tester.Texts())
 	}
-	if current.H < 28 {
-		t.Fatalf("the word-timed document did not take the large character view: %v", current)
+	if !tester.HasText("歌詞の行 3") {
+		t.Fatalf("the current line is missing: %q", tester.Texts())
 	}
-	if !tester.HasText("一行目") || !tester.HasText("三行目") {
-		t.Fatalf("the lines around the current one are missing: %q", tester.Texts())
-	}
-	if _, ok := tester.Find("文字"); ok {
-		t.Fatal("the character view offered a manual unit")
-	}
-	// The large line seeks like a line of the line view.
-	if err := tester.Click("二行目"); err != nil {
+	// The word-timed line seeks like any other line of the list.
+	if err := tester.Click("歌詞の行 3"); err != nil {
 		t.Fatal(err)
 	}
 	seek, ok := lastCommand(app.sent, "seek")
 	if !ok || seek.PositionMS != 6000-lyricsSeekLeadMS {
-		t.Fatalf("a character-view line did not seek: %#v", app.sent)
+		t.Fatalf("a word-timed line did not seek: %#v", app.sent)
 	}
 }
 
@@ -297,8 +315,104 @@ func TestNativeUILyricsNoLyrics(t *testing.T) {
 	app := lyricsUIApp(t, provider)
 	app.player.HasLyrics = false
 	tester := openLyricsUI(t, app)
-	if !tester.HasText(locales.LyricsNotFound()) {
-		t.Fatalf("the panel does not say the work has no lyrics: %q", tester.Texts())
+	if !tester.HasText(locales.LyricsNotFoundSource()) {
+		t.Fatalf("the panel does not say no lyrics were found: %q", tester.Texts())
+	}
+}
+
+// TestNativeUILyricsTabsFollowTheSource checks the three provider tabs: the
+// automatic order picks the source and its tab, a clicked tab asks that
+// source alone, and a new track starts from the automatic order again.
+func TestNativeUILyricsTabsFollowTheSource(t *testing.T) {
+	nico := &fakeLyricsProvider{id: "niconico", name: "niconico", err: lyrics.ErrNotFound}
+	kugou := &fakeLyricsProvider{id: "kugou", name: "KuGou", doc: timedLyricsDoc()}
+	netease := &fakeLyricsProvider{id: "netease", name: "NetEase", doc: timedLyricsDoc()}
+	app := lyricsUIApp(t, nico, kugou, netease)
+	tester := openLyricsUI(t, app)
+	if _, ok := tester.Find("自動"); ok {
+		t.Fatal("the tabs offer an automatic mode; the three providers are the tabs")
+	}
+	if nico.calls != 1 || kugou.calls != 1 || netease.calls != 0 {
+		t.Fatalf("calls = %d, %d, %d; want the automatic order to stop at KuGou", nico.calls, kugou.calls, netease.calls)
+	}
+	if app.lyricsTab != 1 || app.lyricsSource != "" {
+		t.Fatalf("tab = %d, source = %q; want the KuGou tab in automatic mode", app.lyricsTab, app.lyricsSource)
+	}
+	if !tester.HasText(locales.LyricsSource("KuGou")) {
+		t.Fatalf("the footer does not credit KuGou: %q", tester.Texts())
+	}
+
+	// A clicked tab asks one source alone.
+	if err := tester.Click("NetEase"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	waitForApp(t, app, "the NetEase lyrics", func() bool {
+		return app.lyricsVideoID == "sm1" && !app.lyricsLoading && app.lyricsDoc != nil &&
+			app.lyricsDoc.Source == "netease"
+	})
+	tester.Frame()
+	if nico.calls != 1 || kugou.calls != 1 || netease.calls != 1 {
+		t.Fatalf("calls = %d, %d, %d; want the clicked source alone", nico.calls, kugou.calls, netease.calls)
+	}
+	if app.lyricsTab != 2 || app.lyricsSource != "netease" {
+		t.Fatalf("tab = %d, source = %q; want the NetEase tab chosen", app.lyricsTab, app.lyricsSource)
+	}
+	if !tester.HasText(locales.LyricsSource("NetEase")) {
+		t.Fatalf("the footer does not credit NetEase: %q", tester.Texts())
+	}
+
+	// The chosen source stays while the track does.
+	if err := tester.Click("歌詞を閉じる"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if err := tester.Click("歌詞を表示"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if app.lyricsSource != "netease" || app.lyricsDoc == nil || app.lyricsDoc.Source != "netease" {
+		t.Fatalf("reopening lost the chosen source: source=%q doc=%#v", app.lyricsSource, app.lyricsDoc)
+	}
+	if netease.calls != 1 {
+		t.Fatalf("reopening fetched the same source again: %d calls", netease.calls)
+	}
+
+	// A new track starts from the automatic order.
+	app.player.WatchID, app.player.VideoID, app.player.Title = "sm2", "sm2", "次の曲"
+	tester.Frame()
+	waitForApp(t, app, "the next track's lyrics", func() bool {
+		return app.lyricsVideoID == "sm2" && !app.lyricsLoading && app.lyricsDoc != nil
+	})
+	if app.lyricsSource != "" || app.lyricsTab != 1 {
+		t.Fatalf("the next track kept the manual source: tab = %d, source = %q", app.lyricsTab, app.lyricsSource)
+	}
+	if nico.calls != 2 || kugou.calls != 2 || netease.calls != 1 {
+		t.Fatalf("calls = %d, %d, %d; want the automatic order on the next track", nico.calls, kugou.calls, netease.calls)
+	}
+}
+
+// TestNativeUILyricsTabsFitTheMinimumWidth checks the three provider tabs
+// stay inside the card in the narrowest window.
+func TestNativeUILyricsTabsFitTheMinimumWidth(t *testing.T) {
+	nico := &fakeLyricsProvider{id: "niconico", name: "niconico", doc: timedLyricsDoc()}
+	kugou := &fakeLyricsProvider{id: "kugou", name: "KuGou", err: lyrics.ErrNotFound}
+	netease := &fakeLyricsProvider{id: "netease", name: "NetEase", err: lyrics.ErrNotFound}
+	app := lyricsUIApp(t, nico, kugou, netease)
+	tester := ui.NewTester(app.view, 760, 560)
+	if err := tester.Click("歌詞を表示"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Advance(300 * time.Millisecond)
+	waitForApp(t, app, "the lyrics lookup", func() bool {
+		return app.lyricsDoc != nil || app.lyricsErr != nil
+	})
+	tester.Frame()
+	for _, label := range []string{"歌詞", "niconico", "KuGou", "NetEase"} {
+		bounds, ok := tester.Find(label)
+		if !ok || bounds.X < 0 || bounds.X+bounds.W > 760 {
+			t.Fatalf("%q is missing or outside the minimum-width window: bounds=%v", label, bounds)
+		}
 	}
 }
 
@@ -435,14 +549,13 @@ func TestLeadFirstLyricLine(t *testing.T) {
 // spotlight colors: the part played is white, the rest muted.
 func TestLyricSpansFollowThePosition(t *testing.T) {
 	app := newNativeApp(&Mylist{configDir: t.TempDir()})
+	// A line the source timed only as a whole keeps one color: no guessed
+	// character split.
 	line := lyrics.Line{Text: "あいうえお", StartMS: 1000, EndMS: 5000}
 	app.player.PositionMS = 3000
 	spans := app.lyricSpans(line)
-	if len(spans) != 2 || spans[0].Text != "あいう" || spans[1].Text != "えお" {
-		t.Fatalf("spans = %#v; want the first three characters done", spans)
-	}
-	if spans[0].Color != app.theme.Text || spans[1].Color != app.theme.TextMuted {
-		t.Fatalf("spans colors = %v, %v; want white then muted", spans[0].Color, spans[1].Color)
+	if len(spans) != 1 || spans[0].Text != "あいうえお" || spans[0].Color != app.theme.Text {
+		t.Fatalf("spans = %#v; want the whole line in one color", spans)
 	}
 
 	words := lyrics.Line{

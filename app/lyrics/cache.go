@@ -13,30 +13,30 @@ const maxCacheBody = 1 << 20
 
 // cacheVersion names the cache's data format. It is part of every file name,
 // so bumping it starts the cache over rather than reading files written for
-// another format. Bump it when the parsed document changes or a provider is
-// added: the cache answers before the providers do.
-const cacheVersion = "v1"
+// another format. Bump it when the parsed document changes or the file
+// naming changes; adding a provider writes files of its own.
+const cacheVersion = "v2"
 
-// cache keeps successful answers under one directory, one file per video.
-// A file that cannot be read is a miss, not an error: the source is asked
-// again.
+// cache keeps successful answers under one directory, one file per video and
+// source. A file that cannot be read is a miss, not an error: the source is
+// asked again.
 type cache struct {
 	dir string
 }
 
-// path returns where the video's lyrics are kept, reporting false for an ID
-// that cannot name a file.
-func (c *cache) path(videoID string) (string, bool) {
-	if !validID(videoID) {
+// path returns where the source's lyrics of the video are kept, reporting
+// false for an ID that cannot name a file.
+func (c *cache) path(videoID, sourceID string) (string, bool) {
+	if !validID(videoID) || !validID(sourceID) {
 		return "", false
 	}
-	return filepath.Join(c.dir, cacheVersion+"-"+videoID+".json"), true
+	return filepath.Join(c.dir, cacheVersion+"-"+videoID+"-"+sourceID+".json"), true
 }
 
-// load returns the cached lyrics of videoID, false when there is none or the
-// file cannot be read.
-func (c *cache) load(videoID string) (Doc, bool) {
-	path, ok := c.path(videoID)
+// load returns the cached lyrics of videoID from sourceID, false when there
+// is none or the file cannot be read.
+func (c *cache) load(videoID, sourceID string) (Doc, bool) {
+	path, ok := c.path(videoID, sourceID)
 	if !ok {
 		return Doc{}, false
 	}
@@ -51,14 +51,14 @@ func (c *cache) load(videoID string) (Doc, bool) {
 	return doc, true
 }
 
-// save writes the video's lyrics. Another process reading the file while it
-// is written may see a torn body; the reader treats it as a miss and asks
-// the source again, so the cache needs no temp file of its own.
+// save writes the video's lyrics from a source. Another process reading the
+// file while it is written may see a torn body; the reader treats it as a
+// miss and asks the source again, so the cache needs no temp file of its own.
 // shortcut: a torn cache file costs one fetch, not correctness.
-func (c *cache) save(videoID string, doc Doc) error {
-	path, ok := c.path(videoID)
+func (c *cache) save(videoID, sourceID string, doc Doc) error {
+	path, ok := c.path(videoID, sourceID)
 	if !ok {
-		return errors.New("lyrics: video id cannot name a cache file")
+		return errors.New("lyrics: video or source id cannot name a cache file")
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {
@@ -73,15 +73,15 @@ func (c *cache) save(videoID string, doc Doc) error {
 	return os.WriteFile(path, body, 0o644)
 }
 
-// validID reports whether a string looks like a video ID: letters and digits
-// only, as every niconico ID is, so a hand-edited file name can never point
-// outside the cache directory.
-func validID(videoID string) bool {
-	if videoID == "" || len(videoID) > 32 {
+// validID reports whether a string looks like a video or source ID: letters
+// and digits only, so a hand-edited file name can never point outside the
+// cache directory.
+func validID(id string) bool {
+	if id == "" || len(id) > 32 {
 		return false
 	}
-	for i := 0; i < len(videoID); i++ {
-		c := videoID[i]
+	for i := 0; i < len(id); i++ {
+		c := id[i]
 		if c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' {
 			continue
 		}

@@ -88,7 +88,7 @@ type nativeApp struct {
 	// lookups, and the audio saving all ride the same session cookies.
 	nico *Nico
 	// lyrics is the app's one lyrics lookup: the cache and the sources, the
-	// official niconico one for now.
+	// official niconico one and the fallback databases.
 	lyrics *lyrics.Service
 	window *mygo.Window
 	// held is the work the background goroutines handed over while no window
@@ -152,6 +152,8 @@ type nativeApp struct {
 	// lyricsOpen shows the lyrics card floating over the queue.
 	// lyricsVideoID is the track the document or error belongs to,
 	// lyricsDoc the document, and lyricsErr the failure to show.
+	// lyricsSource is the provider the user picked, "" while the card
+	// follows the automatic priority order; lyricsTab is the tab it shows.
 	// lyricsFollow is the line the line view last glided to, per
 	// lyricsFollowVideo. lyricsToken drops the answer of a lookup the next
 	// track replaced.
@@ -161,6 +163,8 @@ type nativeApp struct {
 	lyricsErr       error
 	lyricsLoading   bool
 	lyricsNeedLogin bool
+	lyricsSource    string
+	lyricsTab       int
 	// lyricsLoginWhenFailed is the login state when the failure was shown:
 	// the lookup retries by itself only once a login has happened since.
 	lyricsLoginWhenFailed bool

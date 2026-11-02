@@ -6,8 +6,16 @@ package lyrics
 
 import "log"
 
-// SourceNiconico names niconico's official lyrics, the source the app ships.
-const SourceNiconico = "niconico"
+// The IDs the app's sources answer to. They are stable values: the cache and
+// the UI's tabs ask by them, while the provider's Name is what the user reads.
+const (
+	// SourceNiconico names niconico's official lyrics.
+	SourceNiconico = "niconico"
+	// SourceKugou names the KuGou lyrics database.
+	SourceKugou = "kugou"
+	// SourceNetease names the NetEase Cloud Music lyrics database.
+	SourceNetease = "netease"
+)
 
 // Word is one run of a line with timing of its own, when the source has word
 // timing. Sources that only time whole lines leave it empty.
@@ -42,10 +50,15 @@ func (l Line) Progress(ms float64) float64 {
 
 // Doc is one track's lyrics, as a source answered them.
 type Doc struct {
+	// Source is the ID of the provider that answered, not its display name.
 	Source string `json:"source,omitempty"`
 	// Timed says the lines carry playback positions: the UI may follow them.
 	Timed bool   `json:"timed,omitempty"`
 	Lines []Line `json:"lines"`
+	// annotated says the source's text carried ruby or translation blocks
+	// the parser stripped. The NetEase lookup prefers a cleaner answer and
+	// the cache does not keep this marker.
+	annotated bool
 }
 
 // WordTimed reports whether the document carries word timing. A source with
@@ -91,13 +104,22 @@ type Query struct {
 	HasLyricsKnown bool
 }
 
-// Provider fetches one track's lyrics from one source. Name is how the
-// source is credited. ErrNotFound asks the service to try the next source;
-// every other error does too, but the first one is what the user sees when
-// no source answers.
+// Provider fetches one track's lyrics from one source. ID is the stable name
+// the cache and the UI ask by, and Name is how the source is credited and
+// listed. ErrNotFound asks the service to try the next source; every other
+// error does too, but the first one is what the user sees when no source
+// answers.
 type Provider interface {
+	ID() string
 	Name() string
 	Fetch(Query) (Doc, error)
+}
+
+// Source is one provider as the UI lists it: ID asks for it, Name labels it
+// and credits it.
+type Source struct {
+	ID   string
+	Name string
 }
 
 // Service is the app's one lyrics lookup: the local cache, then the
@@ -117,21 +139,32 @@ func NewService(cacheDir string, providers ...Provider) *Service {
 	return s
 }
 
-// Load returns the track's lyrics: the cached answer when there is one, else
-// the first provider that answers. A source's answer is cached, credited to
+// Sources returns the providers in priority order: the order the automatic
+// lookup tries and the UI lists them in.
+func (s *Service) Sources() []Source {
+	if s == nil {
+		return nil
+	}
+	sources := make([]Source, 0, len(s.providers))
+	for _, provider := range s.providers {
+		sources = append(sources, Source{ID: provider.ID(), Name: provider.Name()})
+	}
+	return sources
+}
+
+// Load returns the track's lyrics: the first provider in priority order that
+// has a cached answer or answers. A source's answer is cached, credited to
 // it, and returned; errors try the next source, and the first error is
 // returned when none answers.
 func (s *Service) Load(q Query) (Doc, error) {
 	if s == nil {
 		return Doc{}, ErrFailed
 	}
-	if s.cache != nil {
-		if doc, ok := s.cache.load(q.VideoID); ok {
-			return doc, nil
-		}
-	}
 	var first error
 	for _, provider := range s.providers {
+		if doc, ok := s.cached(provider, q.VideoID); ok {
+			return doc, nil
+		}
 		doc, err := provider.Fetch(q)
 		if err != nil {
 			if first == nil {
@@ -145,16 +178,60 @@ func (s *Service) Load(q Query) (Doc, error) {
 			}
 			continue
 		}
-		doc.Source = provider.Name()
-		if s.cache != nil {
-			if err := s.cache.save(q.VideoID, doc); err != nil {
-				log.Printf("lyrics: cache %s: %v", q.VideoID, err)
-			}
-		}
-		return doc, nil
+		return s.finish(provider, q.VideoID, doc), nil
 	}
 	if first == nil {
 		first = ErrNotFound
 	}
 	return Doc{}, first
+}
+
+// LoadSource returns one provider's lyrics: its cached answer, else its
+// Fetch. No other provider is tried, so the UI's tab shows exactly the source
+// the user chose.
+func (s *Service) LoadSource(id string, q Query) (Doc, error) {
+	if s == nil {
+		return Doc{}, ErrFailed
+	}
+	for _, provider := range s.providers {
+		if provider.ID() != id {
+			continue
+		}
+		if doc, ok := s.cached(provider, q.VideoID); ok {
+			return doc, nil
+		}
+		doc, err := provider.Fetch(q)
+		if err != nil {
+			return Doc{}, err
+		}
+		if len(doc.Lines) == 0 {
+			return Doc{}, ErrNotFound
+		}
+		return s.finish(provider, q.VideoID, doc), nil
+	}
+	return Doc{}, ErrFailed
+}
+
+// cached returns the provider's saved answer for the track.
+func (s *Service) cached(provider Provider, videoID string) (Doc, bool) {
+	if s.cache == nil {
+		return Doc{}, false
+	}
+	doc, ok := s.cache.load(videoID, provider.ID())
+	if !ok {
+		return Doc{}, false
+	}
+	doc.Source = provider.ID()
+	return doc, true
+}
+
+// finish credits the answer to its provider and saves it.
+func (s *Service) finish(provider Provider, videoID string, doc Doc) Doc {
+	doc.Source = provider.ID()
+	if s.cache != nil {
+		if err := s.cache.save(videoID, provider.ID(), doc); err != nil {
+			log.Printf("lyrics: cache %s: %v", videoID, err)
+		}
+	}
+	return doc
 }

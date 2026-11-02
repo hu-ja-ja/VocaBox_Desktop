@@ -43,7 +43,9 @@ func NewNicoProvider(client *http.Client, apiBase, userAgent string, loggedIn fu
 	}
 }
 
-func (p *nicoProvider) Name() string { return SourceNiconico }
+func (p *nicoProvider) ID() string { return SourceNiconico }
+
+func (p *nicoProvider) Name() string { return "ニコニコ" }
 
 func (p *nicoProvider) Fetch(q Query) (Doc, error) {
 	if q.HasLyricsKnown && !q.HasLyrics {

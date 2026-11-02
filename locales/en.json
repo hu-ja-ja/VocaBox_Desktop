@@ -73,6 +73,8 @@
       "source": { "type": "String" }
     }
   },
+  "lyricsSourceLabel": "Lyrics source",
+  "lyricsNotFoundSource": "No lyrics were found.",
   "playerOffline": "Offline",
   "playerOfflineQuality": "Offline ({quality})",
   "audioSavedLabel": "Saved for offline",
