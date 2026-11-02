@@ -183,11 +183,15 @@ func (app *nativeApp) trackRows(c *ui.Context) {
 	}
 }
 
-// queueView is the screen the player bar opens: the queue as it plays, with
-// the track playing kept in sight. The player itself has no picture: the
-// AmsHelper plays audio on its own.
-func (app *nativeApp) queueView(c *ui.Context) {
-	ui.Row(c).Grow(1).FillHeight().AlignItems(ui.Stretch).Children(func() {
+// queueView is the screen the player bar opens: the queue as a sheet over
+// the page, sliding up from under the player bar and back down, so the
+// page comes back as it goes.
+func (app *nativeApp) queueView(c *ui.Context, slide float32) {
+	ui.Row(c).Key("queue-screen").Absolute().Left(0).Right(0).HeightPercent(100).
+		TopPercent(100*(1-slide)).
+		Background(app.theme.Surface).
+		Shadow(0, -4, 18, 0, ui.RGBA(0, 0, 0, 0.18)).
+		AlignItems(ui.Stretch).Children(func() {
 		app.queuePanel(c)
 	})
 }
@@ -196,13 +200,7 @@ func (app *nativeApp) queueView(c *ui.Context) {
 // first under shuffle, labelled with the mylist the queue came from and its
 // size.
 func (app *nativeApp) queuePanel(c *ui.Context) {
-	// The queue rises up from under the player bar, and sinks back down
-	// when it closes.
-	ui.Column(c).Transition(ui.ElementTransition{
-		Animation: &sidebarShift,
-		Colors:    true,
-		Enter:     &ui.Motion{Y: 40, Opacity: 0}, Exit: &ui.Motion{Y: 40, Opacity: 0},
-	}).Grow(1).FillHeight().Gap(4).Padding(18, 26, 12).Children(func() {
+	ui.Column(c).Grow(1).FillHeight().Gap(4).Padding(18, 26, 12).Children(func() {
 		ui.Column(c).Gap(3).Children(func() {
 			ui.Text(c, locales.PlayerQueue()).FontSize(21).Bold().SingleLine().Ellipsis("…")
 			ui.Text(c, app.queueMeta()).FontSize(12).TextColor(app.theme.TextMuted)

@@ -1262,6 +1262,7 @@ func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 	if err := tester.Click("再生キュー"); err != nil {
 		t.Fatal(err)
 	}
+	tester.Advance(300 * time.Millisecond)
 	if !app.queueOpen {
 		t.Fatal("the queue screen did not open")
 	}
@@ -1296,6 +1297,71 @@ func TestNativeUIQueueScreenShowsTheQueue(t *testing.T) {
 	}
 	if app.queueOpen {
 		t.Fatal("home left the queue screen open")
+	}
+}
+
+// TestNativeUIQueueSlidesOverThePage checks the queue's sheet: it rises from
+// under the player bar, the page stays behind it while it moves, and closing
+// it brings the page back.
+func TestNativeUIQueueSlidesOverThePage(t *testing.T) {
+	app := savedApp(t)
+	indexSaved(t, app, SavedIndexEntry{ID: "111", Name: "キューの元"},
+		[]MylistItem{{WatchID: "sm1", Title: "ページの曲", Available: true, Duration: 120}})
+	tester := ui.NewTester(app.view, 1120, 760)
+	if err := tester.Click("キューの元"); err != nil {
+		t.Fatal(err)
+	}
+	app.player = playerState{
+		Name: "キューの元", Title: "バーの曲", WatchID: "sm2", Ready: true, Volume: 1,
+		Order: []string{"sm2"},
+		Items: []MylistItem{{WatchID: "sm2", Title: "キューの曲", Available: true, Duration: 120}},
+	}
+	tester.Frame()
+	button, ok := tester.Find("再生キュー")
+	if !ok {
+		t.Fatal("queue button is missing")
+	}
+	x, y := button.X+button.W/2, button.Y+button.H/2
+	tester.ClickAt(x, y)
+	if !app.queueOpen {
+		t.Fatal("the queue button did not open the queue")
+	}
+	// Mid-way, the sheet is below its place and the page still shows.
+	tester.Advance(120 * time.Millisecond)
+	rising, ok := tester.Find("キューの曲")
+	if !ok {
+		t.Fatalf("the queue is missing while it rises: %q", tester.Texts())
+	}
+	if !tester.HasText("ページの曲") {
+		t.Fatal("the page left before the sheet covered it")
+	}
+	tester.Advance(200 * time.Millisecond)
+	rest, ok := tester.Find("キューの曲")
+	if !ok || rest.Y >= rising.Y {
+		t.Fatalf("the queue did not rise: rising=%v rest=%v", rising, rest)
+	}
+	if tester.HasText("ページの曲") {
+		t.Fatal("the page stayed behind the queue open")
+	}
+	// Closing brings the sheet down over the page, then leaves it.
+	tester.ClickAt(x, y)
+	if app.queueOpen {
+		t.Fatal("the queue button did not close the queue")
+	}
+	tester.Advance(120 * time.Millisecond)
+	sinking, ok := tester.Find("キューの曲")
+	if !ok || sinking.Y <= rest.Y {
+		t.Fatalf("the queue did not sink: rest=%v sinking=%v", rest, sinking)
+	}
+	if !tester.HasText("ページの曲") {
+		t.Fatal("the page did not come back under the sheet")
+	}
+	tester.Advance(200 * time.Millisecond)
+	if tester.HasText("キューの曲") {
+		t.Fatal("the queue stayed after closing")
+	}
+	if !tester.HasText("ページの曲") {
+		t.Fatal("the page did not return after the queue closed")
 	}
 }
 
@@ -2216,6 +2282,7 @@ func TestNativeUICreatesCombinedMylist(t *testing.T) {
 	// its own.
 	app.queueOpen = false
 	tester.Frame()
+	tester.Advance(300 * time.Millisecond)
 	if app.page == nil || app.page.ID != combined.ID || len(app.page.Items) != 3 {
 		t.Fatalf("opened page = %+v; want the members' tracks merged", app.page)
 	}

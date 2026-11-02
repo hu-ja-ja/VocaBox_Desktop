@@ -360,6 +360,10 @@ const (
 // enter or reorder keep the same curve.
 var sidebarShift = ui.Animation{Duration: 240 * time.Millisecond, Ease: ui.EaseInOut}
 
+// queueShift is the curve of the queue sliding in from under the player
+// bar, and back out over the page as it closes.
+var queueShift = ui.Animation{Duration: 240 * time.Millisecond, Ease: ui.EaseInOut}
+
 // panelIn is the transition a screen appearing inside the content panel
 // takes: it rises in, and sinks out as it leaves.
 var panelIn = ui.ElementTransition{Enter: motionIn, Exit: motionOut}
@@ -401,14 +405,26 @@ func (app *nativeApp) view(c *ui.Context) {
 				app.railAccountOpen = false
 			}
 			app.sidebar(c)
-			// The panel takes the width the sidebar yields as it folds.
+			// The panel takes the width the sidebar yields as it folds, and
+			// clips the queue's sheet to its own rounded corner.
 			panel := ui.Column(c).Grow(1).FillHeight().MinWidth(0).Radius(12).
-				ClipX().Background(app.theme.Surface).Border(1, app.theme.Border)
+				Clip().Background(app.theme.Surface).Border(1, app.theme.Border)
+			// The panel keeps the queue's slide, so the sheet starts and
+			// ends in a frame of its own rather than the screen taking its
+			// place every time the queue opens or closes.
+			target := float32(0)
+			if app.queueOpen {
+				target = 1
+			}
+			slide := panel.AnimateTo("queue-slide", target, queueShift)
 			panel.Children(func() {
-				if app.queueOpen {
-					app.queueView(c)
-				} else {
+				// The page stays behind the sheet while it covers or
+				// uncovers it, and goes while the queue alone shows.
+				if !app.queueOpen || slide < 1 {
 					app.content(c)
+				}
+				if app.queueOpen || slide > 0 {
+					app.queueView(c, slide)
 				}
 			})
 		})
