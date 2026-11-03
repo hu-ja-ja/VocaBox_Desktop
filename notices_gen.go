@@ -33,7 +33,7 @@ var Entries = []Entry{
 	{Name: "M PLUS 1", Version: "", Group: GroupBundledFonts, License: "OFL-1.1", Copyright: "Copyright 2021 The M+ FONTS Project Authors (https://github.com/coz-m/MPLUS_FONTS)", URL: "https://github.com/coz-m/MPLUS_FONTS", TextIndex: 1},
 	{Name: "github.com/Eyevinn/hls-m3u8", Version: "v0.6.5", Group: GroupGoModules, License: "BSD-3-Clause", Copyright: "", URL: "https://github.com/Eyevinn/hls-m3u8/blob/v0.6.5/LICENSE", TextIndex: 2},
 	{Name: "github.com/ebitengine/purego", Version: "v0.11.2", Group: GroupGoModules, License: "Apache-2.0", Copyright: "", URL: "https://github.com/ebitengine/purego/blob/v0.11.2/LICENSE", TextIndex: 3},
-	{Name: "github.com/egoist/mygo", Version: "v0.7.3", Group: GroupGoModules, License: "MIT", Copyright: "", URL: "https://github.com/egoist/mygo/blob/v0.7.3/LICENSE", TextIndex: 4},
+	{Name: "github.com/egoist/mygo", Version: "v0.7.4", Group: GroupGoModules, License: "MIT", Copyright: "", URL: "https://github.com/egoist/mygo/blob/v0.7.4/LICENSE", TextIndex: 4},
 	{Name: "github.com/go-text/typesetting", Version: "v0.3.5", Group: GroupGoModules, License: "BSD-3-Clause, Unlicense", Copyright: "", URL: "https://github.com/go-text/typesetting/blob/v0.3.5/LICENSE", TextIndex: 5},
 	{Name: "golang.org/x/image", Version: "v0.47.0", Group: GroupGoModules, License: "BSD-3-Clause", Copyright: "", URL: "https://cs.opensource.google/go/x/image/+/v0.47.0:LICENSE", TextIndex: 6},
 	{Name: "golang.org/x/net", Version: "v0.62.0", Group: GroupGoModules, License: "BSD-3-Clause", Copyright: "", URL: "https://cs.opensource.google/go/x/net/+/v0.62.0:LICENSE", TextIndex: 6},

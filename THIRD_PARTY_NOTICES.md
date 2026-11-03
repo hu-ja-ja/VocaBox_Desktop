@@ -530,7 +530,7 @@ For more information, please refer to <https://unlicense.org/>
 
 Used by:
 
-- github.com/egoist/mygo v0.7.3
+- github.com/egoist/mygo v0.7.4
 
 ```
 MIT License
