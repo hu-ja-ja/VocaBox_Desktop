@@ -714,6 +714,16 @@ func (msgs Messages) LyricsSource(source string) string {
 	return Catalog.Format(msgs.locale, "lyricsSource", map[string]any{"source": source})
 }
 
+// LyricsOffset says "ずれ"
+// in the language the app shows.
+func LyricsOffset() string { return In(i18n.Locale()).LyricsOffset() }
+
+// LyricsOffset says "ずれ"
+// in the language of msgs.
+func (msgs Messages) LyricsOffset() string {
+	return Catalog.Format(msgs.locale, "lyricsOffset", nil)
+}
+
 // LyricsSourceLabel says "歌詞の提供元"
 // in the language the app shows.
 func LyricsSourceLabel() string { return In(i18n.Locale()).LyricsSourceLabel() }

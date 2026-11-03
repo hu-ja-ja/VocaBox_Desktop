@@ -2,7 +2,9 @@ package lyrics
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -84,6 +86,153 @@ func TestCachePathNamesTheFormatVersion(t *testing.T) {
 	path, ok := c.path("sm1", SourceNiconico)
 	if !ok || filepath.Base(path) != cacheVersion+"-sm1-"+SourceNiconico+".json" {
 		t.Fatalf("cache path = %q, %v; want the format version and source in the name", path, ok)
+	}
+}
+
+// TestDocIDFollowsTheTiming checks the name given to a document: the same
+// lyrics keep it, a corrected word keeps it, and re-timed or other data gets
+// a new one.
+func TestDocIDFollowsTheTiming(t *testing.T) {
+	timed := func() Doc {
+		return Doc{Source: SourceNiconico, Timed: true, Lines: []Line{
+			{Text: "one", StartMS: 0, EndMS: 1000},
+			{Text: "two", StartMS: 2000, EndMS: 3000},
+		}}
+	}
+	id := timed().ID()
+	if id == "" || timed().ID() != id {
+		t.Fatalf("the same document gave %q then %q", id, timed().ID())
+	}
+	// Correcting the words keeps the shift: the timing is the same.
+	text := timed()
+	text.Lines[0].Text = "uno"
+	if text.ID() != id {
+		t.Fatal("a text-only edit changed the lyrics id")
+	}
+	// Re-timing a line, another source, an untimed document, and word
+	// timing each make another id.
+	moved := timed()
+	moved.Lines[1].StartMS = 2100
+	if moved.ID() == id {
+		t.Fatal("a re-timed line kept the lyrics id")
+	}
+	other := timed()
+	other.Source = SourceKugou
+	if other.ID() == id {
+		t.Fatal("another source kept the lyrics id")
+	}
+	untimed := timed()
+	untimed.Timed = false
+	if untimed.ID() == id {
+		t.Fatal("an untimed document kept the lyrics id")
+	}
+	worded := timed()
+	worded.Lines[0].Words = []Word{{Text: "one", StartMS: 0, EndMS: 500}}
+	later := timed()
+	later.Lines[0].Words = []Word{{Text: "one", StartMS: 0, EndMS: 600}}
+	if worded.ID() == id || worded.ID() == later.ID() {
+		t.Fatal("word timing does not make an id of its own")
+	}
+}
+
+// TestServiceKeepsTheOffsets checks the timing shifts live in one file,
+// survive a new service, and belong to the lyrics they were set on.
+func TestServiceKeepsTheOffsets(t *testing.T) {
+	dir := t.TempDir()
+	s := NewService(dir, &fakeProvider{name: SourceNiconico})
+	if err := s.SetOffset("sm1", SourceNiconico, "lyrics-a", -120); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetOffset("sm1", SourceKugou, "lyrics-b", 50); err != nil {
+		t.Fatal(err)
+	}
+	// One file holds both, keyed by video and source.
+	path := filepath.Join(dir, "offsets.json")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the offsets file is missing: %v", err)
+	}
+	for _, key := range []string{`"sm1-niconico"`, `"sm1-kugou"`} {
+		if !strings.Contains(string(body), key) {
+			t.Fatalf("the offsets file has no %s: %s", key, body)
+		}
+	}
+	again := NewService(dir, &fakeProvider{name: SourceNiconico})
+	if got := again.Offset("sm1", SourceNiconico, "lyrics-a"); got != -120 {
+		t.Fatalf("offset = %d; want -120", got)
+	}
+	// A re-timed document is another lyrics: its shift starts over.
+	if got := again.Offset("sm1", SourceNiconico, "lyrics-z"); got != 0 {
+		t.Fatalf("another lyrics of the track offset = %d; want 0", got)
+	}
+	if got := again.Offset("sm1", SourceKugou, "lyrics-b"); got != 50 {
+		t.Fatalf("another source's offset = %d; want 50", got)
+	}
+	if got := again.Offset("sm2", SourceNiconico, "lyrics-a"); got != 0 {
+		t.Fatalf("another video's offset = %d; want 0", got)
+	}
+	// A shift set on the re-timed document replaces the old one: one entry
+	// per track and source.
+	if err := again.SetOffset("sm1", SourceNiconico, "lyrics-z", 30); err != nil {
+		t.Fatal(err)
+	}
+	body, err = os.ReadFile(path)
+	if err != nil || strings.Contains(string(body), "lyrics-a") {
+		t.Fatalf("the old lyrics' entry stayed: %v %s", err, body)
+	}
+	if got := again.Offset("sm1", SourceNiconico, "lyrics-z"); got != 30 {
+		t.Fatalf("offset after re-timing = %d; want 30", got)
+	}
+	if got := again.Offset("sm1", SourceNiconico, "lyrics-a"); got != 0 {
+		t.Fatalf("the old lyrics' offset = %d; want 0", got)
+	}
+	// A shift back to 0 drops its entry and keeps the others.
+	if err := again.SetOffset("sm1", SourceNiconico, "lyrics-z", 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := again.Offset("sm1", SourceNiconico, "lyrics-z"); got != 0 {
+		t.Fatalf("offset after clearing = %d; want 0", got)
+	}
+	if got := again.Offset("sm1", SourceKugou, "lyrics-b"); got != 50 {
+		t.Fatalf("clearing one shift dropped another: %d", got)
+	}
+	// No shifts left no file: the default says nothing.
+	if err := again.SetOffset("sm1", SourceKugou, "lyrics-b", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("clearing every shift left a file: %v", err)
+	}
+	// A cache that saves no lyrics has nowhere to keep a shift.
+	disabled := NewService("", &fakeProvider{name: SourceNiconico})
+	if err := disabled.SetOffset("sm1", SourceNiconico, "lyrics-a", 50); err != nil ||
+		disabled.Offset("sm1", SourceNiconico, "lyrics-a") != 0 {
+		t.Fatalf("a disabled cache kept an offset: err=%v", err)
+	}
+}
+
+// TestServiceSetsAsideTheUnreadableOffsets checks a file the app cannot read
+// is kept for the user rather than overwritten by the first new shift.
+func TestServiceSetsAsideTheUnreadableOffsets(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "offsets.json")
+	if err := os.WriteFile(path, []byte("{broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewService(dir, &fakeProvider{name: SourceNiconico})
+	if got := s.Offset("sm1", SourceNiconico, "lyrics-a"); got != 0 {
+		t.Fatalf("a broken file gave offset %d; want 0", got)
+	}
+	body, err := os.ReadFile(path + ".bak")
+	if err != nil || string(body) != "{broken" {
+		t.Fatalf("the broken file was not kept: %v %q", err, body)
+	}
+	if err := s.SetOffset("sm1", SourceNiconico, "lyrics-a", 50); err != nil {
+		t.Fatal(err)
+	}
+	again := NewService(dir, &fakeProvider{name: SourceNiconico})
+	if got := again.Offset("sm1", SourceNiconico, "lyrics-a"); got != 50 {
+		t.Fatalf("offset after the broken file = %d; want 50", got)
 	}
 }
 

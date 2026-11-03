@@ -57,7 +57,7 @@ func lyricsUIApp(t *testing.T, providers ...*fakeLyricsProvider) *nativeApp {
 	for _, provider := range providers {
 		list = append(list, provider)
 	}
-	app.lyrics = lyrics.NewService("", list...)
+	app.lyrics = lyrics.NewService(t.TempDir(), list...)
 	app.player = playerState{
 		WatchID: "sm1", VideoID: "sm1", Title: "歌詞の曲", Uploader: "投稿者",
 		Ready: true, Playing: true, Volume: 1, PositionMS: 6500,
@@ -189,6 +189,84 @@ func TestNativeUILyricsClickSeeksToTheLine(t *testing.T) {
 	}
 }
 
+// TestNativeUILyricsOffsetShiftsTheTiming checks the footer's number and
+// stepper: a click on an arrow and a key step change the line timing at once,
+// and the shift is kept in the lyrics cache.
+func TestNativeUILyricsOffsetShiftsTheTiming(t *testing.T) {
+	provider := &fakeLyricsProvider{name: "niconico", doc: timedLyricsDoc()}
+	app := lyricsUIApp(t, provider)
+	tester := openLyricsUI(t, app)
+	stepper, ok := tester.Find(locales.LyricsOffset())
+	if !ok {
+		t.Fatalf("the card has no offset stepper: %q", tester.Texts())
+	}
+	// A click on the number takes the keyboard, as the field did, even
+	// before the stepper has the focus.
+	app.lyricsOffsetMS = 1300
+	tester.Frame()
+	if err := tester.Click("1300"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Key(0, ui.KeyUp)
+	tester.Frame()
+	if app.lyricsOffsetMS != 1400 {
+		t.Fatalf("offset = %v; want a key step after the number's click", app.lyricsOffsetMS)
+	}
+	if !tester.HasText("1400") {
+		t.Fatalf("the field shows %q; want 1400", tester.Texts())
+	}
+	if got := app.lyrics.Offset("sm1", "niconico", app.lyricsID); got != 1400 {
+		t.Fatalf("saved offset = %d; want 1400", got)
+	}
+	// A click on an arrow steps and keeps the shift.
+	tester.ClickAt(stepper.X+stepper.W/2, stepper.Y+stepper.H/4)
+	tester.Frame()
+	if app.lyricsOffsetMS != 1500 {
+		t.Fatalf("offset = %v; want a 100 ms step", app.lyricsOffsetMS)
+	}
+	tester.ClickAt(stepper.X+stepper.W/2, stepper.Y+stepper.H*3/4)
+	tester.Frame()
+	if app.lyricsOffsetMS != 1400 {
+		t.Fatalf("offset = %v; want a step back to 1400", app.lyricsOffsetMS)
+	}
+	if got := app.lyrics.Offset("sm1", "niconico", app.lyricsID); got != 1400 {
+		t.Fatalf("saved offset = %d; want 1400", got)
+	}
+	// The shift moves both the line the card follows and the seek of a
+	// clicked one.
+	app.player.PositionMS = 6100
+	app.lyricsOffsetMS = 600
+	tester.Frame()
+	if app.lyricsFollow != 0 {
+		t.Fatalf("the card follows line %d; want the first with a 600 ms shift", app.lyricsFollow)
+	}
+	if err := tester.Click("二行目"); err != nil {
+		t.Fatal(err)
+	}
+	seek, ok := lastCommand(app.sent, "seek")
+	if !ok || seek.PositionMS != 6000+600-lyricsSeekLeadMS {
+		t.Fatalf("the shifted line did not seek: %#v", app.sent)
+	}
+	// Another track keeps its own shift.
+	app.player.WatchID, app.player.VideoID, app.player.Title = "sm2", "sm2", "次の曲"
+	tester.Frame()
+	waitForApp(t, app, "the next track's lyrics", func() bool {
+		return app.lyricsVideoID == "sm2" && !app.lyricsLoading && app.lyricsDoc != nil
+	})
+	if app.lyricsOffsetMS != 0 {
+		t.Fatalf("the next track came back with a %v ms shift", app.lyricsOffsetMS)
+	}
+	// The saved shift comes back with its track and source.
+	app.player.WatchID, app.player.VideoID, app.player.Title = "sm1", "sm1", "歌詞の曲"
+	tester.Frame()
+	waitForApp(t, app, "the first track's lyrics", func() bool {
+		return app.lyricsVideoID == "sm1" && !app.lyricsLoading && app.lyricsDoc != nil
+	})
+	if app.lyricsOffsetMS != 1400 {
+		t.Fatalf("the first track came back with a %v ms shift; want the saved 1400", app.lyricsOffsetMS)
+	}
+}
+
 // TestNativeUILyricsCardFitsTheMinimumWidth checks the card and the queue
 // behind it stay inside the narrowest window.
 func TestNativeUILyricsCardFitsTheMinimumWidth(t *testing.T) {
@@ -203,7 +281,7 @@ func TestNativeUILyricsCardFitsTheMinimumWidth(t *testing.T) {
 		return app.lyricsDoc != nil || app.lyricsErr != nil
 	})
 	tester.Frame()
-	for _, label := range []string{"再生キュー", "歌詞", locales.LyricsSource(lyrics.SourceNiconico)} {
+	for _, label := range []string{"再生キュー", "歌詞", locales.LyricsSource(lyrics.SourceNiconico), locales.LyricsOffset(), "ms"} {
 		bounds, ok := tester.Find(label)
 		if !ok || bounds.X < 0 || bounds.X+bounds.W > 760 {
 			t.Fatalf("%q is missing or outside the minimum-width window: bounds=%v", label, bounds)
@@ -574,5 +652,11 @@ func TestLyricSpansFollowThePosition(t *testing.T) {
 	spans = app.lyricSpans(words)
 	if len(spans) != 2 || spans[0].Color != app.theme.Text || spans[1].Color != app.theme.Text {
 		t.Fatalf("word spans at 6s = %#v; want both words white", spans)
+	}
+	// The card's offset moves the position the words color to.
+	app.lyricsOffsetMS = 5000
+	spans = app.lyricSpans(words)
+	if len(spans) != 2 || spans[0].Color != app.theme.Text || spans[1].Color != app.theme.TextMuted {
+		t.Fatalf("word spans with a shift = %#v; want the first word white", spans)
 	}
 }

@@ -4,7 +4,12 @@
 // Provider implementation and one entry in the service's provider list.
 package lyrics
 
-import "log"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"log"
+)
 
 // The IDs the app's sources answer to. They are stable values: the cache and
 // the UI's tabs ask by them, while the provider's Name is what the user reads.
@@ -90,6 +95,21 @@ func (d Doc) LineAt(ms float64) int {
 	return at
 }
 
+// ID names the document by its source and timing, not its words: an edit
+// that only corrects the text keeps the timing shift, while re-timed lyrics
+// get a new ID and start over. It is a short hex digest, stable across runs.
+func (d Doc) ID() string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s|%v|", d.Source, d.Timed)
+	for _, line := range d.Lines {
+		fmt.Fprintf(h, "%v,%v|", line.StartMS, line.EndMS)
+		for _, word := range line.Words {
+			fmt.Fprintf(h, "%v,%v|", word.StartMS, word.EndMS)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
+
 // Query is what a source needs to look up one track. VideoID is the source's
 // own ID for the video; the metadata lets a source that searches by title
 // and artist match the track. HasLyrics and HasLyricsKnown are the watch
@@ -135,6 +155,7 @@ func NewService(cacheDir string, providers ...Provider) *Service {
 	s := &Service{providers: providers}
 	if cacheDir != "" {
 		s.cache = &cache{dir: cacheDir}
+		s.cache.offsets = s.cache.loadOffsets()
 	}
 	return s
 }
@@ -210,6 +231,49 @@ func (s *Service) LoadSource(id string, q Query) (Doc, error) {
 		return s.finish(provider, q.VideoID, doc), nil
 	}
 	return Doc{}, ErrFailed
+}
+
+// Offset returns the timing shift the user saved for the source's lyrics of
+// the video: milliseconds added to every line, + meaning the lines start
+// later. A shift set on other lyrics of the track, as a re-timed document,
+// does not apply, so it returns 0 then.
+func (s *Service) Offset(videoID, sourceID, lyricsID string) int {
+	if s == nil || s.cache == nil {
+		return 0
+	}
+	entry, ok := s.cache.offsets[offsetKey(videoID, sourceID)]
+	if !ok || entry.Lyrics != lyricsID {
+		return 0
+	}
+	return entry.Offset
+}
+
+// SetOffset saves the timing shift for the source's lyrics of the video,
+// replacing the shift of another lyrics of the same track. A shift of 0 drops
+// the entry, as the default says nothing.
+func (s *Service) SetOffset(videoID, sourceID, lyricsID string, ms int) error {
+	if s == nil || s.cache == nil {
+		return nil
+	}
+	offsets := s.cache.offsets
+	if offsets == nil {
+		offsets = map[string]offsetEntry{}
+		s.cache.offsets = offsets
+	}
+	key := offsetKey(videoID, sourceID)
+	if ms == 0 {
+		if _, ok := offsets[key]; !ok {
+			return nil
+		}
+		delete(offsets, key)
+	} else {
+		entry := offsetEntry{Lyrics: lyricsID, Offset: ms}
+		if offsets[key] == entry {
+			return nil
+		}
+		offsets[key] = entry
+	}
+	return s.cache.saveOffsets(offsets)
 }
 
 // cached returns the provider's saved answer for the track.

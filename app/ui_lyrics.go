@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -200,12 +202,18 @@ func (app *nativeApp) lyricsPlain(c *ui.Context, doc *lyrics.Doc) {
 	})
 }
 
+// lyricsPosition is the document's position: the player's moved by the
+// card's offset, so a positive one makes the lines wait.
+func (app *nativeApp) lyricsPosition() float64 {
+	return app.player.PositionMS - app.lyricsOffsetMS
+}
+
 // lyricSpans colors one line to the position by the words its source timed.
 // A line the source timed only as a whole keeps one color: the app never
 // guesses a character-level split.
 func (app *nativeApp) lyricSpans(line lyrics.Line) []ui.Span {
 	done, rest := app.theme.Text, app.theme.TextMuted
-	position := app.player.PositionMS
+	position := app.lyricsPosition()
 	if len(line.Words) == 0 || wordsText(line.Words) != line.Text {
 		return []ui.Span{{Text: line.Text, Color: done}}
 	}
@@ -239,7 +247,7 @@ func (app *nativeApp) lyricsLines(c *ui.Context, doc *lyrics.Doc) {
 	// The rows' bounds and the viewport are the frame before's, drawn with
 	// this offset: measure against it, not the offset this frame's glide sets.
 	wasY := app.lyricsScroll.Y
-	current := doc.LineAt(app.player.PositionMS)
+	current := doc.LineAt(app.lyricsPosition())
 	app.followLyrics(current)
 	if cap(app.lyricsLineCenter) < len(doc.Lines) {
 		app.lyricsLineCenter = make([]float32, len(doc.Lines))
@@ -318,7 +326,7 @@ func (app *nativeApp) seekLyrics(line lyrics.Line) {
 	if !app.player.Ready {
 		return
 	}
-	ms := max(0, line.StartMS-lyricsSeekLeadMS)
+	ms := max(0, line.StartMS+app.lyricsOffsetMS-lyricsSeekLeadMS)
 	app.seekValue, app.seekSettling = ms, true
 	app.sendPlayer(PlayerCommand{Action: "seek", PositionMS: ms})
 }
@@ -345,13 +353,70 @@ func (app *nativeApp) followLyrics(current int) {
 	app.lyricsScroll.ScrollTo(0, target, lyricsScrollAnimation)
 }
 
-// lyricsFooter credits the source that answered.
+// lyricsOffsetStepMS is one press of the offset field's arrows or keys, and
+// lyricsOffsetLimitMS how far the shift may go either way.
+const (
+	lyricsOffsetStepMS  = 100
+	lyricsOffsetLimitMS = 10000
+)
+
+// lyricsFooter credits the source that answered and carries the timing
+// shift: stepped in milliseconds, + moving every line later, saved in the
+// lyrics cache so the same track and source come back in sync.
 func (app *nativeApp) lyricsFooter(c *ui.Context) {
 	doc := app.lyricsDoc
-	if doc == nil || doc.Source == "" {
+	if doc == nil {
 		return
 	}
-	ui.Text(c, locales.LyricsSource(app.lyricsSourceName(doc.Source))).FontSize(11).TextColor(app.theme.TextMuted)
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(10).Children(func() {
+		if doc.Source != "" {
+			ui.Text(c, locales.LyricsSource(app.lyricsSourceName(doc.Source))).FontSize(11).
+				SingleLine().Ellipsis("…").Grow(1).TextColor(app.theme.TextMuted)
+		} else {
+			ui.Spacer(c)
+		}
+		if !doc.Timed {
+			return
+		}
+		app.lyricsOffsetField(c)
+		ui.Text(c, "ms").FontSize(11).TextColor(app.theme.TextMuted)
+	})
+}
+
+// lyricsOffsetField is the shift as a number beside mygo's stepper: the
+// arrows and the up and down keys move it, the stepper keeps the step, the
+// limit, and the spin button's reading, and a click on the number takes the
+// keyboard for it.
+func (app *nativeApp) lyricsOffsetField(c *ui.Context) {
+	ui.Row(c).Shrink(0).AlignItems(ui.Center).Background(app.theme.Surface).
+		Border(1, app.theme.Border).Radius(6).Clip().Children(func() {
+		value := ui.Text(c, strconv.Itoa(int(app.lyricsOffsetMS))).FontSize(14).
+			Width(64).Padding(5, 10).TextAlign(ui.End).TextColor(app.theme.Text).Cursor(ui.CursorText)
+		ui.Box(c).Width(1).Height(28).Background(app.theme.Border)
+		stepper := ui.Stepper(c, &app.lyricsOffsetMS, -lyricsOffsetLimitMS, lyricsOffsetLimitMS, lyricsOffsetStepMS).
+			Width(24).BorderWidth(0).Radius(0).Background(ui.RGBA(0, 0, 0, 0)).
+			Label(locales.LyricsOffset()).Tooltip(locales.LyricsOffset())
+		// The value is the field's reading, so a click on it takes the
+		// keyboard as a field's click does.
+		if value.Clicked() {
+			stepper.Focus()
+		}
+		if stepper.Changed() {
+			app.saveLyricsOffset()
+		}
+	})
+}
+
+// saveLyricsOffset keeps the card's shift in the lyrics cache, tied to the
+// track, source, and lyrics it belongs to.
+func (app *nativeApp) saveLyricsOffset() {
+	doc := app.lyricsDoc
+	if doc == nil || app.lyrics == nil {
+		return
+	}
+	if err := app.lyrics.SetOffset(app.lyricsVideoID, doc.Source, app.lyricsID, int(app.lyricsOffsetMS)); err != nil {
+		log.Printf("lyrics: saving the offset: %v", err)
+	}
 }
 
 // lyricsSourceName is the display name of a source ID, the ID itself for a
@@ -413,6 +478,8 @@ func (app *nativeApp) beginLyricsSource(track, source string) {
 	app.lyricsSource = source
 	app.lyricsVideoID = track
 	app.lyricsDoc = nil
+	app.lyricsID = ""
+	app.lyricsOffsetMS = 0
 	app.lyricsErr = nil
 	app.lyricsNeedLogin = false
 	app.lyricsLoginWhenFailed = false
@@ -465,6 +532,8 @@ func (app *nativeApp) beginLyricsSource(track, source string) {
 				return
 			}
 			app.lyricsDoc = &doc
+			app.lyricsID = doc.ID()
+			app.lyricsOffsetMS = float64(app.lyrics.Offset(track, doc.Source, app.lyricsID))
 			if source == "" {
 				app.lyricsTab = app.lyricsTabOf(doc.Source)
 			}

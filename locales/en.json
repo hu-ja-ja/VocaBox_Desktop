@@ -68,6 +68,7 @@
   "lyricsUntimed": "These lyrics have no playback timing.",
   "lyricsRetry": "Reload",
   "lyricsSource": "Lyrics from {source}",
+  "lyricsOffset": "Offset",
   "@lyricsSource": {
     "placeholders": {
       "source": { "type": "String" }

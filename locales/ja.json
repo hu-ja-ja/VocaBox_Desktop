@@ -68,6 +68,7 @@
   "lyricsUntimed": "この歌詞には再生位置の情報がありません",
   "lyricsRetry": "再読み込み",
   "lyricsSource": "歌詞提供: {source}",
+  "lyricsOffset": "ずれ",
   "@lyricsSource": {
     "placeholders": {
       "source": { "type": "String" }

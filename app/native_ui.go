@@ -157,9 +157,15 @@ type nativeApp struct {
 	// lyricsFollow is the line the line view last glided to, per
 	// lyricsFollowVideo. lyricsToken drops the answer of a lookup the next
 	// track replaced.
-	lyricsOpen      bool
-	lyricsVideoID   string
-	lyricsDoc       *lyrics.Doc
+	lyricsOpen    bool
+	lyricsVideoID string
+	lyricsDoc     *lyrics.Doc
+	// lyricsOffsetMS shifts the document's timing: every line starts that
+	// many milliseconds later, + meaning the user waits longer for it.
+	// lyricsID names the document whose timing that shift belongs to, so a
+	// re-timed document starts over.
+	lyricsOffsetMS  float64
+	lyricsID        string
 	lyricsErr       error
 	lyricsLoading   bool
 	lyricsNeedLogin bool
