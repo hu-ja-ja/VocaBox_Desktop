@@ -119,6 +119,33 @@ func TestNativeUILyricsFloatsOverTheQueue(t *testing.T) {
 	}
 }
 
+// TestNativeUILyricsFollowsTheSidebar checks the card keeps step with the
+// sidebar's fold: once the fold is over, the card is already where it ends,
+// rather than sliding on for a while of its own.
+func TestNativeUILyricsFollowsTheSidebar(t *testing.T) {
+	provider := &fakeLyricsProvider{name: "niconico", doc: timedLyricsDoc()}
+	app := lyricsUIApp(t, provider)
+	tester := openLyricsUI(t, app)
+	before, ok := tester.Find(locales.LyricsTitle())
+	if !ok {
+		t.Fatalf("the lyrics card has no title: %q", tester.Texts())
+	}
+	if err := tester.Click("サイドバーを開く"); err != nil {
+		t.Fatal(err)
+	}
+	// The sidebar's fold is over; the card must be there with it.
+	tester.Advance(sidebarShift.Duration + 20*time.Millisecond)
+	moved, ok := tester.Find(locales.LyricsTitle())
+	if !ok || moved.X <= before.X {
+		t.Fatalf("the card did not follow the sidebar: before=%v moved=%v", before, moved)
+	}
+	tester.Advance(300 * time.Millisecond)
+	settled, ok := tester.Find(locales.LyricsTitle())
+	if !ok || moved.X != settled.X {
+		t.Fatalf("the card kept moving after the sidebar settled: moved=%v settled=%v", moved, settled)
+	}
+}
+
 // TestNativeUILyricsWordTimingShowsTheCharacterView checks the view the
 // document picks: word timing shows the large character view, and line
 // timing the line list.

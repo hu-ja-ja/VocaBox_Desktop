@@ -43,13 +43,16 @@ func leadFirstLyricLine(doc *lyrics.Doc) {
 
 // lyricsPanel is the card floating over the queue's right: the track's
 // lyrics, credited to the source that answered. The queue stays visible and
-// usable on its left, and the player bar below is untouched.
+// usable on its left, and the player bar below is untouched. The card rides
+// the queue sheet and the sidebar's fold, so its box follows the layout each
+// frame rather than animating on its own: only its colors transition, while
+// Enter and Exit still rise and fade it.
 func (app *nativeApp) lyricsPanel(c *ui.Context) {
 	app.syncLyrics()
 	ui.Column(c).Absolute().Top(12).Right(12).Bottom(12).WidthPercent(52).MaxWidth(620).
 		Background(app.theme.Surface).Border(1, app.theme.Border).Radius(12).
 		Shadow(-6, 0, 24, 0, ui.RGBA(0, 0, 0, 0.35)).
-		Transition(ui.ElementTransition{Enter: motionRise, Exit: motionFade}).
+		Transition(ui.ElementTransition{Colors: true, Enter: motionRise, Exit: motionFade}).
 		Padding(18, 24, 12).Gap(12).Children(func() {
 		app.lyricsHeader(c)
 		app.lyricsSources(c)
