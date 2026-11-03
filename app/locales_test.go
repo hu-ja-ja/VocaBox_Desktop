@@ -21,9 +21,9 @@ func TestMain(m *testing.M) {
 // frame, and the fallback of a language the app does not ship.
 func TestCatalogsSaySongCounts(t *testing.T) {
 	cases := []struct {
-		name  string
-		got   string
-		want  string
+		name string
+		got  string
+		want string
 	}{
 		{"ja 3", locales.In("ja").QueueSongCount(3), "3曲"},
 		{"en 1", locales.In("en").QueueSongCount(1), "1 song"},
