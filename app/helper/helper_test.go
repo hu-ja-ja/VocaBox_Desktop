@@ -1,4 +1,4 @@
-package main
+package helper
 
 import (
 	"encoding/json"
@@ -15,8 +15,8 @@ func TestReadHelperEventsParsesLines(t *testing.T) {
 		"not json\n" +
 		"\n" +
 		`{"ev":"failed","code":"NetworkError","ext":-2147012889,"msg":"boom"}` + "\n")
-	var events []helperEvent
-	readHelperEvents(input, func(event helperEvent) { events = append(events, event) })
+	var events []Event
+	readEvents(input, func(event Event) { events = append(events, event) })
 	if len(events) != 3 {
 		t.Fatalf("events = %#v", events)
 	}
@@ -34,28 +34,28 @@ func TestReadHelperEventsParsesLines(t *testing.T) {
 // TestHelperCommandWireShape pins the JSON the helper's C# side reads.
 func TestHelperCommandWireShape(t *testing.T) {
 	cases := []struct {
-		command helperCommand
+		command Command
 		want    string
 	}{
 		{
-			helperCommand{Cmd: "play", URL: "https://d/x.m3u8", Cookie: "domand_bid=1", UA: "ua"},
+			Command{Cmd: "play", URL: "https://d/x.m3u8", Cookie: "domand_bid=1", UA: "ua"},
 			`{"cmd":"play","url":"https://d/x.m3u8","cookie":"domand_bid=1","ua":"ua"}`,
 		},
 		{
 			// A track whose load was already played once carries its name and
 			// the play state: false installs it paused.
-			helperCommand{Cmd: "play", URL: "https://d/x.m3u8", Gen: 2, Play: true},
+			Command{Cmd: "play", URL: "https://d/x.m3u8", Gen: 2, Play: true},
 			`{"cmd":"play","url":"https://d/x.m3u8","gen":2,"play":true}`,
 		},
 		{
 			// A saved track plays from disk: no url, no cookie, just the file
 			// URI and the play state.
-			helperCommand{Cmd: "play", File: "file:///C:/audio/sm1.m4a", Gen: 3, Play: true},
+			Command{Cmd: "play", File: "file:///C:/audio/sm1.m4a", Gen: 3, Play: true},
 			`{"cmd":"play","file":"file:///C:/audio/sm1.m4a","gen":3,"play":true}`,
 		},
-		{helperCommand{Cmd: "position"}, `{"cmd":"position"}`},
-		{helperCommand{Cmd: "seek", MS: 1500}, `{"cmd":"seek","ms":1500}`},
-		{helperCommand{Cmd: "volume", Value: 0.4}, `{"cmd":"volume","value":0.4}`},
+		{Command{Cmd: "position"}, `{"cmd":"position"}`},
+		{Command{Cmd: "seek", MS: 1500}, `{"cmd":"seek","ms":1500}`},
+		{Command{Cmd: "volume", Value: 0.4}, `{"cmd":"volume","value":0.4}`},
 	}
 	for _, tc := range cases {
 		got, err := json.Marshal(tc.command)
@@ -72,24 +72,24 @@ func TestHelperCommandWireShape(t *testing.T) {
 // it starts, answers position, and quits cleanly. It is skipped until
 // `mise run helper` has produced resources/AmsHelper.exe.
 func TestAmsHelperRunsTheProtocol(t *testing.T) {
-	path, err := filepath.Abs(filepath.Join("..", "resources", "AmsHelper.exe"))
+	path, err := filepath.Abs(filepath.Join("..", "..", "resources", "AmsHelper.exe"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Skip("AmsHelper.exe is not built; run `mise run helper`")
 	}
-	events := make(chan helperEvent, 16)
+	events := make(chan Event, 16)
 	exited := make(chan error, 1)
-	helper, err := startHelper(path, "..", func(event helperEvent) { events <- event }, func(err error) { exited <- err })
+	proc, err := Start(path, filepath.Join("..", ".."), func(event Event) { events <- event }, func(err error) { exited <- err })
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer helper.shutdown()
-	if err := helper.send(helperCommand{Cmd: "volume", Value: 0.3}); err != nil {
+	defer proc.Shutdown()
+	if err := proc.Send(Command{Cmd: "volume", Value: 0.3}); err != nil {
 		t.Fatal(err)
 	}
-	if err := helper.send(helperCommand{Cmd: "position"}); err != nil {
+	if err := proc.Send(Command{Cmd: "position"}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -100,7 +100,7 @@ func TestAmsHelperRunsTheProtocol(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the helper did not answer the position pull")
 	}
-	if err := helper.send(helperCommand{Cmd: "quit"}); err != nil {
+	if err := proc.Send(Command{Cmd: "quit"}); err != nil {
 		t.Fatal(err)
 	}
 	select {

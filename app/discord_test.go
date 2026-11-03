@@ -1,12 +1,8 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
-	"os"
 	"testing"
 	"time"
-	"unsafe"
 )
 
 // TestDiscordPresenceCard checks the card the track playing shows: the shape
@@ -67,41 +63,14 @@ func TestDiscordResendDue(t *testing.T) {
 	}
 }
 
-// TestDiscordFrames checks the pipe frames: the little-endian header with
-// the payload behind it, and the bound on what is read.
-func TestDiscordFrames(t *testing.T) {
-	payload := []byte(`{"v":1,"client_id":"1"}`)
-	frame := discordFrame(discordOpHandshake, payload)
-	if len(frame) != 8+len(payload) {
-		t.Fatalf("frame length = %d", len(frame))
-	}
-	if opcode := binary.LittleEndian.Uint32(frame[0:4]); opcode != discordOpHandshake {
-		t.Fatalf("opcode = %d", opcode)
-	}
-	if length := binary.LittleEndian.Uint32(frame[4:8]); length != uint32(len(payload)) {
-		t.Fatalf("length = %d", length)
-	}
-	opcode, got, err := discordReadFrame(bytes.NewReader(frame))
-	if err != nil || opcode != discordOpHandshake || !bytes.Equal(got, payload) {
-		t.Fatalf("read = %d %q, %v", opcode, got, err)
-	}
-
-	// A frame longer than any answer of Discord's is refused.
-	oversized := discordFrame(discordOpFrame, nil)
-	binary.LittleEndian.PutUint32(oversized[4:8], discordMaxFrame+1)
-	if _, _, err := discordReadFrame(bytes.NewReader(oversized)); err == nil {
-		t.Fatal("an oversized frame was read")
-	}
-}
-
 // fakeDiscord records what the player told Discord.
 type fakeDiscord struct {
 	activities []discordActivity
 	stops      int
 }
 
-func (f *fakeDiscord) update(activity discordActivity) { f.activities = append(f.activities, activity) }
-func (f *fakeDiscord) disconnect()                     { f.stops++ }
+func (f *fakeDiscord) Update(activity discordActivity) { f.activities = append(f.activities, activity) }
+func (f *fakeDiscord) Disconnect()                     { f.stops++ }
 
 // TestPlaybackSendsDiscordPresence checks what the player hands Discord: the
 // track at once, a timer only while it plays, nothing on a change that does
@@ -156,39 +125,5 @@ func TestPlaybackSendsDiscordPresence(t *testing.T) {
 	p.remove("sm1")
 	if discord.stops != stops+1 {
 		t.Fatalf("stops after removing = %d", discord.stops)
-	}
-}
-
-// TestDiscordDrainEmptiesThePipe checks the reply drain: it takes off what a
-// client has sent, and it leaves an empty pipe alone. Waiting on that pipe
-// instead would hold up every send behind it — the read lock and the write
-// lock of one file are the same lock.
-func TestDiscordDrainEmptiesThePipe(t *testing.T) {
-	conn, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	defer conn.Close()
-	defer writer.Close()
-
-	idle := make(chan struct{})
-	go func() {
-		discordDrain(conn)
-		close(idle)
-	}()
-	select {
-	case <-idle:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the drain waited on an empty pipe")
-	}
-
-	if _, err := writer.Write([]byte(`{"cmd":"SET_ACTIVITY","nonce":"1"}`)); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	discordDrain(conn)
-
-	var avail uint32
-	if ok, _, _ := procPeekNamedPipe.Call(conn.Fd(), 0, 0, 0, uintptr(unsafe.Pointer(&avail)), 0); ok == 0 || avail != 0 {
-		t.Fatalf("the drain left %d bytes", avail)
 	}
 }

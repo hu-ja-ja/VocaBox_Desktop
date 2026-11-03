@@ -103,8 +103,8 @@ type playback struct {
 // helperConn is the engine's view of the running helper: the JSON-line link
 // and the kill switch.
 type helperConn interface {
-	send(helperCommand) error
-	shutdown()
+	Send(helperCommand) error
+	Shutdown()
 }
 
 // positionPollInterval is how often the app pulls the helper's position
@@ -311,7 +311,7 @@ func (p *playback) play(item MylistItem) {
 	p.app.playerError = ""
 	// The old track stops at once rather than playing on under the new one.
 	if p.proc != nil {
-		_ = p.proc.send(helperCommand{Cmd: "stop"})
+		_ = p.proc.Send(helperCommand{Cmd: "stop"})
 	}
 	p.publish()
 	go func() {
@@ -397,11 +397,11 @@ func (p *playback) sendPlay() {
 		command.Cookie = p.cookie
 		command.UA = p.ua
 	}
-	if err := p.proc.send(command); err != nil {
+	if err := p.proc.Send(command); err != nil {
 		p.fail(errors.New(locales.ErrPlayerConnect()))
 		return
 	}
-	_ = p.proc.send(helperCommand{Cmd: "volume", Value: p.app.player.Volume})
+	_ = p.proc.Send(helperCommand{Cmd: "volume", Value: p.app.player.Volume})
 }
 
 // ensureHelper starts the helper process when none runs, and the position
@@ -465,7 +465,7 @@ func (p *playback) pollPosition() {
 			if p.closing || p.proc == nil || !p.app.player.Ready || !p.app.player.Playing {
 				return
 			}
-			_ = p.proc.send(helperCommand{Cmd: "position"})
+			_ = p.proc.Send(helperCommand{Cmd: "position"})
 		})
 	}
 }
@@ -598,7 +598,7 @@ func (p *playback) resume() {
 	p.wantPlaying = true
 	p.app.player.Playing = true
 	if p.proc != nil {
-		_ = p.proc.send(helperCommand{Cmd: "resume"})
+		_ = p.proc.Send(helperCommand{Cmd: "resume"})
 	}
 	p.publish()
 }
@@ -607,7 +607,7 @@ func (p *playback) pause() {
 	p.wantPlaying = false
 	p.app.player.Playing = false
 	if p.proc != nil {
-		_ = p.proc.send(helperCommand{Cmd: "pause"})
+		_ = p.proc.Send(helperCommand{Cmd: "pause"})
 	}
 	p.publish()
 }
@@ -629,7 +629,7 @@ func (p *playback) seek(positionMS float64) {
 // sendSeek passes an already clamped position to the helper.
 func (p *playback) sendSeek(positionMS float64) {
 	if p.proc != nil {
-		_ = p.proc.send(helperCommand{Cmd: "seek", MS: positionMS})
+		_ = p.proc.Send(helperCommand{Cmd: "seek", MS: positionMS})
 	}
 }
 
@@ -637,7 +637,7 @@ func (p *playback) setVolume(volume float64) {
 	volume = clampVolume(volume)
 	p.app.player.Volume = volume
 	if p.proc != nil {
-		_ = p.proc.send(helperCommand{Cmd: "volume", Value: volume})
+		_ = p.proc.Send(helperCommand{Cmd: "volume", Value: volume})
 	}
 	p.publish()
 }
@@ -685,7 +685,7 @@ func (p *playback) remove(watchID string) {
 		p.loadToken++
 		p.uris = nil
 		if p.proc != nil {
-			_ = p.proc.send(helperCommand{Cmd: "stop"})
+			_ = p.proc.Send(helperCommand{Cmd: "stop"})
 		}
 		st := &p.app.player
 		st.WatchID, st.VideoID, st.Title, st.Uploader, st.ThumbURL = "", "", "", "", ""
@@ -759,7 +759,7 @@ func (p *playback) shutdown() {
 	p.closing = true
 	p.polling.Store(false)
 	if p.proc != nil {
-		p.proc.shutdown()
+		p.proc.Shutdown()
 	}
 }
 

@@ -34,11 +34,11 @@ func TestPlaybackE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer helper.shutdown()
+	defer helper.Shutdown()
 
 	// The app starts a track by sending play with play true; without it the
 	// helper installs the track paused.
-	if err := helper.send(helperCommand{Cmd: "play", URL: sources.URIs[0], Cookie: sources.Cookie, UA: sources.UserAgent, Play: true}); err != nil {
+	if err := helper.Send(helperCommand{Cmd: "play", URL: sources.URIs[0], Cookie: sources.Cookie, UA: sources.UserAgent, Play: true}); err != nil {
 		t.Fatal(err)
 	}
 	opened := waitHelperEvent(t, events, "opened", 30*time.Second)
@@ -49,7 +49,7 @@ func TestPlaybackE2E(t *testing.T) {
 	// The position advances on its own.
 	position := waitHelperPosition(t, helper, events, 1000, 15*time.Second)
 	// A seek lands where it was asked to.
-	if err := helper.send(helperCommand{Cmd: "seek", MS: 55_000}); err != nil {
+	if err := helper.Send(helperCommand{Cmd: "seek", MS: 55_000}); err != nil {
 		t.Fatal(err)
 	}
 	position = waitHelperPosition(t, helper, events, 54_000, 15*time.Second)
@@ -58,7 +58,7 @@ func TestPlaybackE2E(t *testing.T) {
 	}
 
 	// Pause holds the position; resume moves it again.
-	if err := helper.send(helperCommand{Cmd: "pause"}); err != nil {
+	if err := helper.Send(helperCommand{Cmd: "pause"}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(500 * time.Millisecond)
@@ -66,7 +66,7 @@ func TestPlaybackE2E(t *testing.T) {
 	if paused-position > 300 {
 		t.Fatalf("the position moved while paused: %v -> %v", position, paused)
 	}
-	if err := helper.send(helperCommand{Cmd: "resume"}); err != nil {
+	if err := helper.Send(helperCommand{Cmd: "resume"}); err != nil {
 		t.Fatal(err)
 	}
 	waitHelperPosition(t, helper, events, paused+500, 10*time.Second)
@@ -74,14 +74,14 @@ func TestPlaybackE2E(t *testing.T) {
 	// Switching tracks replaces the source playing: the replaced track's
 	// media objects are disposed, and the one replacing it opens in their
 	// place (the leak a switch used to leave).
-	if err := helper.send(helperCommand{Cmd: "play", URL: sources.URIs[0], Cookie: sources.Cookie, UA: sources.UserAgent, Gen: 2, Play: true}); err != nil {
+	if err := helper.Send(helperCommand{Cmd: "play", URL: sources.URIs[0], Cookie: sources.Cookie, UA: sources.UserAgent, Gen: 2, Play: true}); err != nil {
 		t.Fatal(err)
 	}
 	if switched := waitHelperEvent(t, events, "opened", 30*time.Second); switched.Gen != 2 {
 		t.Fatalf("opened gen = %d; want 2", switched.Gen)
 	}
 
-	if err := helper.send(helperCommand{Cmd: "quit"}); err != nil {
+	if err := helper.Send(helperCommand{Cmd: "quit"}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -117,7 +117,7 @@ func waitHelperEvent(t *testing.T, events <-chan helperEvent, name string, timeo
 // pullHelperPosition asks the helper where it is and waits for the answer.
 func pullHelperPosition(t *testing.T, helper helperConn, events <-chan helperEvent) float64 {
 	t.Helper()
-	if err := helper.send(helperCommand{Cmd: "position"}); err != nil {
+	if err := helper.Send(helperCommand{Cmd: "position"}); err != nil {
 		t.Fatal(err)
 	}
 	return waitHelperEvent(t, events, "position", 5*time.Second).MS
@@ -170,9 +170,9 @@ func TestOfflineSaveE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer helper.shutdown()
+	defer helper.Shutdown()
 
-	if err := helper.send(helperCommand{Cmd: "play", File: savedAudioURI(dest), Play: true}); err != nil {
+	if err := helper.Send(helperCommand{Cmd: "play", File: savedAudioURI(dest), Play: true}); err != nil {
 		t.Fatal(err)
 	}
 	opened := waitHelperEvent(t, events, "opened", 30*time.Second)
@@ -181,7 +181,7 @@ func TestOfflineSaveE2E(t *testing.T) {
 		t.Fatalf("duration = %vms; want the track's", opened.DurationMS)
 	}
 	position := waitHelperPosition(t, helper, events, 1000, 15*time.Second)
-	if err := helper.send(helperCommand{Cmd: "seek", MS: 55_000}); err != nil {
+	if err := helper.Send(helperCommand{Cmd: "seek", MS: 55_000}); err != nil {
 		t.Fatal(err)
 	}
 	position = waitHelperPosition(t, helper, events, 54_000, 15*time.Second)
@@ -189,7 +189,7 @@ func TestOfflineSaveE2E(t *testing.T) {
 		t.Fatalf("seek overshot: %vms", position)
 	}
 
-	if err := helper.send(helperCommand{Cmd: "quit"}); err != nil {
+	if err := helper.Send(helperCommand{Cmd: "quit"}); err != nil {
 		t.Fatal(err)
 	}
 	select {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/app/discord"
 	"github.com/hu-ja-ja/VocaBox_Desktop/app/lyrics"
 )
 
@@ -336,7 +337,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	app := &nativeApp{
 		mylist:       mylist,
 		nico:         nico,
-		discord:      newDiscordRPC(discordClientID),
+		discord:      discord.New(discordClientID),
 		session:      sessionStore{mylist: mylist},
 		router:       router,
 		theme:        t,

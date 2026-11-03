@@ -1,4 +1,8 @@
-package main
+// Package helper runs VocaBox's playback helper, the Rust process that plays
+// one niconico DOMAND audio playlist through Windows' own media stack (see
+// helper/README.md for the protocol). The app runs it as a child, so a
+// media-stack crash cannot take the UI down.
+package helper
 
 import (
 	"bufio"
@@ -12,14 +16,9 @@ import (
 	"syscall"
 )
 
-// AmsHelper is VocaBox's playback helper: a small Rust process that
-// plays one niconico DOMAND audio playlist through Windows' own media stack
-// (see helper/README.md for the protocol). The app runs it as a child, so a
-// media-stack crash cannot take the UI down.
-
-// helperEvent is one event line of the helper's protocol: opened, ended,
-// failed, or the position reply with ms set.
-type helperEvent struct {
+// Event is one event line of the helper's protocol: opened, ended, failed, or
+// the position reply with ms set.
+type Event struct {
 	Event      string  `json:"ev"`
 	DurationMS float64 `json:"durationMs"`
 	MS         float64 `json:"ms"`
@@ -32,8 +31,8 @@ type helperEvent struct {
 	Gen int `json:"gen,omitempty"`
 }
 
-// helperCommand is one command line of the protocol.
-type helperCommand struct {
+// Command is one command line of the protocol.
+type Command struct {
 	Cmd string `json:"cmd"`
 	// URL, Cookie and UA belong to play: the signed audio media playlist,
 	// the app's cookies for .nicovideo.jp, and the User-Agent. File names a
@@ -50,9 +49,9 @@ type helperCommand struct {
 	Play bool `json:"play,omitempty"`
 }
 
-// helperProcess is one running helper. Events arrive on its own goroutine,
-// in the order the helper printed them; send is safe from any goroutine.
-type helperProcess struct {
+// Process is one running helper. Events arrive on its own goroutine, in the
+// order the helper printed them; Send is safe from any goroutine.
+type Process struct {
 	cmd   *exec.Cmd
 	stdin io.WriteCloser
 	mu    sync.Mutex
@@ -61,10 +60,9 @@ type helperProcess struct {
 	closed bool
 }
 
-// startHelper launches the helper at path. onEvent hears every event line,
-// onExit the exit once the process is gone (its error is nil for a clean
-// quit).
-func startHelper(path, dir string, onEvent func(helperEvent), onExit func(error)) (*helperProcess, error) {
+// Start launches the helper at path. onEvent hears every event line, onExit
+// the exit once the process is gone (its error is nil for a clean quit).
+func Start(path, dir string, onEvent func(Event), onExit func(error)) (*Process, error) {
 	cmd := exec.Command(path)
 	cmd.Dir = dir
 	// The helper is a console program; without this a console window would
@@ -85,12 +83,12 @@ func startHelper(path, dir string, onEvent func(helperEvent), onExit func(error)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	h := &helperProcess{
+	h := &Process{
 		cmd:   cmd,
 		stdin: stdin,
 	}
 	go func() {
-		readHelperEvents(stdout, onEvent)
+		readEvents(stdout, onEvent)
 		err := cmd.Wait()
 		h.mu.Lock()
 		closed := h.closed
@@ -103,13 +101,13 @@ func startHelper(path, dir string, onEvent func(helperEvent), onExit func(error)
 		}
 		onExit(err)
 	}()
-	go drainHelperStderr(stderr)
+	go drainStderr(stderr)
 	return h, nil
 }
 
-// send writes one command line. A send to a dead helper reports an error;
-// the exit callback has already fired or will.
-func (h *helperProcess) send(command helperCommand) error {
+// Send writes one command line. A send to a dead helper reports an error; the
+// exit callback has already fired or will.
+func (h *Process) Send(command Command) error {
 	line, err := json.Marshal(command)
 	if err != nil {
 		return err
@@ -124,9 +122,9 @@ func (h *helperProcess) send(command helperCommand) error {
 	return err
 }
 
-// shutdown ends the helper for good: the app is quitting, so the audio stops
+// Shutdown ends the helper for good: the app is quitting, so the audio stops
 // with it. The kill is deliberate and racing callbacks must ignore it.
-func (h *helperProcess) shutdown() {
+func (h *Process) Shutdown() {
 	h.mu.Lock()
 	h.closed = true
 	h.stdin.Close()
@@ -134,16 +132,16 @@ func (h *helperProcess) shutdown() {
 	_ = h.cmd.Process.Kill()
 }
 
-// readHelperEvents dispatches the helper's event lines; a malformed line is
-// dropped rather than stopping the stream.
-func readHelperEvents(r io.Reader, onEvent func(helperEvent)) {
+// readEvents dispatches the helper's event lines; a malformed line is dropped
+// rather than stopping the stream.
+func readEvents(r io.Reader, onEvent func(Event)) {
 	s := bufio.NewScanner(r)
 	for s.Scan() {
 		line := bytes.TrimSpace(s.Bytes())
 		if len(line) == 0 {
 			continue
 		}
-		var event helperEvent
+		var event Event
 		if err := json.Unmarshal(line, &event); err != nil {
 			continue
 		}
@@ -151,9 +149,9 @@ func readHelperEvents(r io.Reader, onEvent func(helperEvent)) {
 	}
 }
 
-// drainHelperStderr logs what the helper writes to stderr: Rust panics
-// and Windows' media-stack complaints arrive there.
-func drainHelperStderr(r io.Reader) {
+// drainStderr logs what the helper writes to stderr: Rust panics and Windows'
+// media-stack complaints arrive there.
+func drainStderr(r io.Reader) {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 0, 4<<10), 64<<10)
 	for s.Scan() {

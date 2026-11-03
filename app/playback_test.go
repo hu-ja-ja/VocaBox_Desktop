@@ -20,14 +20,14 @@ type fakeHelper struct {
 	onExit   func(error)
 }
 
-func (h *fakeHelper) send(command helperCommand) error {
+func (h *fakeHelper) Send(command helperCommand) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.commands = append(h.commands, command)
 	return nil
 }
 
-func (h *fakeHelper) shutdown() {}
+func (h *fakeHelper) Shutdown() {}
 
 func (h *fakeHelper) all() []helperCommand {
 	h.mu.Lock()
