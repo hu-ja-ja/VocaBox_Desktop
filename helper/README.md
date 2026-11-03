@@ -1,7 +1,7 @@
 # AmsHelper
 
 VocaBox の再生ヘルパー。`AdaptiveMediaSource` + `MediaPlayer`（Windows 標準のメディアスタック）で
-ニコニコ DOMAND の HLS 音声を再生する常駐プロセス。Go 側（`app/helper.go`）が子プロセスとして起動し、
+ニコニコ DOMAND の HLS 音声を再生する常駐プロセス。Go 側（`app/helper/helper.go`）が子プロセスとして起動し、
 stdin/stdout の JSON lines で制御する。クラッシュ分離と、Go に WinRT バインディングを持ち込まないことが目的。
 
 ## ビルド
@@ -40,7 +40,7 @@ stdout（イベント、1行1オブジェクト）:
   （manifest / segment / AES鍵）に載せる（`domand_bid` が無いと delivery/asset 系が 403）。
   システムの Cookie ストアは使わない（`CookieUsageBehavior.NoCookies`）ため、
   `user_session` などが OS 側に残ることはない。
-- 位置のプルは Go 側が約4回/秒。イベントと応答は同じ stdout に混ざるため、`ev` で振り分ける。
+- 位置のプルは Go 側が、歌詞を同期表示している間は約10回/秒、それ以外は約3回/秒。イベントと応答は同じ stdout に混ざるため、`ev` で振り分ける。
 - `file` の再生は `MediaSource::CreateFromUri`（ローカルファイル）で開く。HLS のときだけ `AdaptiveMediaSource` を使う。
 - イベントには `gen` が付く（`play` で渡された世代名）。差し替えられた再生の遅れたイベントを
   アプリが見分けて捨てるためのもので、ヘルパー自身は `gen` を検証しない。
