@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "packageRules": [
+    {
+      "description": "windows-future 0.100 depends on windows-core 0.100, but the windows crate is still 0.62 so the types do not match. Remove this rule once windows 0.100 is out.",
+      "matchPackageNames": ["windows-future"],
+      "enabled": false
+    }
+  ]
+}

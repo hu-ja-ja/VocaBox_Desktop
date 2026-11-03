@@ -11,11 +11,25 @@ jobs:
     steps:
       # mise.toml is the only source of the tool versions (Go, Rust, mr-boxington
       # and the licence tools), so CI installs what a developer's mise install does.
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.2.6
       # The helper first: the app bundles resources/AmsHelper.exe, and its
       # smoke test only runs once the file is there.
       - run: mise run helper
       - run: go vet ./...
       - run: go test ./...
       - run: mise run build
+
+  actions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      # The lockfile pins every action to the commit that was reviewed, so a stale
+      # lockfile means the workflows would run code nobody checked.
+      - name: Verify the action lockfile
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh extension install github/gh-actions-lock --force --pin v0.4.0
+          gh actions-lock --verify
