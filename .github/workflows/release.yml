@@ -16,7 +16,7 @@ jobs:
     steps:
       # mygo build uploads to the release of the version in mygo.json, so the
       # release's tag has to name the same version before anything builds.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.release.tag_name }}
       - name: Check the version
@@ -30,9 +30,9 @@ jobs:
           }
       # mise.toml is the only source of the tool versions (Go, Rust and
       # mr-boxington), so the release builds what a developer's mise install builds.
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5
       # mygo build downloads NSIS on a fresh runner; the cache keeps it.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~\AppData\Local\mygo\nsis-*
           key: nsis-${{ hashFiles('go.sum') }}
