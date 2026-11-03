@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLineAtAndProgress(t *testing.T) {
@@ -258,6 +259,40 @@ func TestServiceReturnsTheFirstErrorWhenAllFail(t *testing.T) {
 	s := NewService("", first, second)
 	if _, err := s.Load(Query{VideoID: "sm1"}); !errors.Is(err, ErrLogin) {
 		t.Fatalf("Load error = %v; want the first source's error", err)
+	}
+}
+
+// TestQueryBudget checks the time a lookup is given: none is never spent, and
+// a spent one reads as spent at once.
+func TestQueryBudget(t *testing.T) {
+	if (Query{}).expired() {
+		t.Fatal("a lookup without a budget reads as spent")
+	}
+	if !(Query{}).withDeadline(-time.Second).expired() {
+		t.Fatal("a lookup whose budget is spent does not read as spent")
+	}
+	if (Query{}).withDeadline(time.Minute).expired() {
+		t.Fatal("a fresh lookup reads as spent")
+	}
+}
+
+// TestServiceGivesUpWhenTheBudgetIsSpent checks that a lookup out of time asks
+// no source, and reports a failure rather than that the track has no lyrics.
+func TestServiceGivesUpWhenTheBudgetIsSpent(t *testing.T) {
+	provider := &fakeProvider{name: "source", doc: Doc{Lines: []Line{{Text: "歌詞"}}}}
+	s := NewService("", provider)
+	s.timeout = -time.Second
+	if _, err := s.Load(Query{VideoID: "sm1"}); !errors.Is(err, ErrFailed) {
+		t.Fatalf("Load error = %v; want ErrFailed", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("Load called the source %d times; want none once the budget is spent", provider.calls)
+	}
+	if _, err := s.LoadSource("source", Query{VideoID: "sm1"}); !errors.Is(err, ErrFailed) {
+		t.Fatalf("LoadSource error = %v; want ErrFailed", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("LoadSource called the source %d times; want none once the budget is spent", provider.calls)
 	}
 }
 

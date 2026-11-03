@@ -166,6 +166,10 @@ func TestPlaybackCarriesTheWatchLyricsAnswer(t *testing.T) {
 // slow rate until a timed document follows the track.
 func TestPositionPollIntervalFollowsTheLyrics(t *testing.T) {
 	p, _, _ := newTestPlayback(t)
+	if positionPollIdleInterval%positionPollInterval != 0 {
+		t.Fatalf("the idle interval %v is not whole ticks of %v, so every pull would drift",
+			positionPollIdleInterval, positionPollInterval)
+	}
 	if got := p.pollInterval(); got != positionPollIdleInterval {
 		t.Fatalf("poll interval = %v; want the idle %v", got, positionPollIdleInterval)
 	}

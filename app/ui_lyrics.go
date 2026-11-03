@@ -525,7 +525,9 @@ func (app *nativeApp) beginLyricsSource(track, source string) {
 				app.lyricsErr = err
 				switch {
 				case errors.Is(err, lyrics.ErrUnauthorized):
-					app.sessionExpired()
+					// The session is the app's: a source refusing it asks
+					// for a sign-in here and leaves the rest of the app
+					// signed in, so a lyrics failure never logs the user out.
 					app.lyricsNeedLogin = true
 					app.lyricsLoginWhenFailed = app.loggedIn
 				case errors.Is(err, lyrics.ErrLogin):

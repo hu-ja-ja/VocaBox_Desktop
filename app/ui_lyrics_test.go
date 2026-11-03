@@ -551,6 +551,59 @@ func TestNativeUILyricsRetriesAfterLogin(t *testing.T) {
 	}
 }
 
+// TestNativeUILyricsKeepsTheSessionOnAnExpiredOne checks that a lyrics source
+// refusing the session asks for a sign-in and leaves the app's own session
+// alone: the rest of the app keeps playing as the account.
+func TestNativeUILyricsKeepsTheSessionOnAnExpiredOne(t *testing.T) {
+	provider := &fakeLyricsProvider{name: "niconico", err: lyrics.ErrUnauthorized}
+	app := lyricsUIApp(t, provider)
+	app.loggedIn = true
+	if err := app.session.Save("user_session=abc"); err != nil {
+		t.Fatal(err)
+	}
+	tester := openLyricsUI(t, app)
+	if !app.loggedIn {
+		t.Fatal("the lyrics failure signed the app out")
+	}
+	if cookies, err := app.session.Load(); err != nil || cookies == "" {
+		t.Fatalf("the lyrics failure forgot the session: %q, %v", cookies, err)
+	}
+	if !tester.HasText(locales.ErrSessionExpired()) {
+		t.Fatalf("the card does not say the session expired: %q", tester.Texts())
+	}
+	if _, ok := tester.Find(locales.LoginWithNiconico()); !ok {
+		t.Fatalf("the card offers no sign-in: %q", tester.Texts())
+	}
+	// The same session is not asked again on every frame.
+	if provider.calls != 1 {
+		t.Fatalf("the provider was called %d times; want the failure kept", provider.calls)
+	}
+}
+
+// TestNativeUILyricsRetriesAfterSigningInAgain checks the retry the expired
+// session's sign-in brings: the card asks again once the account is back.
+func TestNativeUILyricsRetriesAfterSigningInAgain(t *testing.T) {
+	provider := &fakeLyricsProvider{name: "niconico"}
+	provider.onFetch = func(call int) (lyrics.Doc, error) {
+		if call == 1 {
+			return lyrics.Doc{}, lyrics.ErrUnauthorized
+		}
+		return timedLyricsDoc(), nil
+	}
+	app := lyricsUIApp(t, provider)
+	app.loggedIn = true
+	tester := openLyricsUI(t, app)
+	if provider.calls != 1 {
+		t.Fatalf("the provider was called %d times; want one lookup", provider.calls)
+	}
+	app.loginSucceeded(locales.StatusLoggedIn())
+	tester.Frame()
+	waitForApp(t, app, "the lyrics after signing in again", func() bool { return app.lyricsDoc != nil })
+	if provider.calls != 2 {
+		t.Fatalf("the provider was called %d times; want one retry", provider.calls)
+	}
+}
+
 // TestNativeUILyricsHidesQueueAudioAndLength checks the queue beside the
 // lyrics: the title takes the room, and the save mark and length wait until
 // the lyrics close.

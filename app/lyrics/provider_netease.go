@@ -77,6 +77,9 @@ func (p *neteaseProvider) Fetch(q Query) (Doc, error) {
 	var firstErr error
 	seen := map[string]bool{}
 	for _, keyword := range searchQueries(q) {
+		if q.expired() {
+			break
+		}
 		songs, err := p.search(keyword)
 		if err != nil {
 			return Doc{}, err
@@ -95,6 +98,9 @@ func (p *neteaseProvider) Fetch(q Query) (Doc, error) {
 			accepted = accepted[:neteaseCandidateLimit]
 		}
 		for _, song := range accepted {
+			if q.expired() {
+				break
+			}
 			if seen[song.ID] {
 				continue
 			}

@@ -260,9 +260,16 @@ func (app *nativeApp) finishLogin(window *mygo.Window, status string, failed boo
 			app.setError(errors.New(status))
 			return
 		}
-		app.loggedIn = true
-		app.setStatus(status)
+		app.loginSucceeded(status)
 	})
+}
+
+// loginSucceeded records a completed sign-in: the app is signed in from here
+// on, and a lyrics failure that asked for the sign-in asks again.
+func (app *nativeApp) loginSucceeded(status string) {
+	app.loggedIn = true
+	app.lyricsLoginWhenFailed = false
+	app.setStatus(status)
 }
 
 // logout forgets the session the user signed in with.

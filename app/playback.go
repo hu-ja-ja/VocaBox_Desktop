@@ -110,10 +110,12 @@ type helperConn interface {
 // positionPollInterval is how often the app pulls the helper's position
 // while a timed lyrics document shows: often enough for the lyrics to turn
 // with the vocal. positionPollIdleInterval is the rate otherwise, rare enough
-// that each pull's window rebuild does not crowd the player.
+// that each pull's window rebuild does not crowd the player. The pull ticks at
+// the fast rate and skips ticks until the idle one, so the idle rate is a
+// whole number of ticks rather than the next one after it.
 const (
 	positionPollInterval     = 100 * time.Millisecond
-	positionPollIdleInterval = 250 * time.Millisecond
+	positionPollIdleInterval = 3 * positionPollInterval
 )
 
 // previousRestartMS is how far into a track the previous button restarts it

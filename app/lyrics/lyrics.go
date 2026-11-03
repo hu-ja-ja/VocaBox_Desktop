@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"time"
 )
 
 // The IDs the app's sources answer to. They are stable values: the cache and
@@ -122,6 +123,29 @@ type Query struct {
 	DurationMS     float64
 	HasLyrics      bool
 	HasLyricsKnown bool
+	// deadline is when the lookup asking gives up on the sources still to
+	// try; the zero time never gives up.
+	deadline time.Time
+}
+
+// lookupTimeout bounds one lookup across the sources, so a source that keeps
+// timing out cannot hold the card on "loading" for minutes. A request already
+// in flight may outlast it by its own client's timeout.
+const lookupTimeout = 15 * time.Second
+
+// errTimeout reports a lookup that spent its budget before a source answered.
+// It says the lookup failed, not that the track has no lyrics.
+var errTimeout = fmt.Errorf("%w: the lookup ran out of time", ErrFailed)
+
+// withDeadline starts the lookup's budget of d.
+func (q Query) withDeadline(d time.Duration) Query {
+	q.deadline = time.Now().Add(d)
+	return q
+}
+
+// expired reports whether the lookup has spent its budget.
+func (q Query) expired() bool {
+	return !q.deadline.IsZero() && time.Now().After(q.deadline)
 }
 
 // Provider fetches one track's lyrics from one source. ID is the stable name
@@ -147,12 +171,14 @@ type Source struct {
 type Service struct {
 	providers []Provider
 	cache     *cache
+	// timeout is how long one lookup may take; tests shorten it.
+	timeout time.Duration
 }
 
 // NewService returns a service over providers, remembering answers in
 // cacheDir. An empty cacheDir disables the cache.
 func NewService(cacheDir string, providers ...Provider) *Service {
-	s := &Service{providers: providers}
+	s := &Service{providers: providers, timeout: lookupTimeout}
 	if cacheDir != "" {
 		s.cache = &cache{dir: cacheDir}
 		s.cache.offsets = s.cache.loadOffsets()
@@ -176,15 +202,22 @@ func (s *Service) Sources() []Source {
 // Load returns the track's lyrics: the first provider in priority order that
 // has a cached answer or answers. A source's answer is cached, credited to
 // it, and returned; errors try the next source, and the first error is
-// returned when none answers.
+// returned when none answers. The sources share one budget of time, so a slow
+// one leaves the next the rest.
 func (s *Service) Load(q Query) (Doc, error) {
 	if s == nil {
 		return Doc{}, ErrFailed
 	}
+	q = q.withDeadline(s.timeout)
 	var first error
 	for _, provider := range s.providers {
+		// A cached answer costs no request: it is worth reading even when
+		// the budget is gone.
 		if doc, ok := s.cached(provider, q.VideoID); ok {
 			return doc, nil
+		}
+		if q.expired() {
+			break
 		}
 		doc, err := provider.Fetch(q)
 		if err != nil {
@@ -201,6 +234,11 @@ func (s *Service) Load(q Query) (Doc, error) {
 		}
 		return s.finish(provider, q.VideoID, doc), nil
 	}
+	if q.expired() {
+		// No source answered in the time given, which says nothing about
+		// whether the track has lyrics.
+		return Doc{}, errTimeout
+	}
 	if first == nil {
 		first = ErrNotFound
 	}
@@ -214,6 +252,7 @@ func (s *Service) LoadSource(id string, q Query) (Doc, error) {
 	if s == nil {
 		return Doc{}, ErrFailed
 	}
+	q = q.withDeadline(s.timeout)
 	for _, provider := range s.providers {
 		if provider.ID() != id {
 			continue
@@ -221,8 +260,14 @@ func (s *Service) LoadSource(id string, q Query) (Doc, error) {
 		if doc, ok := s.cached(provider, q.VideoID); ok {
 			return doc, nil
 		}
+		if q.expired() {
+			return Doc{}, errTimeout
+		}
 		doc, err := provider.Fetch(q)
 		if err != nil {
+			if q.expired() {
+				return Doc{}, errTimeout
+			}
 			return Doc{}, err
 		}
 		if len(doc.Lines) == 0 {

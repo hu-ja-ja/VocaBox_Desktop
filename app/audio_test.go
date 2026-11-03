@@ -325,6 +325,34 @@ func TestDropSegmentIndexes(t *testing.T) {
 	}
 }
 
+// TestSegmentIndexesIn checks the cheap question the repair asks first: a
+// segment with its index says yes, and one without it says no.
+func TestSegmentIndexesIn(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		body []byte
+		want bool
+	}{
+		{"indexed", audioTestSegment(0x11), true},
+		{"repaired", audioTestSavedSegment(0x11), false},
+	} {
+		path := filepath.Join(dir, tc.name+".m4a")
+		if err := os.WriteFile(path, tc.body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := segmentIndexesIn(f)
+		f.Close()
+		if got != tc.want {
+			t.Fatalf("%s: segmentIndexesIn = %v; want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestRepairSavedAudio checks the one-time repair of a track saved with the
 // per-segment indexes: the file keeps everything but them, and a second pass
 // leaves it alone.

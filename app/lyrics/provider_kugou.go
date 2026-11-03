@@ -74,6 +74,9 @@ func (p *kugouProvider) Fetch(q Query) (Doc, error) {
 	}
 	var firstErr error
 	for _, keyword := range searchQueries(q) {
+		if q.expired() {
+			break
+		}
 		songs, err := p.search(keyword)
 		if err != nil {
 			return Doc{}, err
@@ -92,6 +95,9 @@ func (p *kugouProvider) Fetch(q Query) (Doc, error) {
 			accepted = accepted[:kugouCandidateLimit]
 		}
 		for _, song := range accepted {
+			if q.expired() {
+				break
+			}
 			doc, err := p.lyrics(q, song)
 			if err == nil {
 				return doc, nil
@@ -184,6 +190,9 @@ func (p *kugouProvider) lyrics(q Query, song kugouSong) (Doc, error) {
 	}
 	var firstErr error
 	for _, candidate := range accepted {
+		if q.expired() {
+			break
+		}
 		doc, err := p.download(candidate)
 		if err == nil {
 			return doc, nil

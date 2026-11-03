@@ -490,6 +490,15 @@ func dropSegmentIndexes(b []byte) []byte {
 // left out carries, so the whole track plays. The file is rewritten once; one
 // already without them is left alone.
 func repairSavedAudio(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	indexed := segmentIndexesIn(f)
+	f.Close()
+	if !indexed {
+		return
+	}
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return
@@ -501,6 +510,39 @@ func repairSavedAudio(path string) {
 	if err := writeFileAtomic(path, stripped, 0o644, locales.ErrAudioSave()); err != nil {
 		log.Printf("audio: repairing %s: %v", path, err)
 	}
+}
+
+// boxWalkLimit bounds the headers segmentIndexesIn reads: a track of
+// one-second segments holds a few hundred, and a file of more box headers
+// than that is read whole rather than walked a syscall at a time.
+const boxWalkLimit = 1 << 12
+
+// segmentIndexesIn reports whether the saved track still holds a per-segment
+// sidx box. It walks the top-level boxes by their headers alone, so a track
+// already repaired costs no read of its media on every play.
+func segmentIndexesIn(f *os.File) bool {
+	var header [16]byte
+	for off, boxes := int64(0), 0; boxes < boxWalkLimit; boxes++ {
+		if _, err := f.ReadAt(header[:8], off); err != nil {
+			return false
+		}
+		size := int64(binary.BigEndian.Uint32(header[0:4]))
+		if size == 1 {
+			if _, err := f.ReadAt(header[8:16], off+8); err != nil {
+				return false
+			}
+			size = int64(binary.BigEndian.Uint64(header[8:16]))
+		}
+		if size < 8 {
+			return false
+		}
+		if string(header[4:8]) == "sidx" {
+			return true
+		}
+		off += size
+	}
+	// Too many boxes to walk here: let the whole-file pass below decide.
+	return true
 }
 
 // audioSegmentKey is the key one segment is encrypted with: the last key its

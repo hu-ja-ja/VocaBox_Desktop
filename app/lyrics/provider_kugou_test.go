@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // krcFixture encodes text the way KuGou's KRC download answers it: zlib,
@@ -156,5 +157,28 @@ func TestKugouProviderRejectsAnotherCut(t *testing.T) {
 	}
 	if lyricsCalls != 0 {
 		t.Fatalf("the lyrics search ran %d times for a rejected cut", lyricsCalls)
+	}
+}
+
+// TestKugouProviderStopsWhenTheLookupIsOutOfTime checks that a source whose
+// time is spent sends no request at all, so the next source is not held up by
+// a chain of them.
+func TestKugouProviderStopsWhenTheLookupIsOutOfTime(t *testing.T) {
+	requests := 0
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": 1})
+	})
+	provider := NewKugouProvider(server.Client(), server.URL, server.URL, "")
+	query := Query{Title: "サンプル曲", DurationMS: 242000}
+	query.deadline = time.Now().Add(-time.Second)
+	if _, err := provider.Fetch(query); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Fetch error = %v; want ErrNotFound", err)
+	}
+	if requests != 0 {
+		t.Fatalf("%d requests were sent after the lookup's time was spent", requests)
 	}
 }
