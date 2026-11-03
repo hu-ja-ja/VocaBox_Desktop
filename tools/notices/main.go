@@ -46,12 +46,13 @@ const wrapWidth = 76
 
 // groups name where a bundled work comes from, as the notices head them.
 const (
-	lucideIcons = "Lucide icons"
-	goModules   = "Go modules"
-	rustCrates  = "Rust crates"
-	cratesURI   = "https://crates.io/crates/"
-	noticesPath = "THIRD_PARTY_NOTICES.md"
-	entriesPath = "notices_gen.go"
+	bundledFonts = "Bundled fonts"
+	lucideIcons  = "Lucide icons"
+	goModules    = "Go modules"
+	rustCrates   = "Rust crates"
+	cratesURI    = "https://crates.io/crates/"
+	noticesPath  = "THIRD_PARTY_NOTICES.md"
+	entriesPath  = "notices_gen.go"
 )
 
 // entry is one bundled work: what it is, the terms it is bundled under, and
@@ -131,9 +132,14 @@ func mainModule() (file, module string, err error) {
 	return file, m.Path, nil
 }
 
-// collect lists every work the app bundles, the icons it takes from Lucide,
-// the Go modules it links and the crates the helper bundles, sorted by name.
+// collect lists every work the app bundles, the fonts it draws its interface
+// in, the icons it takes from Lucide, the Go modules it links and the crates
+// the helper bundles, sorted by name.
 func collect(root, module string) ([]entry, error) {
+	fonts, err := fontEntry(root)
+	if err != nil {
+		return nil, err
+	}
 	icons, err := iconEntry(root)
 	if err != nil {
 		return nil, err
@@ -146,9 +152,28 @@ func collect(root, module string) ([]entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	all := append([]entry{icons}, append(modules, crates...)...)
+	all := append([]entry{fonts, icons}, append(modules, crates...)...)
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Name < all[j].Name })
 	return all, nil
+}
+
+// fontEntry is the font the app draws its interface in, its terms read from
+// the licence text the font ships with.
+func fontEntry(root string) (entry, error) {
+	terms, err := os.ReadFile(filepath.Join(root, "app", "fonts", "OFL.txt"))
+	if err != nil {
+		return entry{}, err
+	}
+	text := string(terms)
+	copyright, _, _ := strings.Cut(text, "\n")
+	return entry{
+		Name:      "M PLUS 1",
+		Group:     bundledFonts,
+		License:   "OFL-1.1",
+		Copyright: strings.TrimSpace(copyright),
+		URL:       "https://github.com/coz-m/MPLUS_FONTS",
+		Text:      "The app draws its interface in M PLUS 1, taken from Google Fonts (https://fonts.google.com/specimen/M+PLUS+1), unmodified.\n\n" + text,
+	}, nil
 }
 
 // iconEntry is the Lucide icons the app takes: the entry of the list, whose
@@ -414,9 +439,10 @@ func (e Entry) Text() string { return Texts[e.TextIndex] }
 
 // Groups of the entries, as the notices head them.
 const (
-	GroupLucideIcons = "Lucide icons"
-	GroupGoModules   = "Go modules"
-	GroupRustCrates  = "Rust crates"
+	GroupBundledFonts = "Bundled fonts"
+	GroupLucideIcons  = "Lucide icons"
+	GroupGoModules    = "Go modules"
+	GroupRustCrates   = "Rust crates"
 )
 
 // Entries lists the works the app and its playback helper bundle, sorted by
@@ -444,7 +470,7 @@ var Entries = []Entry{
 func renderNotices(root string, entries []entry) ([]byte, error) {
 	var b strings.Builder
 	b.WriteString(headerMD)
-	for _, group := range []string{lucideIcons, goModules, rustCrates} {
+	for _, group := range []string{bundledFonts, lucideIcons, goModules, rustCrates} {
 		inGroup := filterGroup(entries, group)
 		if len(inGroup) == 0 {
 			continue
@@ -505,6 +531,8 @@ func textBlocks(entries []entry) []textBlock {
 // groupConst is the generated constant naming one group.
 func groupConst(group string) string {
 	switch group {
+	case bundledFonts:
+		return "GroupBundledFonts"
 	case lucideIcons:
 		return "GroupLucideIcons"
 	case goModules:

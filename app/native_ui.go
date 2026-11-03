@@ -324,6 +324,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	t.AccentPressed = ui.Hex("#c84684")
 	t.AccentText = ui.Hex("#1a0e15")
 	t.Focus = ui.Hex("#f29bc1")
+	t.Font = appFontFamily
 	t.Radius = 8
 	t.Spacing = 4
 	router := ui.NewRouter(homePath)
