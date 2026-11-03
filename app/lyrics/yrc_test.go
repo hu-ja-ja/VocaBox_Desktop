@@ -32,25 +32,25 @@ func TestParseYRC(t *testing.T) {
 }
 
 func TestParseYRCStripsRubyAndTranslation(t *testing.T) {
-	const text = "[32210,2250](32210,90,0)大(32300,110,0)胆(32410,170,0)不(32580,370,0)敌" +
-		"(32950,0,0)（(32950,0,0)だ(32950,0,0)い(32950,0,0)た(32950,0,0)ん(32950,0,0)ふ(32950,0,0)て(32950,0,0)き(32950,0,0)）" +
-		"(32950,210,0)に(33160,230,0)ハ(33390,170,0)イ(33560,300,0)カ(33860,130,0)ラ(33990,380,0)革(34370,90,0)命" +
-		"(34460,0,0)（(34460,0,0)か(34460,0,0)く(34460,0,0)め(34460,0,0)い(34460,0,0)）【(34460,0,0)英(34460,0,0)勇(34460,0,0)】"
+	const text = "[32210,2250](32210,90,0)あ(32300,110,0)い(32410,170,0)う(32580,370,0)え" +
+		"(32950,0,0)（(32950,0,0)え(32950,0,0)）" +
+		"(32950,210,0)お" +
+		"(34460,0,0)【(34460,0,0)翻(34460,0,0)訳(34460,0,0)】"
 	lines := parseYRC(text)
 	if len(lines) != 1 {
 		t.Fatalf("lines = %#v", lines)
 	}
 	line := lines[0]
-	if line.Text != "大胆不敌にハイカラ革命" {
+	if line.Text != "あいうえお" {
 		t.Fatalf("text = %q; want ruby and translation dropped", line.Text)
 	}
-	if len(line.Words) != 11 {
+	if len(line.Words) != 5 {
 		t.Fatalf("words = %#v; want the plain lyric's words", line.Words)
 	}
-	if line.Words[3].Text != "敌" || line.Words[3].StartMS != 32580 || line.Words[3].EndMS != 32950 {
+	if line.Words[3].Text != "え" || line.Words[3].StartMS != 32580 || line.Words[3].EndMS != 32950 {
 		t.Fatalf("word before the ruby = %#v", line.Words[3])
 	}
-	if line.Words[4].Text != "に" || line.Words[4].StartMS != 32950 {
+	if line.Words[4].Text != "お" || line.Words[4].StartMS != 32950 {
 		t.Fatalf("word after the ruby = %#v", line.Words[4])
 	}
 }

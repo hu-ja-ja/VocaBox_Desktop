@@ -32,22 +32,22 @@ func krcFixture(t *testing.T, text string) string {
 }
 
 func TestKugouProviderReadsKRC(t *testing.T) {
-	content := krcFixture(t, "[ti:千本桜]\n"+
-		"[0,1000]千本桜 - 初音ミク\n"+
-		"[1000,100]词：黒うさP\n"+
-		"[2000,2000]<0,500,0>千<500,500,0>本<1000,1000,0>桜\n"+
-		"[4000,1500]<0,750,0>夜<750,750,0>ニ")
+	content := krcFixture(t, "[ti:サンプル曲]\n"+
+		"[0,1000]サンプル曲 - 歌手\n"+
+		"[1000,100]词：作者P\n"+
+		"[2000,2000]<0,500,0>サ<500,500,0>ン<1000,1000,0>プ\n"+
+		"[4000,1500]<0,750,0>二<750,750,0>行")
 	mux := http.NewServeMux()
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	mux.HandleFunc("/api/v3/search/song", func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("keyword"); got != "黒うさP 千本桜" {
+		if got := r.URL.Query().Get("keyword"); got != "作者P サンプル曲" {
 			t.Errorf("keyword = %q; want the uploader and title", got)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": 1,
 			"data": map[string]any{"info": []map[string]any{{
-				"hash": "h1", "songname": "千本桜", "singername": "初音ミク", "duration": 242,
+				"hash": "h1", "songname": "サンプル曲", "singername": "歌手", "duration": 242,
 			}}},
 		})
 	})
@@ -58,7 +58,7 @@ func TestKugouProviderReadsKRC(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": 200,
 			"candidates": []map[string]any{{
-				"id": "c1", "accesskey": "k1", "song": "千本桜", "singer": "初音ミク",
+				"id": "c1", "accesskey": "k1", "song": "サンプル曲", "singer": "歌手",
 				"duration": 242000, "content_format": 4,
 			}},
 		})
@@ -74,7 +74,7 @@ func TestKugouProviderReadsKRC(t *testing.T) {
 	})
 
 	provider := NewKugouProvider(server.Client(), server.URL, server.URL, "VocaBox/test")
-	doc, err := provider.Fetch(Query{VideoID: "sm1", Title: "千本桜", Artist: "黒うさP", DurationMS: 242000})
+	doc, err := provider.Fetch(Query{VideoID: "sm1", Title: "サンプル曲", Artist: "作者P", DurationMS: 242000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestKugouProviderReadsKRC(t *testing.T) {
 		t.Fatalf("doc = %#v; want two timed lines", doc)
 	}
 	first := doc.Lines[0]
-	if first.Text != "千本桜" || first.StartMS != 2000 || first.EndMS != 4000 {
+	if first.Text != "サンプ" || first.StartMS != 2000 || first.EndMS != 4000 {
 		t.Fatalf("first line = %#v; want the title header and credit line dropped", first)
 	}
 	if len(first.Words) != 3 || first.Words[1].StartMS != 2500 || first.Words[2].EndMS != 4000 {
@@ -102,7 +102,7 @@ func TestKugouProviderReadsLRC(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": 1,
 			"data": map[string]any{"info": []map[string]any{{
-				"hash": "h1", "songname": "千本桜", "singername": "初音ミク", "duration": 242,
+				"hash": "h1", "songname": "サンプル曲", "singername": "歌手", "duration": 242,
 			}}},
 		})
 	})
@@ -110,7 +110,7 @@ func TestKugouProviderReadsLRC(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": 200,
 			"candidates": []map[string]any{{
-				"id": "c1", "accesskey": "k1", "song": "千本桜", "singer": "初音ミク",
+				"id": "c1", "accesskey": "k1", "song": "サンプル曲", "singer": "歌手",
 				"duration": 242000, "content_format": 1,
 			}},
 		})
@@ -120,7 +120,7 @@ func TestKugouProviderReadsLRC(t *testing.T) {
 	})
 
 	provider := NewKugouProvider(server.Client(), server.URL, server.URL, "")
-	doc, err := provider.Fetch(Query{Title: "千本桜", DurationMS: 242000})
+	doc, err := provider.Fetch(Query{Title: "サンプル曲", DurationMS: 242000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestKugouProviderRejectsAnotherCut(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": 1,
 			"data": map[string]any{"info": []map[string]any{{
-				"hash": "h1", "songname": "千本桜 (Game Version)", "singername": "初音ミク", "duration": 218,
+				"hash": "h1", "songname": "サンプル曲 (Game Version)", "singername": "歌手", "duration": 218,
 			}}},
 		})
 	})
@@ -150,7 +150,7 @@ func TestKugouProviderRejectsAnotherCut(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": 200, "candidates": []map[string]any{}})
 	})
 	provider := NewKugouProvider(server.Client(), server.URL, server.URL, "")
-	_, err := provider.Fetch(Query{Title: "千本桜", DurationMS: 242000})
+	_, err := provider.Fetch(Query{Title: "サンプル曲", DurationMS: 242000})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Fetch error = %v; want ErrNotFound", err)
 	}

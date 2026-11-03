@@ -21,14 +21,14 @@ func neteaseSearchHandler(t *testing.T) http.HandlerFunc {
 			t.Error(err)
 			return
 		}
-		if got := r.PostForm.Get("s"); got != "黒うさP 千本桜" {
+		if got := r.PostForm.Get("s"); got != "作者P サンプル曲" {
 			t.Errorf("s = %q; want the uploader and title", got)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
 			"result": map[string]any{"songs": []map[string]any{{
-				"id": 26096272, "name": "千本桜", "dt": 242000,
-				"ar": []map[string]any{{"name": "黒うさP"}, {"name": "初音ミク"}},
+				"id": 26096272, "name": "サンプル曲", "dt": 242000,
+				"ar": []map[string]any{{"name": "作者P"}, {"name": "歌手"}},
 			}}},
 		})
 	}
@@ -70,7 +70,7 @@ func TestNeteaseProviderReadsYRC(t *testing.T) {
 	})
 
 	provider := NewNeteaseProvider(server.Client(), server.URL, server.URL, "VocaBox/test")
-	doc, err := provider.Fetch(Query{VideoID: "sm1", Title: "千本桜", Artist: "黒うさP", DurationMS: 242000})
+	doc, err := provider.Fetch(Query{VideoID: "sm1", Title: "サンプル曲", Artist: "作者P", DurationMS: 242000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,15 +109,15 @@ func TestNeteaseProviderFallsBackToTheWebLRC(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
-			"lrc": map[string]any{"lyric": "[00:00.000] 作词 : 黒うさP\n" +
-				"[00:00.000] 作曲 : 黒うさP\n" +
+			"lrc": map[string]any{"lyric": "[00:00.000] 作词 : 作者P\n" +
+				"[00:00.000] 作曲 : 作者P\n" +
 				"[00:01.00] 一行目\n" +
 				"[00:03.50] 二行目\n"},
 		})
 	})
 
 	provider := NewNeteaseProvider(server.Client(), server.URL, server.URL, "VocaBox/test")
-	doc, err := provider.Fetch(Query{VideoID: "sm1", Title: "千本桜", Artist: "黒うさP", DurationMS: 242000})
+	doc, err := provider.Fetch(Query{VideoID: "sm1", Title: "サンプル曲", Artist: "作者P", DurationMS: 242000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestNeteaseProviderReadsTheEAPILRC(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200})
 	})
 	provider := NewNeteaseProvider(server.Client(), server.URL, server.URL, "")
-	doc, err := provider.Fetch(Query{Title: "千本桜", Artist: "黒うさP", DurationMS: 242000})
+	doc, err := provider.Fetch(Query{Title: "サンプル曲", Artist: "作者P", DurationMS: 242000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,15 +170,15 @@ func TestNeteaseProviderPrefersTheCleanYRC(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
 			"result": map[string]any{"songs": []map[string]any{
-				{"id": 1, "name": "千本桜", "dt": 242000, "ar": []map[string]any{{"name": "黒うさP"}}},
-				{"id": 2, "name": "千本桜", "dt": 243000, "ar": []map[string]any{{"name": "黒うさP"}}},
+				{"id": 1, "name": "サンプル曲", "dt": 242000, "ar": []map[string]any{{"name": "作者P"}}},
+				{"id": 2, "name": "サンプル曲", "dt": 243000, "ar": []map[string]any{{"name": "作者P"}}},
 			}},
 		})
 	})
 	mux.HandleFunc("/eapi/song/lyric/v1", func(w http.ResponseWriter, r *http.Request) {
-		yrc := "[1000,1000](1000,500,0)大(1500,500,0)胆（だいたん）【 翻訳 】"
+		yrc := "[1000,1000](1000,500,0)歌(1500,500,0)詞（かし）【 翻訳 】"
 		if calls.Add(1) == 2 {
-			yrc = "[1000,1000](1000,500,0)清(1500,500,0)楚"
+			yrc = "[1000,1000](1000,500,0)本(1500,500,0)文"
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
@@ -190,14 +190,14 @@ func TestNeteaseProviderPrefersTheCleanYRC(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200})
 	})
 	provider := NewNeteaseProvider(server.Client(), server.URL, server.URL, "")
-	doc, err := provider.Fetch(Query{Title: "千本桜", Artist: "黒うさP", DurationMS: 242000})
+	doc, err := provider.Fetch(Query{Title: "サンプル曲", Artist: "作者P", DurationMS: 242000})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if doc.annotated {
 		t.Fatal("the annotated copy was returned over the clean one")
 	}
-	if len(doc.Lines) != 1 || doc.Lines[0].Text != "清楚" {
+	if len(doc.Lines) != 1 || doc.Lines[0].Text != "本文" {
 		t.Fatalf("doc = %#v; want the clean YRC", doc)
 	}
 	if got := calls.Load(); got != 2 {
@@ -213,8 +213,8 @@ func TestNeteaseProviderReadsTheOldSongFields(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
 			"result": map[string]any{"songs": []map[string]any{{
-				"id": 1, "name": "千本桜", "duration": 242000,
-				"artists": []map[string]any{{"name": "初音ミク"}},
+				"id": 1, "name": "サンプル曲", "duration": 242000,
+				"artists": []map[string]any{{"name": "歌手"}},
 			}}},
 		})
 	})
@@ -228,7 +228,7 @@ func TestNeteaseProviderReadsTheOldSongFields(t *testing.T) {
 		})
 	})
 	provider := NewNeteaseProvider(server.Client(), server.URL, server.URL, "")
-	doc, err := provider.Fetch(Query{Title: "千本桜", DurationMS: 242000})
+	doc, err := provider.Fetch(Query{Title: "サンプル曲", DurationMS: 242000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,8 +257,8 @@ func TestNeteaseProviderNoLyrics(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"code": 200,
 					"result": map[string]any{"songs": []map[string]any{{
-						"id": 1, "name": "千本桜", "dt": 242000,
-						"ar": []map[string]any{{"name": "初音ミク"}},
+						"id": 1, "name": "サンプル曲", "dt": 242000,
+						"ar": []map[string]any{{"name": "歌手"}},
 					}}},
 				})
 			})
@@ -280,7 +280,7 @@ func TestNeteaseProviderNoLyrics(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(c.webBody)
 			})
 			provider := NewNeteaseProvider(server.Client(), server.URL, server.URL, "")
-			_, err := provider.Fetch(Query{Title: "千本桜", DurationMS: 242000})
+			_, err := provider.Fetch(Query{Title: "サンプル曲", DurationMS: 242000})
 			if !errors.Is(err, ErrNotFound) {
 				t.Fatalf("Fetch error = %v; want ErrNotFound", err)
 			}

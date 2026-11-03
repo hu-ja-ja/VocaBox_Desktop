@@ -17,17 +17,17 @@ import (
 func TestTrayCardShowsTheTrack(t *testing.T) {
 	app := newNativeApp(NewMylist())
 	app.player = playerState{
-		WatchID: "sm1", Title: "夜に駆ける", Uploader: "YOASOBI", Ready: true, Playing: true,
+		WatchID: "sm1", Title: "サンプル曲", Uploader: "投稿者", Ready: true, Playing: true,
 		PositionMS: 47_000, DurationMS: 261_000, Quality: "320kbps", Volume: 1,
 	}
 	tester := ui.NewTester(app.trayCardView, trayCardWidth, trayCardHeight)
-	for _, want := range []string{"夜に駆ける", "YOASOBI", "0:47 / 4:21", "320kbps"} {
+	for _, want := range []string{"サンプル曲", "投稿者", "0:47 / 4:21", "320kbps"} {
 		if !tester.HasText(want) {
 			t.Fatalf("the card does not show %q: %q", want, tester.Texts())
 		}
 	}
 	// Everything the card carries has to fit it: a flyout does not scroll.
-	for _, label := range []string{"夜に駆ける", "前へ", "一時停止", "次へ", "ミュート", "ウィンドウを表示", "終了"} {
+	for _, label := range []string{"サンプル曲", "前へ", "一時停止", "次へ", "ミュート", "ウィンドウを表示", "終了"} {
 		box, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("the card has no %q: %q", label, tester.Texts())
