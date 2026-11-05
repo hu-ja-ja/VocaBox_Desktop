@@ -14,7 +14,11 @@ run = 'cargo build --release --manifest-path helper/Cargo.toml && copy /y helper
 
 [tasks.dev]
 depends = ["helper"]
-run = "go tool mygo dev"
+# A language it ships, as ja, en, zh-Hans or zh-Hant, for one run: -lang
+# leaves the app's own language setting alone. Without one the app follows
+# the system's.
+usage = 'arg "[lang]" help="language tag, as ja, en, zh-Hans or zh-Hant"'
+run = 'go tool mygo dev{% if usage.lang is defined and usage.lang %} -lang {{ usage.lang }}{% endif %}'
 
 [tasks.build]
 depends = ["helper"]

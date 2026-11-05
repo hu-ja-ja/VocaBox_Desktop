@@ -28,6 +28,10 @@ func TestCatalogsSaySongCounts(t *testing.T) {
 		{"ja 3", locales.In("ja").QueueSongCount(3), "3曲"},
 		{"en 1", locales.In("en").QueueSongCount(1), "1 song"},
 		{"en 3", locales.In("en").QueueSongCount(3), "3 songs"},
+		{"zh-Hans 3", locales.In("zh-Hans").QueueSongCount(3), "3 首歌曲"},
+		{"zh-Hant 1", locales.In("zh-Hant").QueueSongCount(1), "1 首歌曲"},
+		{"zh-CN reads Simplified", locales.In("zh-CN").NavHome(), "首页"},
+		{"zh-TW reads Traditional", locales.In("zh-TW").NavHome(), "首頁"},
 		{"de falls back to the source", locales.In("de").NavHome(), "ホーム"},
 	}
 	for _, tc := range cases {

@@ -64,12 +64,18 @@ func TestNativeUIShowsLicenses(t *testing.T) {
 	if got := licenseTitle(entry); got != "mygo v0.7.4  ·  MIT" {
 		t.Fatalf("the list names the module %q; want its package name", got)
 	}
-	tester.Scroll(560, 500, 0, 160)
-	tester.Frame()
-	if err := tester.Click(licenseTitle(entry)); err != nil {
-		t.Fatal(err)
+	key := entry.Name + " " + entry.Version
+	// The list is longer than the page: scroll down until the row is in
+	// view and clicking it opens it.
+	for step := 0; step < 40 && !app.licenseOpen[key]; step++ {
+		_ = tester.Click(licenseTitle(entry))
+		if app.licenseOpen[key] {
+			break
+		}
+		tester.Scroll(560, 500, 0, 100)
+		tester.Frame()
 	}
-	if !app.licenseOpen[entry.Name+" "+entry.Version] {
+	if !app.licenseOpen[key] {
 		t.Fatalf("the row of %s did not open: %#v", entry.Name, app.licenseOpen)
 	}
 	if !tester.HasText("github.com/egoist/mygo") {

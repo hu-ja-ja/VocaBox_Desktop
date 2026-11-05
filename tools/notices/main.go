@@ -136,7 +136,7 @@ func mainModule() (file, module string, err error) {
 // in, the icons it takes from Lucide, the Go modules it links and the crates
 // the helper bundles, sorted by name.
 func collect(root, module string) ([]entry, error) {
-	fonts, err := fontEntry(root)
+	fonts, err := fontEntries(root)
 	if err != nil {
 		return nil, err
 	}
@@ -152,28 +152,55 @@ func collect(root, module string) ([]entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	all := append([]entry{fonts, icons}, append(modules, crates...)...)
+	all := append(append(append(fonts, icons), modules...), crates...)
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Name < all[j].Name })
 	return all, nil
 }
 
-// fontEntry is the font the app draws its interface in, its terms read from
-// the licence text the font ships with.
-func fontEntry(root string) (entry, error) {
-	terms, err := os.ReadFile(filepath.Join(root, "app", "fonts", "OFL.txt"))
-	if err != nil {
-		return entry{}, err
+// fontEntries are the fonts the app draws its interface in, their terms read
+// from the licence text each ships with.
+func fontEntries(root string) ([]entry, error) {
+	// The two Noto fonts share the sentence, so their texts are one: the
+	// notices then list the licence once for both.
+	const notoText = "The app draws its Chinese interface in Noto Sans SC and Noto Sans TC, taken from Google Fonts (https://fonts.google.com/specimen/Noto+Sans+SC), unmodified."
+	fonts := []struct{ name, file, url, intro string }{
+		{
+			name:  "M PLUS 1",
+			file:  "OFL.txt",
+			url:   "https://github.com/coz-m/MPLUS_FONTS",
+			intro: "The app draws its interface in M PLUS 1, taken from Google Fonts (https://fonts.google.com/specimen/M+PLUS+1), unmodified.",
+		},
+		{
+			name:  "Noto Sans SC",
+			file:  "NotoSansSC-OFL.txt",
+			url:   "https://github.com/notofonts/noto-cjk",
+			intro: notoText,
+		},
+		{
+			name:  "Noto Sans TC",
+			file:  "NotoSansTC-OFL.txt",
+			url:   "https://github.com/notofonts/noto-cjk",
+			intro: notoText,
+		},
 	}
-	text := string(terms)
-	copyright, _, _ := strings.Cut(text, "\n")
-	return entry{
-		Name:      "M PLUS 1",
-		Group:     bundledFonts,
-		License:   "OFL-1.1",
-		Copyright: strings.TrimSpace(copyright),
-		URL:       "https://github.com/coz-m/MPLUS_FONTS",
-		Text:      "The app draws its interface in M PLUS 1, taken from Google Fonts (https://fonts.google.com/specimen/M+PLUS+1), unmodified.\n\n" + text,
-	}, nil
+	entries := make([]entry, 0, len(fonts))
+	for _, f := range fonts {
+		terms, err := os.ReadFile(filepath.Join(root, "app", "fonts", f.file))
+		if err != nil {
+			return nil, err
+		}
+		text := string(terms)
+		copyright, _, _ := strings.Cut(text, "\n")
+		entries = append(entries, entry{
+			Name:      f.name,
+			Group:     bundledFonts,
+			License:   "OFL-1.1",
+			Copyright: strings.TrimSpace(copyright),
+			URL:       f.url,
+			Text:      f.intro + "\n\n" + text,
+		})
+	}
+	return entries, nil
 }
 
 // iconEntry is the Lucide icons the app takes: the entry of the list, whose

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 	"github.com/hu-ja-ja/VocaBox_Desktop/app/discord"
 	"github.com/hu-ja-ja/VocaBox_Desktop/app/lyrics"
@@ -324,7 +325,7 @@ func newNativeApp(mylist *Mylist) *nativeApp {
 	t.AccentPressed = ui.Hex("#c84684")
 	t.AccentText = ui.Hex("#1a0e15")
 	t.Focus = ui.Hex("#f29bc1")
-	t.Font = appFontFamily
+	t.Font = appFontFor(i18n.Locale())
 	t.Radius = 8
 	t.Spacing = 4
 	router := ui.NewRouter(homePath)
