@@ -761,6 +761,11 @@ func (p *playback) publish() {
 	p.polling.Store(!p.closing && p.proc != nil && st.Ready && st.Playing)
 	// The tray is the only place the app speaks while its window is hidden.
 	p.app.refreshTray()
+	// The tray and the window show the same player: a change made from the
+	// tray has no frame of the window's own to show it.
+	if p.app.window != nil {
+		p.app.window.Invalidate()
+	}
 	p.syncDiscord(false)
 }
 
