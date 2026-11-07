@@ -192,9 +192,10 @@ func TestNativeUILyricsWordTimingUsesTheLineList(t *testing.T) {
 func TestNativeUILyricsClickSeeksToTheLine(t *testing.T) {
 	provider := &fakeLyricsProvider{name: "niconico", doc: timedLyricsDoc()}
 	app := lyricsUIApp(t, provider)
-	// Start at the top, so the click on the second line is a seek the bar
-	// keeps, not one it already reads as landed.
+	// While paused, no position reports arrive to move the lyrics after the
+	// seek, so the clicked line must update the displayed position itself.
 	app.player.PositionMS = 0
+	app.player.Playing = false
 	tester := openLyricsUI(t, app)
 	if err := tester.Click("二行目"); err != nil {
 		t.Fatal(err)
@@ -203,8 +204,23 @@ func TestNativeUILyricsClickSeeksToTheLine(t *testing.T) {
 	if !ok || seek.PositionMS != 6000-lyricsSeekLeadMS {
 		t.Fatalf("clicking a line did not seek before it: %#v", app.sent)
 	}
-	if !app.seekSettling || app.seekValue != seek.PositionMS {
-		t.Fatalf("the seek was not taken by the player bar: value=%v settling=%v", app.seekValue, app.seekSettling)
+	if app.player.PositionMS != 6000 || app.lyricsDoc.LineAt(app.lyricsPosition()) != 1 {
+		t.Fatalf("the paused lyrics did not advance through the clicked line: position=%v line=%d", app.player.PositionMS, app.lyricsDoc.LineAt(app.lyricsPosition()))
+	}
+	if app.seekValue != app.player.PositionMS {
+		t.Fatalf("the player bar did not follow the clicked line: value=%v position=%v", app.seekValue, app.player.PositionMS)
+	}
+	// The helper starts 100ms early. Its first report must not rewind the
+	// highlighted line; the normal position takes over once playback catches up.
+	app.player.Playing = true
+	player := &playback{app: app, gen: 1}
+	player.applyEvent(helperEvent{Gen: 1, Event: "position", MS: 6000 - lyricsSeekLeadMS})
+	if app.player.PositionMS != 6000 || app.lyricsDoc.LineAt(app.lyricsPosition()) != 1 {
+		t.Fatalf("the first playback report rewound the lyrics: position=%v line=%d", app.player.PositionMS, app.lyricsDoc.LineAt(app.lyricsPosition()))
+	}
+	player.applyEvent(helperEvent{Gen: 1, Event: "position", MS: 6020})
+	if app.player.PositionMS != 6020 || app.lyricsSeekPending {
+		t.Fatalf("the player position did not take over after reaching the clicked line: position=%v pending=%v", app.player.PositionMS, app.lyricsSeekPending)
 	}
 	// The first line starts at the song's beginning, so its lead clamps.
 	if err := tester.Click("一行目"); err != nil {
@@ -213,6 +229,29 @@ func TestNativeUILyricsClickSeeksToTheLine(t *testing.T) {
 	seek, ok = lastCommand(app.sent, "seek")
 	if !ok || seek.PositionMS != 0 {
 		t.Fatalf("the first line did not seek to the start: %#v", app.sent)
+	}
+}
+
+func TestNativeUILyricsFollowPausedSeekBar(t *testing.T) {
+	provider := &fakeLyricsProvider{name: "niconico", doc: timedLyricsDoc()}
+	app := lyricsUIApp(t, provider)
+	app.player.PositionMS = 0
+	app.player.Playing = false
+	tester := openLyricsUI(t, app)
+	bar, ok := tester.Find("再生位置")
+	if !ok {
+		t.Fatal("the seek bar is missing")
+	}
+	x, y := bar.X+bar.W/2, bar.Y+bar.H/2
+	tester.Move(x, y)
+	tester.Press(x, y)
+	position := app.seekValue
+	tester.Release(x, bar.Y-30)
+	if position <= 6000 || position >= 11000 {
+		t.Fatalf("the seek bar selected %v; want a point in the second lyric line", position)
+	}
+	if app.player.PositionMS != position || app.lyricsDoc.LineAt(app.lyricsPosition()) != 1 {
+		t.Fatalf("the paused lyrics did not follow the seek: player=%v line=%d want position=%v line=1", app.player.PositionMS, app.lyricsDoc.LineAt(app.lyricsPosition()), position)
 	}
 }
 
@@ -350,6 +389,33 @@ func TestNativeUILyricsGlidesToTheLine(t *testing.T) {
 	tester.Advance(1000 * time.Millisecond)
 	if tester.FramePending() {
 		t.Fatalf("the glide did not settle")
+	}
+}
+
+func TestNativeUILyricsScrollsToTopBeforeFirstLine(t *testing.T) {
+	doc := lyrics.Doc{Timed: true}
+	for i := range 40 {
+		doc.Lines = append(doc.Lines, lyrics.Line{
+			Text:    fmt.Sprintf("歌詞の行 %d", i),
+			StartMS: float64((i*2 + 3) * 1000),
+			EndMS:   float64((i*2+3)*1000 + 1500),
+		})
+	}
+	provider := &fakeLyricsProvider{name: "niconico", doc: doc}
+	app := lyricsUIApp(t, provider)
+	app.player.PositionMS = 43000
+	app.player.DurationMS = 100000
+	tester := openLyricsUI(t, app)
+	tester.Advance(700 * time.Millisecond)
+	if app.lyricsScroll.Y <= 0 {
+		t.Fatalf("the line view did not scroll down to the playing line: %v", app.lyricsScroll.Y)
+	}
+
+	app.player.PositionMS = 0
+	tester.Frame()
+	tester.Advance(700 * time.Millisecond)
+	if app.lyricsDoc.LineAt(app.lyricsPosition()) != -1 || app.lyricsScroll.Y > 1 {
+		t.Fatalf("seeking before the first line did not return to the top: line=%d scroll=%v", app.lyricsDoc.LineAt(app.lyricsPosition()), app.lyricsScroll.Y)
 	}
 }
 

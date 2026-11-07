@@ -174,6 +174,10 @@ type nativeApp struct {
 	lyricsFollow          int
 	lyricsFollowVideo     string
 	lyricsToken           uint64
+	// lyricsSeekTargetMS keeps a clicked line visible through the seek's
+	// short audio lead, until the player reports reaching it.
+	lyricsSeekTargetMS float64
+	lyricsSeekPending  bool
 	// lyricsSync mirrors whether the card shows a timed document, for the
 	// position pull: it runs off the UI thread, so it cannot read the state
 	// above.
@@ -543,6 +547,10 @@ func (app *nativeApp) statusLine(c *ui.Context) {
 // sendPlayer hands one command to the playback engine; in tests, without an
 // engine, the command is only recorded, which is what the UI tests assert on.
 func (app *nativeApp) sendPlayer(command PlayerCommand) {
+	switch command.Action {
+	case "seek", "previous", "next", "select", "remove":
+		app.lyricsSeekPending = false
+	}
 	if app.playback != nil {
 		app.playback.handle(command)
 		return

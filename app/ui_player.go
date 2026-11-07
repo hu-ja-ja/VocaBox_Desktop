@@ -50,6 +50,10 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			// the bar's thin strip, so a drag that leaves it still commits.
 			_, _, held := seek.Dragged()
 			if !held && (app.seekHeld || seek.Changed()) {
+				// A paused player will not report this position until playback resumes.
+				if !app.player.Playing {
+					app.player.PositionMS = app.seekValue
+				}
 				app.sendPlayer(PlayerCommand{Action: "seek", PositionMS: app.seekValue})
 				app.seekSettling = true
 			}

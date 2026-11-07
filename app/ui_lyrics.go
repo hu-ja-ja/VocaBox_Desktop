@@ -248,8 +248,9 @@ func wordsText(words []lyrics.Word) string {
 // glides to the current line as the track moves on.
 func (app *nativeApp) lyricsLines(c *ui.Context, doc *lyrics.Doc) {
 	current := doc.LineAt(app.lyricsPosition())
+	scrollTo := max(current, 0)
 	track := app.lyricsTrack()
-	follow := current >= 0 && (app.lyricsFollow != current || app.lyricsFollowVideo != track)
+	follow := app.lyricsFollow != current || app.lyricsFollowVideo != track
 	if follow {
 		app.lyricsFollow, app.lyricsFollowVideo = current, track
 	}
@@ -264,7 +265,7 @@ func (app *nativeApp) lyricsLines(c *ui.Context, doc *lyrics.Doc) {
 				row := ui.Button(c, "").Label(line.Text).FillWidth().Padding(10, 16).
 					BorderWidth(0).Radius(8).Justify(ui.Start).AlignItems(ui.Start).
 					Disabled(!app.player.Ready)
-				if follow && i == current {
+				if follow && i == scrollTo {
 					row.ScrollIntoView(ui.ScrollIntoViewOptions{
 						Block: ui.ScrollCenter, Animation: &lyricsScrollAnimation,
 					})
@@ -318,9 +319,12 @@ func (app *nativeApp) seekLyrics(line lyrics.Line) {
 	if !app.player.Ready {
 		return
 	}
-	ms := max(0, line.StartMS+app.lyricsOffsetMS-lyricsSeekLeadMS)
-	app.seekValue, app.seekSettling = ms, true
+	position := max(0, line.StartMS+app.lyricsOffsetMS)
+	ms := max(0, position-lyricsSeekLeadMS)
+	app.player.PositionMS = position
+	app.seekValue, app.seekSettling = position, true
 	app.sendPlayer(PlayerCommand{Action: "seek", PositionMS: ms})
+	app.lyricsSeekTargetMS, app.lyricsSeekPending = position, true
 }
 
 // lyricsOffsetStepMS is one press of the offset field's arrows or keys, and

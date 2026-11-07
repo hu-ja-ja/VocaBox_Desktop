@@ -516,7 +516,15 @@ func (p *playback) applyEvent(event helperEvent) {
 		p.bandFailed(event)
 	case "position":
 		if p.app.player.Ready {
-			p.app.player.PositionMS = event.MS
+			position := event.MS
+			if p.app.lyricsSeekPending {
+				if position < p.app.lyricsSeekTargetMS {
+					position = p.app.lyricsSeekTargetMS
+				} else {
+					p.app.lyricsSeekPending = false
+				}
+			}
+			p.app.player.PositionMS = position
 		}
 	}
 }
