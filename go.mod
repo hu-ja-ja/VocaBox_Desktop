@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/Eyevinn/hls-m3u8 v0.6.5
-	github.com/egoist/mygo v0.7.4
+	github.com/egoist/mygo v0.8.3
 	golang.org/x/image v0.47.0
 	golang.org/x/text v0.43.0
 )

@@ -384,9 +384,14 @@ func TestNativeUITrackClickPlaysIt(t *testing.T) {
 	if err := tester.Click("作業用クリック"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tester.Click("サンプル曲"); err != nil {
-		t.Fatal(err)
+	// The list row and its nested button share this accessible label, so click
+	// the row's center rather than asking the tester to resolve the duplicate.
+	track, ok := tester.Find("サンプル曲")
+	if !ok {
+		t.Fatal("the track row is not shown")
 	}
+	tester.ClickAt(track.X+track.W/2, track.Y+track.H/2)
+	tester.Frame()
 	selected, ok := lastCommand(app.sent, "select")
 	if !ok || selected.WatchID != "sm9" {
 		t.Fatalf("clicking a track did not play it: %#v", app.sent)
