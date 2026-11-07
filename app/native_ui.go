@@ -178,13 +178,11 @@ type nativeApp struct {
 	// position pull: it runs off the UI thread, so it cannot read the state
 	// above.
 	lyricsSync atomic.Bool
-	// lyricsScroll is the line view's place, and lyricsLineCenter where
-	// the last frame laid each line out, as its center in the scroll's
-	// content: the follow glides a line to the middle of lyricsViewH.
-	lyricsScroll     ui.ScrollState
-	lyricsLineCenter []float32
-	lyricsViewY      float32
-	lyricsViewH      float32
+	// lyricsScroll keeps the lyrics view's place; the viewport bounds are
+	// retained to verify the active line stays centered in UI tests.
+	lyricsScroll ui.ScrollState
+	lyricsViewY  float32
+	lyricsViewH  float32
 	// queueMenuRow is the queue row whose menu is open, -1 for none, and
 	// queueMenuOpen drives the popover until it is dismissed.
 	queueMenuRow  int

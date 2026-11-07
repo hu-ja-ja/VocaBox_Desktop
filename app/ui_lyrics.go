@@ -247,17 +247,13 @@ func wordsText(words []lyrics.Word) string {
 // document keeps the whole line white rather than guessing a split. The list
 // glides to the current line as the track moves on.
 func (app *nativeApp) lyricsLines(c *ui.Context, doc *lyrics.Doc) {
-	// The rows' bounds and the viewport are the frame before's, drawn with
-	// this offset: measure against it, not the offset this frame's glide sets.
-	wasY := app.lyricsScroll.Y
 	current := doc.LineAt(app.lyricsPosition())
-	app.followLyrics(current)
-	if cap(app.lyricsLineCenter) < len(doc.Lines) {
-		app.lyricsLineCenter = make([]float32, len(doc.Lines))
+	track := app.lyricsTrack()
+	follow := current >= 0 && (app.lyricsFollow != current || app.lyricsFollowVideo != track)
+	if follow {
+		app.lyricsFollow, app.lyricsFollowVideo = current, track
 	}
-	app.lyricsLineCenter = app.lyricsLineCenter[:len(doc.Lines)]
 	scroll := ui.Scroll(c).TrackScroll(&app.lyricsScroll).Grow(1)
-	// The viewport's place is the frame before's, as the rows' are.
 	if bounds := scroll.Bounds(); bounds.H > 0 {
 		app.lyricsViewY, app.lyricsViewH = bounds.Y, bounds.H
 	}
@@ -268,6 +264,11 @@ func (app *nativeApp) lyricsLines(c *ui.Context, doc *lyrics.Doc) {
 				row := ui.Button(c, "").Label(line.Text).FillWidth().Padding(10, 16).
 					BorderWidth(0).Radius(8).Justify(ui.Start).AlignItems(ui.Start).
 					Disabled(!app.player.Ready)
+				if follow && i == current {
+					row.ScrollIntoView(ui.ScrollIntoViewOptions{
+						Block: ui.ScrollCenter, Animation: &lyricsScrollAnimation,
+					})
+				}
 				if row.Hovered() {
 					row.Background(app.theme.SurfaceHover)
 				} else {
@@ -291,21 +292,9 @@ func (app *nativeApp) lyricsLines(c *ui.Context, doc *lyrics.Doc) {
 				if row.Clicked() {
 					app.seekLyrics(line)
 				}
-				app.measureLyricsLine(i, row, wasY)
 			}
 		})
 	})
-}
-
-// measureLyricsLine records where a line sits in the scroll's content, so the
-// follow can glide to it before the next frame lays the list out again. scrollY
-// is the offset the bounds were drawn with.
-func (app *nativeApp) measureLyricsLine(i int, row ui.Element, scrollY float32) {
-	bounds := row.Bounds()
-	if bounds.H == 0 || app.lyricsViewH == 0 {
-		return
-	}
-	app.lyricsLineCenter[i] = bounds.Y + bounds.H/2 - app.lyricsViewY + scrollY
 }
 
 // lyricsWhole is the whole view: every line as a plain white sheet, with the
@@ -332,28 +321,6 @@ func (app *nativeApp) seekLyrics(line lyrics.Line) {
 	ms := max(0, line.StartMS+app.lyricsOffsetMS-lyricsSeekLeadMS)
 	app.seekValue, app.seekSettling = ms, true
 	app.sendPlayer(PlayerCommand{Action: "seek", PositionMS: ms})
-}
-
-// followLyrics glides the line playing to the middle of the line view, once
-// per line, so a list the user is reading stays where they left it until the
-// next line takes over.
-func (app *nativeApp) followLyrics(current int) {
-	if current < 0 || current >= len(app.lyricsLineCenter) || app.lyricsViewH <= 0 {
-		return
-	}
-	track := app.lyricsTrack()
-	if app.lyricsFollow == current && app.lyricsFollowVideo == track {
-		return
-	}
-	center := app.lyricsLineCenter[current]
-	if center <= 0 {
-		// The line was not laid out yet: the next frame knows where it is.
-		return
-	}
-	app.lyricsFollow, app.lyricsFollowVideo = current, track
-	target := center - app.lyricsViewH/2
-	target = max(0, min(target, app.lyricsScroll.MaxY))
-	app.lyricsScroll.ScrollTo(0, target, lyricsScrollAnimation)
 }
 
 // lyricsOffsetStepMS is one press of the offset field's arrows or keys, and
@@ -491,9 +458,8 @@ func (app *nativeApp) beginLyricsSource(track, source string) {
 		app.lyricsTab = 0
 	}
 	app.lyricsFollow, app.lyricsFollowVideo = -1, ""
-	// A new document starts at its top, with no line measured yet.
+	// A new document starts at its top; its active line reveals itself.
 	app.lyricsScroll = ui.ScrollState{}
-	app.lyricsLineCenter = nil
 	app.lyricsToken++
 	token := app.lyricsToken
 	query := lyrics.Query{

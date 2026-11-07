@@ -331,15 +331,15 @@ func TestNativeUILyricsGlidesToTheLine(t *testing.T) {
 	app := lyricsUIApp(t, provider)
 	app.player.PositionMS = 0
 	tester := openLyricsUI(t, app)
-	// Lay the lines out, measure them, and let the opening settle.
+	// Let the initial reveal settle.
 	tester.Frame()
 	tester.Advance(500 * time.Millisecond)
-	if app.lyricsScroll.Scrolling() {
+	if tester.FramePending() {
 		t.Fatalf("the line view did not settle at the start")
 	}
 	app.player.PositionMS = 20 * 2000
 	tester.Frame()
-	if !app.lyricsScroll.Scrolling() {
+	if !tester.FramePending() {
 		t.Fatalf("the line view jumped to the line playing instead of gliding")
 	}
 	before := app.lyricsScroll.Y
@@ -348,15 +348,13 @@ func TestNativeUILyricsGlidesToTheLine(t *testing.T) {
 		t.Fatalf("the glide did not move: %v then %v", before, app.lyricsScroll.Y)
 	}
 	tester.Advance(1000 * time.Millisecond)
-	if app.lyricsScroll.Scrolling() {
+	if tester.FramePending() {
 		t.Fatalf("the glide did not settle")
 	}
 }
 
 // TestNativeUILyricsCentersTheLineAfterAQuickChange checks a line that takes
-// over while the list is still gliding lands in the middle: the centers are
-// measured against the offset their bounds were drawn with, not the one the
-// glide just set.
+// over while the list is still gliding retargets the reveal to its center.
 func TestNativeUILyricsCentersTheLineAfterAQuickChange(t *testing.T) {
 	doc := lyrics.Doc{Timed: true}
 	for i := range 40 {
@@ -380,7 +378,7 @@ func TestNativeUILyricsCentersTheLineAfterAQuickChange(t *testing.T) {
 	tester.Frame()
 	tester.Advance(900 * time.Millisecond)
 	tester.Frame()
-	if app.lyricsScroll.Scrolling() {
+	if tester.FramePending() {
 		t.Fatalf("the list did not settle")
 	}
 	bounds, ok := tester.Find(doc.Lines[21].Text)
@@ -391,6 +389,42 @@ func TestNativeUILyricsCentersTheLineAfterAQuickChange(t *testing.T) {
 	want := app.lyricsViewY + app.lyricsViewH/2
 	if diff := center - want; diff < -2 || diff > 2 {
 		t.Fatalf("the current line is %v DIPs from the middle", diff)
+	}
+}
+
+func TestNativeUILyricsManualScrollWaitsForNextLine(t *testing.T) {
+	doc := lyrics.Doc{Timed: true}
+	for i := range 40 {
+		doc.Lines = append(doc.Lines, lyrics.Line{
+			Text:    fmt.Sprintf("歌詞の行 %d", i),
+			StartMS: float64(i * 2000),
+			EndMS:   float64(i*2000 + 1500),
+		})
+	}
+	provider := &fakeLyricsProvider{name: "niconico", doc: doc}
+	app := lyricsUIApp(t, provider)
+	app.player.PositionMS = 0
+	tester := openLyricsUI(t, app)
+	tester.Advance(500 * time.Millisecond)
+
+	tester.Scroll(800, app.lyricsViewY+app.lyricsViewH/2, 0, 400)
+	manualY := app.lyricsScroll.Y
+	if manualY <= 0 {
+		t.Fatal("the lyrics did not scroll manually")
+	}
+	tester.Frame()
+	if app.lyricsScroll.Y != manualY {
+		t.Fatalf("the current line pulled the user's scroll from %v to %v", manualY, app.lyricsScroll.Y)
+	}
+
+	app.player.PositionMS = 2000
+	tester.Frame()
+	if !tester.FramePending() {
+		t.Fatal("the next line did not resume following")
+	}
+	tester.Advance(130 * time.Millisecond)
+	if app.lyricsScroll.Y == manualY {
+		t.Fatal("following the next line did not move the scroll")
 	}
 }
 
