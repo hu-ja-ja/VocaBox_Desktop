@@ -1,5 +1,9 @@
 # VocaBox
 
+[![Latest release](https://img.shields.io/github/v/release/hu-ja-ja/VocaBox_Desktop?style=flat-square)](https://github.com/hu-ja-ja/VocaBox_Desktop/releases/latest)
+[![License](https://img.shields.io/github/license/hu-ja-ja/VocaBox_Desktop?style=flat-square)](LICENSE)
+[![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/vocabox)
+
 ニコニコ動画のマイリストを音声で楽しむ、Windows向けプレーヤーです。動画映像は表示せず、曲を選んで再生できます。
 
 [ダウンロード](https://github.com/hu-ja-ja/VocaBox_Desktop/releases) ・ [ソースコード](https://github.com/hu-ja-ja/VocaBox_Desktop)
