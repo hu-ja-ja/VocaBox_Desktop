@@ -173,20 +173,24 @@ type nativeApp struct {
 	lyricsLoginWhenFailed bool
 	lyricsFollow          int
 	lyricsFollowVideo     string
-	lyricsToken           uint64
+	// lyricsReveal says the next follow places the line playing at once
+	// rather than gliding: the card opening, a new track, or a resize.
+	lyricsReveal bool
+	lyricsToken  uint64
 	// lyricsSeekTargetMS keeps a clicked line visible through the seek's
 	// short audio lead, until the player reports reaching it.
 	lyricsSeekTargetMS float64
 	lyricsSeekPending  bool
-	// lyricsSync mirrors whether the card shows a timed document, for the
-	// position pull: it runs off the UI thread, so it cannot read the state
+	// lyricsSync mirrors whether the open queue shows a timed lyrics card, for
+	// the position pull: it runs off the UI thread, so it cannot read the state
 	// above.
 	lyricsSync atomic.Bool
-	// lyricsScroll keeps the lyrics view's place; the viewport bounds are
-	// retained to verify the active line stays centered in UI tests.
+	// lyricsScroll keeps the lyrics view's place; the viewport bounds place
+	// the active line and let UI tests verify it stays centered.
 	lyricsScroll ui.ScrollState
 	lyricsViewY  float32
 	lyricsViewH  float32
+	lyricsViewW  float32
 	// queueMenuRow is the queue row whose menu is open, -1 for none, and
 	// queueMenuOpen drives the popover until it is dismissed.
 	queueMenuRow  int
@@ -431,13 +435,18 @@ func (app *nativeApp) view(c *ui.Context) {
 	c.SetTheme(app.theme)
 	// The position pull runs off this thread: tell it whether a timed
 	// document follows the track, so it asks at the fast rate only then.
-	app.lyricsSync.Store(app.lyricsOpen && app.lyricsDoc != nil && app.lyricsDoc.Timed)
+	app.lyricsSync.Store(app.queueOpen && app.lyricsOpen && app.lyricsDoc != nil && app.lyricsDoc.Timed)
 	// The queue takes the window: opening it folds the sidebar away, and
 	// closing it brings back the sidebar the queue was opened in.
 	if app.queueOpen != app.queueWasOpen {
 		if app.queueOpen {
 			app.sidebarBeforeQueue = app.sidebarOpen
 			app.sidebarOpen = false
+			if app.lyricsOpen {
+				// The card comes back with the queue, whichever way it
+				// opened: bring the line playing to the middle.
+				app.revealLyrics()
+			}
 		} else {
 			app.sidebarOpen = app.sidebarBeforeQueue
 		}
@@ -493,13 +502,10 @@ func (app *nativeApp) view(c *ui.Context) {
 	ui.Overlay(c, func() {})
 }
 
-// toggleQueue opens or closes the queue sheet. Closing it also closes the
-// lyrics beside it: the two are one screen.
+// toggleQueue opens or closes the queue sheet. The view asks for the line
+// playing to come back to the middle when the card comes with it.
 func (app *nativeApp) toggleQueue() {
 	app.queueOpen = !app.queueOpen
-	if !app.queueOpen {
-		app.lyricsOpen = false
-	}
 }
 
 // navigate goes to a destination chosen by the logo, the rail's home or a

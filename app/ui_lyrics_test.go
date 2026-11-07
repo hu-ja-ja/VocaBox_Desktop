@@ -48,6 +48,20 @@ func timedLyricsDoc() lyrics.Doc {
 	}}
 }
 
+// longTimedLyricsDoc is a timed document long enough to scroll well past the
+// first lines.
+func longTimedLyricsDoc() lyrics.Doc {
+	doc := lyrics.Doc{Timed: true}
+	for i := range 40 {
+		doc.Lines = append(doc.Lines, lyrics.Line{
+			Text:    fmt.Sprintf("歌詞の行 %d", i),
+			StartMS: float64(i * 2000),
+			EndMS:   float64(i*2000 + 1500),
+		})
+	}
+	return doc
+}
+
 // lyricsUIApp is an app with a track at 6.5 seconds and a lyrics service
 // over the test's providers, in a throwaway config directory.
 func lyricsUIApp(t *testing.T, providers ...*fakeLyricsProvider) *nativeApp {
@@ -79,6 +93,20 @@ func openLyricsUI(t *testing.T, app *nativeApp) *ui.Tester {
 	})
 	tester.Frame()
 	return tester
+}
+
+// assertLineCentered checks a lyrics line sits in the middle of the line view.
+func assertLineCentered(t *testing.T, tester *ui.Tester, app *nativeApp, line, when string) {
+	t.Helper()
+	bounds, ok := tester.Find(line)
+	if !ok {
+		t.Fatalf("%s: %q is not shown: %q", when, line, tester.Texts())
+	}
+	center := bounds.Y + bounds.H/2
+	want := app.lyricsViewY + app.lyricsViewH/2
+	if diff := center - want; diff < -2 || diff > 2 {
+		t.Fatalf("%s: %q is %v DIPs from the middle", when, line, diff)
+	}
 }
 
 func TestNativeUILyricsFloatsOverTheQueue(t *testing.T) {
@@ -119,6 +147,250 @@ func TestNativeUILyricsFloatsOverTheQueue(t *testing.T) {
 	}
 }
 
+func TestNativeUILyricsStateSurvivesQueueToggle(t *testing.T) {
+	provider := &fakeLyricsProvider{name: "niconico", doc: timedLyricsDoc()}
+	app := lyricsUIApp(t, provider)
+	tester := openLyricsUI(t, app)
+
+	app.toggleQueue()
+	tester.Frame()
+	tester.Advance(600 * time.Millisecond)
+	if app.queueOpen || !app.lyricsOpen {
+		t.Fatalf("closing the queue changed the lyrics-card state: queue=%v lyrics=%v", app.queueOpen, app.lyricsOpen)
+	}
+	if tester.HasText("二行目") {
+		t.Fatalf("the lyrics card remained visible after the queue closed: %q", tester.Texts())
+	}
+	if app.lyricsSync.Load() {
+		t.Fatal("hidden timed lyrics kept the fast position pull enabled")
+	}
+
+	app.toggleQueue()
+	tester.Frame()
+	tester.Advance(600 * time.Millisecond)
+	if !app.queueOpen || !app.lyricsOpen || !tester.HasText(locales.LyricsTitle()) || !tester.HasText("二行目") {
+		t.Fatalf("reopening the queue did not restore the lyrics card: queue=%v lyrics=%v texts=%q", app.queueOpen, app.lyricsOpen, tester.Texts())
+	}
+	if provider.calls != 1 {
+		t.Fatalf("reopening the card fetched lyrics again: %d calls", provider.calls)
+	}
+	if !app.lyricsSync.Load() {
+		t.Fatal("visible timed lyrics did not restore the fast position pull")
+	}
+
+	if err := tester.Click(locales.LyricsClose()); err != nil {
+		t.Fatal(err)
+	}
+	app.toggleQueue()
+	tester.Frame()
+	tester.Advance(600 * time.Millisecond)
+	if app.lyricsOpen {
+		t.Fatal("closing the queue reopened a lyrics card the user had closed")
+	}
+	app.toggleQueue()
+	tester.Frame()
+	tester.Advance(600 * time.Millisecond)
+	if tester.HasText("二行目") {
+		t.Fatal("reopening the queue showed a lyrics card the user had closed")
+	}
+}
+
+// TestNativeUILyricsButtonShowsAHiddenCard checks the player bar reads the
+// card as closed while the queue hides it, and one click brings both back.
+func TestNativeUILyricsButtonShowsAHiddenCard(t *testing.T) {
+	provider := &fakeLyricsProvider{name: "niconico", doc: timedLyricsDoc()}
+	app := lyricsUIApp(t, provider)
+	tester := openLyricsUI(t, app)
+
+	app.toggleQueue()
+	tester.Frame()
+	tester.Advance(600 * time.Millisecond)
+	if !tester.HasText(locales.LyricsOpen()) || tester.HasText(locales.LyricsClose()) {
+		t.Fatalf("the hidden card still read as shown: %q", tester.Texts())
+	}
+
+	if err := tester.Click(locales.LyricsOpen()); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	tester.Advance(600 * time.Millisecond)
+	if !app.queueOpen || !app.lyricsOpen || !tester.HasText("二行目") {
+		t.Fatalf("the button did not bring the card back: queue=%v lyrics=%v texts=%q", app.queueOpen, app.lyricsOpen, tester.Texts())
+	}
+}
+
+// TestNativeUILyricsCentersTheCurrentLineWhenTheQueueReopens checks that
+// opening the queue brings the line playing back to the middle at once,
+// rather than waiting for the next line to move the view.
+func TestNativeUILyricsCentersTheCurrentLineWhenTheQueueReopens(t *testing.T) {
+	doc := longTimedLyricsDoc()
+	for _, tc := range []struct {
+		name           string
+		playing, ready bool
+	}{
+		{"playing", true, true},
+		{"paused", false, true},
+		{"stopped", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &fakeLyricsProvider{name: "niconico", doc: doc}
+			app := lyricsUIApp(t, provider)
+			app.player.PositionMS = 20 * 2000
+			app.player.Playing, app.player.Ready = tc.playing, tc.ready
+			tester := openLyricsUI(t, app)
+			tester.Advance(700 * time.Millisecond)
+			// The view can lose its place while the queue is closed, as when
+			// the container is unmounted; the line playing still has to come
+			// back to the middle when the queue opens.
+			tester.Scroll(800, app.lyricsViewY+app.lyricsViewH/2, 0, 10000)
+			tester.Frame()
+			if app.lyricsScroll.Y <= 0 {
+				t.Fatalf("the view did not scroll down: %v", app.lyricsScroll.Y)
+			}
+
+			app.toggleQueue()
+			tester.Frame()
+			tester.Advance(600 * time.Millisecond)
+			app.toggleQueue()
+			tester.Frame()
+			tester.Advance(700 * time.Millisecond)
+
+			assertLineCentered(t, tester, app, doc.Lines[20].Text, "after reopening")
+		})
+	}
+}
+
+// TestNativeUILyricsCentersTheLastLine checks the half-viewport padding below
+// the last line lets it reach the middle too.
+func TestNativeUILyricsCentersTheLastLine(t *testing.T) {
+	doc := longTimedLyricsDoc()
+	provider := &fakeLyricsProvider{name: "niconico", doc: doc}
+	app := lyricsUIApp(t, provider)
+	app.player.PositionMS = 39*2000 + 100
+	tester := openLyricsUI(t, app)
+	tester.Advance(700 * time.Millisecond)
+
+	assertLineCentered(t, tester, app, doc.Lines[39].Text, "the last line")
+}
+
+// TestNativeUILyricsRecentersAfterResize checks the absolute middle moves
+// with the viewport: a resize puts the line playing there again at once.
+func TestNativeUILyricsRecentersAfterResize(t *testing.T) {
+	doc := longTimedLyricsDoc()
+	provider := &fakeLyricsProvider{name: "niconico", doc: doc}
+	app := lyricsUIApp(t, provider)
+	app.player.PositionMS = 20 * 2000
+	tester := openLyricsUI(t, app)
+	tester.Advance(700 * time.Millisecond)
+
+	tester.SetSize(900, 600)
+	tester.Frame()
+	tester.Frame()
+	assertLineCentered(t, tester, app, doc.Lines[20].Text, "after a resize")
+}
+
+// TestNativeUILyricsRecentersAfterSidebarResize checks a width change that
+// rewraps the lines above the current one: the line playing still returns to
+// the middle.
+func TestNativeUILyricsRecentersAfterSidebarResize(t *testing.T) {
+	doc := lyrics.Doc{Timed: true}
+	for i := range 20 {
+		doc.Lines = append(doc.Lines, lyrics.Line{
+			Text:    fmt.Sprintf("とても長い歌詞の行 %d です。幅が変わると折り返し方が変わり、上の行の高さも変わります。", i),
+			StartMS: float64(i * 2000),
+			EndMS:   float64(i*2000 + 1500),
+		})
+	}
+	provider := &fakeLyricsProvider{name: "niconico", doc: doc}
+	app := lyricsUIApp(t, provider)
+	app.player.PositionMS = 10 * 2000
+	tester := openLyricsUI(t, app)
+	tester.SetSize(760, 560)
+	tester.Frame()
+	tester.Advance(700 * time.Millisecond)
+	assertLineCentered(t, tester, app, doc.Lines[10].Text, "before the sidebar")
+
+	if err := tester.Click("サイドバーを開く"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Advance(sidebarShift.Duration + 20*time.Millisecond)
+	tester.Frame()
+	assertLineCentered(t, tester, app, doc.Lines[10].Text, "after the sidebar")
+}
+
+// TestNativeUILyricsPlacesTheCurrentLineAtOnceOnReopen checks reopening the
+// queue does not glide from the old scroll position: the line playing is in
+// the middle by the first frame.
+func TestNativeUILyricsPlacesTheCurrentLineAtOnceOnReopen(t *testing.T) {
+	provider := &fakeLyricsProvider{name: "niconico", doc: longTimedLyricsDoc()}
+	app := lyricsUIApp(t, provider)
+	app.player.PositionMS = 20 * 2000
+	tester := openLyricsUI(t, app)
+	tester.Advance(700 * time.Millisecond)
+	tester.Scroll(800, app.lyricsViewY+app.lyricsViewH/2, 0, 10000)
+	tester.Frame()
+	before := app.lyricsScroll.Y
+	if before <= 0 {
+		t.Fatalf("the view did not scroll down: %v", before)
+	}
+
+	app.toggleQueue()
+	tester.Frame()
+	tester.Advance(600 * time.Millisecond)
+	app.toggleQueue()
+	// Frames without time: an animated reveal would still be where it was.
+	tester.Frame()
+	tester.Frame()
+	instant := app.lyricsScroll.Y
+	tester.Advance(700 * time.Millisecond)
+	settled := app.lyricsScroll.Y
+	if diff := instant - settled; diff < -0.5 || diff > 0.5 {
+		t.Fatalf("reopening glided from %v to %v; want the line placed at %v at once", instant, settled, settled)
+	}
+	if diff := instant - before; diff > -0.5 && diff < 0.5 {
+		t.Fatalf("reopening left the scroll at the old place %v; want %v at once", before, instant)
+	}
+}
+
+// TestNativeUILyricsCentersWhenATrackReopensTheQueue checks the other way
+// back to the queue: a track clicked on the page opens it with the card the
+// user left open, and the line playing still comes to the middle.
+func TestNativeUILyricsCentersWhenATrackReopensTheQueue(t *testing.T) {
+	doc := longTimedLyricsDoc()
+	provider := &fakeLyricsProvider{name: "niconico", doc: doc}
+	app := lyricsUIApp(t, provider)
+	app.player.PositionMS = 20 * 2000
+	app.player.Playing, app.player.Ready = false, false
+	app.page = &MylistPage{ID: "111", Name: "リスト", TotalItemCount: 1, Items: []MylistItem{
+		{WatchID: "sm1", Title: "リストの曲", Available: true, Duration: 120},
+	}}
+	app.router.Push(mylistPath("111"))
+
+	tester := openLyricsUI(t, app)
+	tester.Advance(700 * time.Millisecond)
+	tester.Scroll(800, app.lyricsViewY+app.lyricsViewH/2, 0, 10000)
+	tester.Frame()
+	if app.lyricsScroll.Y <= 0 {
+		t.Fatalf("the view did not scroll down: %v", app.lyricsScroll.Y)
+	}
+
+	app.toggleQueue()
+	tester.Frame()
+	tester.Advance(600 * time.Millisecond)
+	row, ok := tester.Find("リストの曲")
+	if !ok {
+		t.Fatalf("the page track is not shown: %q", tester.Texts())
+	}
+	tester.ClickAt(row.X+row.W/2, row.Y+row.H/2)
+	tester.Frame()
+	if !app.queueOpen || !app.lyricsOpen {
+		t.Fatalf("clicking a track did not reopen the queue with the card: queue=%v lyrics=%v", app.queueOpen, app.lyricsOpen)
+	}
+	tester.Advance(700 * time.Millisecond)
+
+	assertLineCentered(t, tester, app, doc.Lines[20].Text, "after the track reopened the queue")
+}
+
 // TestNativeUILyricsFollowsTheSidebar checks the card keeps step with the
 // sidebar's fold: once the fold is over, the card is already where it ends,
 // rather than sliding on for a while of its own.
@@ -153,14 +425,7 @@ func TestNativeUILyricsFollowsTheSidebar(t *testing.T) {
 // takes the line list like every other timed document: its current line
 // colors its words, and lines far from it stay in the list.
 func TestNativeUILyricsWordTimingUsesTheLineList(t *testing.T) {
-	doc := lyrics.Doc{Timed: true}
-	for i := range 40 {
-		doc.Lines = append(doc.Lines, lyrics.Line{
-			Text:    fmt.Sprintf("歌詞の行 %d", i),
-			StartMS: float64(i * 2000),
-			EndMS:   float64(i*2000 + 1500),
-		})
-	}
+	doc := longTimedLyricsDoc()
 	doc.Lines[3].Words = []lyrics.Word{
 		{Text: "歌詞", StartMS: 6000, EndMS: 7000},
 		{Text: "の行 3", StartMS: 7000, EndMS: 7500},
@@ -358,15 +623,7 @@ func TestNativeUILyricsCardFitsTheMinimumWidth(t *testing.T) {
 // TestNativeUILyricsGlidesToTheLine checks the line view eases to the line
 // playing rather than jumping to it.
 func TestNativeUILyricsGlidesToTheLine(t *testing.T) {
-	doc := lyrics.Doc{Timed: true}
-	for i := range 40 {
-		doc.Lines = append(doc.Lines, lyrics.Line{
-			Text:    fmt.Sprintf("歌詞の行 %d", i),
-			StartMS: float64(i * 2000),
-			EndMS:   float64(i*2000 + 1500),
-		})
-	}
-	provider := &fakeLyricsProvider{name: "niconico", doc: doc}
+	provider := &fakeLyricsProvider{name: "niconico", doc: longTimedLyricsDoc()}
 	app := lyricsUIApp(t, provider)
 	app.player.PositionMS = 0
 	tester := openLyricsUI(t, app)
@@ -392,7 +649,10 @@ func TestNativeUILyricsGlidesToTheLine(t *testing.T) {
 	}
 }
 
-func TestNativeUILyricsScrollsToTopBeforeFirstLine(t *testing.T) {
+// TestNativeUILyricsCentersTheFirstLineBeforeItStarts checks the view can put
+// the first line in the middle too: the half-viewport padding above it gives
+// the scroll the room the content's top would otherwise take away.
+func TestNativeUILyricsCentersTheFirstLineBeforeItStarts(t *testing.T) {
 	doc := lyrics.Doc{Timed: true}
 	for i := range 40 {
 		doc.Lines = append(doc.Lines, lyrics.Line{
@@ -414,22 +674,16 @@ func TestNativeUILyricsScrollsToTopBeforeFirstLine(t *testing.T) {
 	app.player.PositionMS = 0
 	tester.Frame()
 	tester.Advance(700 * time.Millisecond)
-	if app.lyricsDoc.LineAt(app.lyricsPosition()) != -1 || app.lyricsScroll.Y > 1 {
-		t.Fatalf("seeking before the first line did not return to the top: line=%d scroll=%v", app.lyricsDoc.LineAt(app.lyricsPosition()), app.lyricsScroll.Y)
+	if app.lyricsDoc.LineAt(app.lyricsPosition()) != -1 {
+		t.Fatalf("the position before the first line is line %d", app.lyricsDoc.LineAt(app.lyricsPosition()))
 	}
+	assertLineCentered(t, tester, app, doc.Lines[0].Text, "the first line")
 }
 
 // TestNativeUILyricsCentersTheLineAfterAQuickChange checks a line that takes
 // over while the list is still gliding retargets the reveal to its center.
 func TestNativeUILyricsCentersTheLineAfterAQuickChange(t *testing.T) {
-	doc := lyrics.Doc{Timed: true}
-	for i := range 40 {
-		doc.Lines = append(doc.Lines, lyrics.Line{
-			Text:    fmt.Sprintf("歌詞の行 %d", i),
-			StartMS: float64(i * 2000),
-			EndMS:   float64(i*2000 + 1500),
-		})
-	}
+	doc := longTimedLyricsDoc()
 	provider := &fakeLyricsProvider{name: "niconico", doc: doc}
 	app := lyricsUIApp(t, provider)
 	app.player.PositionMS = 0
@@ -447,27 +701,11 @@ func TestNativeUILyricsCentersTheLineAfterAQuickChange(t *testing.T) {
 	if tester.FramePending() {
 		t.Fatalf("the list did not settle")
 	}
-	bounds, ok := tester.Find(doc.Lines[21].Text)
-	if !ok {
-		t.Fatalf("the current line is not shown: %q", tester.Texts())
-	}
-	center := bounds.Y + bounds.H/2
-	want := app.lyricsViewY + app.lyricsViewH/2
-	if diff := center - want; diff < -2 || diff > 2 {
-		t.Fatalf("the current line is %v DIPs from the middle", diff)
-	}
+	assertLineCentered(t, tester, app, doc.Lines[21].Text, "after a quick change")
 }
 
 func TestNativeUILyricsManualScrollWaitsForNextLine(t *testing.T) {
-	doc := lyrics.Doc{Timed: true}
-	for i := range 40 {
-		doc.Lines = append(doc.Lines, lyrics.Line{
-			Text:    fmt.Sprintf("歌詞の行 %d", i),
-			StartMS: float64(i * 2000),
-			EndMS:   float64(i*2000 + 1500),
-		})
-	}
-	provider := &fakeLyricsProvider{name: "niconico", doc: doc}
+	provider := &fakeLyricsProvider{name: "niconico", doc: longTimedLyricsDoc()}
 	app := lyricsUIApp(t, provider)
 	app.player.PositionMS = 0
 	tester := openLyricsUI(t, app)

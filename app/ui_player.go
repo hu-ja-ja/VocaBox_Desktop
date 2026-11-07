@@ -164,13 +164,16 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 					app.volumeHeld = held
 				})
 
+				// The card shows with the queue, so the button reads the two
+				// together: a card the closed queue hides is not "shown".
+				lyricsShown := app.lyricsOpen && app.queueOpen
 				lyricsLabel := locales.LyricsOpen()
-				if app.lyricsOpen {
+				if lyricsShown {
 					lyricsLabel = locales.LyricsClose()
 				}
 				lyrics := ui.Button(c, "").Label(lyricsLabel).Tooltip(lyricsLabel).Padding(6, 9).
 					BorderWidth(0).Disabled(app.player.WatchID == "")
-				if app.lyricsOpen {
+				if lyricsShown {
 					lyrics.Background(app.theme.SurfacePressed)
 				}
 				lyrics.Children(func() {

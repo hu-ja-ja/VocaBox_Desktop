@@ -13,9 +13,8 @@ import (
 )
 
 // lyricsScrollAnimation is the glide of the line view to the line playing: a
-// spring keeps its velocity when the next line arrives before it settles, and
-// settles without overshooting the line it arrives at.
-var lyricsScrollAnimation = ui.Animation{Spring: ui.SpringOptions{Duration: 320 * time.Millisecond}}
+// fixed 320 ms ease-out, so every line arrives in the same time and stops on it.
+var lyricsScrollAnimation = ui.Animation{Duration: 320 * time.Millisecond, Ease: ui.EaseOut}
 
 // lyricsFirstLineLeadMS is how far the official data's first line starts
 // after its vocal. The lines after it are timed to the vocal, so only the
@@ -245,30 +244,50 @@ func wordsText(words []lyrics.Word) string {
 // far white and the current one bold, the rest faint. The current line colors
 // its words to the position when the source timed them; a line-timed
 // document keeps the whole line white rather than guessing a split. The list
-// glides to the current line as the track moves on.
+// puts the current line in the middle: at once when the card opens, a new
+// track arrives, or the view resizes, and gliding there as the track moves on.
+// Half a viewport above and below lets the first and last lines reach the
+// middle too.
 func (app *nativeApp) lyricsLines(c *ui.Context, doc *lyrics.Doc) {
+	scroll := ui.Scroll(c).TrackScroll(&app.lyricsScroll).Grow(1)
+	// The viewport's bounds are known from the frame before: when they
+	// change, the middle moved, or the lines above rewrapped, so the line
+	// playing has to be placed there again.
+	if bounds := scroll.Bounds(); bounds.H > 0 {
+		if bounds.H != app.lyricsViewH || bounds.W != app.lyricsViewW {
+			app.revealLyrics()
+		}
+		app.lyricsViewY, app.lyricsViewH, app.lyricsViewW = bounds.Y, bounds.H, bounds.W
+	}
 	current := doc.LineAt(app.lyricsPosition())
 	scrollTo := max(current, 0)
 	track := app.lyricsTrack()
-	follow := app.lyricsFollow != current || app.lyricsFollowVideo != track
+	follow := app.lyricsReveal || app.lyricsFollow != current || app.lyricsFollowVideo != track
 	if follow {
 		app.lyricsFollow, app.lyricsFollowVideo = current, track
 	}
-	scroll := ui.Scroll(c).TrackScroll(&app.lyricsScroll).Grow(1)
-	if bounds := scroll.Bounds(); bounds.H > 0 {
-		app.lyricsViewY, app.lyricsViewH = bounds.Y, bounds.H
-	}
+	// ScrollIntoView takes the row's place in the content as its target,
+	// not a step from the current scroll: a stale position cannot pull the
+	// line off the middle.
+	pad := app.lyricsViewH / 2
 	scroll.Children(func() {
 		ui.Column(c).FillWidth().Children(func() {
+			ui.Box(c).FillWidth().Height(pad).Shrink(0)
 			for i := range doc.Lines {
 				line := doc.Lines[i]
 				row := ui.Button(c, "").Label(line.Text).FillWidth().Padding(10, 16).
 					BorderWidth(0).Radius(8).Justify(ui.Start).AlignItems(ui.Start).
 					Disabled(!app.player.Ready)
 				if follow && i == scrollTo {
-					row.ScrollIntoView(ui.ScrollIntoViewOptions{
-						Block: ui.ScrollCenter, Animation: &lyricsScrollAnimation,
-					})
+					options := ui.ScrollIntoViewOptions{Block: ui.ScrollCenter}
+					if app.lyricsReveal {
+						if app.lyricsViewH > 0 {
+							app.lyricsReveal = false
+						}
+					} else {
+						options.Animation = &lyricsScrollAnimation
+					}
+					row.ScrollIntoView(options)
 				}
 				if row.Hovered() {
 					row.Background(app.theme.SurfaceHover)
@@ -294,6 +313,7 @@ func (app *nativeApp) lyricsLines(c *ui.Context, doc *lyrics.Doc) {
 					app.seekLyrics(line)
 				}
 			}
+			ui.Box(c).FillWidth().Height(pad).Shrink(0)
 		})
 	})
 }
@@ -461,7 +481,7 @@ func (app *nativeApp) beginLyricsSource(track, source string) {
 	if source == "" {
 		app.lyricsTab = 0
 	}
-	app.lyricsFollow, app.lyricsFollowVideo = -1, ""
+	app.revealLyrics()
 	// A new document starts at its top; its active line reveals itself.
 	app.lyricsScroll = ui.ScrollState{}
 	app.lyricsToken++
@@ -535,11 +555,23 @@ func (app *nativeApp) retryLyrics() {
 	}
 }
 
-// toggleLyrics opens or closes the lyrics card. Opening it ensures the
-// queue is there: the card floats over it.
+// toggleLyrics shows the lyrics card or closes it. The card floats over the
+// queue, so showing it opens the queue too; a card a closed queue hides comes
+// back at once rather than closing unseen.
 func (app *nativeApp) toggleLyrics() {
-	app.lyricsOpen = !app.lyricsOpen
-	if app.lyricsOpen {
-		app.queueOpen = true
+	if !app.lyricsOpen || !app.queueOpen {
+		app.lyricsOpen, app.queueOpen = true, true
+		// The line playing goes back to the middle rather than staying where
+		// it was when the card closed.
+		app.revealLyrics()
+		return
 	}
+	app.lyricsOpen = false
+}
+
+// revealLyrics puts the line playing back in the middle at once: the card
+// opening, a new track, or a resize.
+func (app *nativeApp) revealLyrics() {
+	app.lyricsFollow, app.lyricsFollowVideo = -1, ""
+	app.lyricsReveal = true
 }
