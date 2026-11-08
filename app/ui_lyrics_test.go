@@ -120,6 +120,9 @@ func TestNativeUILyricsFloatsOverTheQueue(t *testing.T) {
 	if !ok {
 		t.Fatalf("the lyrics card has no title: %q", tester.Texts())
 	}
+	if h := accessOf(t, tester, ui.RoleHeading, locales.LyricsTitle()); h.Level != 2 {
+		t.Fatalf("the lyrics heading is %+v", h)
+	}
 	queue, ok := tester.Find("キューは空です")
 	if !ok {
 		t.Fatalf("the queue is not shown: %q", tester.Texts())

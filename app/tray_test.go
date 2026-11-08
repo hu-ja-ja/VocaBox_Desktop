@@ -9,6 +9,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // TestTrayCardShowsTheTrack checks the card the icon's right click opens:
@@ -90,6 +91,11 @@ func TestTrayCardWithoutATrack(t *testing.T) {
 		}
 		if bottom := box.Y + box.H; bottom > trayCardHeight {
 			t.Fatalf("%q ends at %v, past the card's %d", label, bottom, trayCardHeight)
+		}
+	}
+	for _, name := range []string{locales.ActionPlay(), locales.PlayerNext()} {
+		if a := accessOf(t, tester, ui.RoleButton, name); !a.Disabled {
+			t.Fatalf("%q works with no track: %+v", name, a)
 		}
 	}
 	app.sent = nil

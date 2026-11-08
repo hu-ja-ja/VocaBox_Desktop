@@ -43,7 +43,8 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				app.seekValue = app.player.PositionMS
 			}
 			ui.Text(c, formatMillis(app.seekValue)).Width(42).FontSize(11).TextColor(app.theme.TextMuted)
-			seek := ui.Slider(c, &app.seekValue, 0, max).Label(locales.PlayerSeek()).Grow(1).Disabled(!app.player.Ready)
+			seek := ui.Slider(c, &app.seekValue, 0, max).Label(locales.PlayerSeek()).
+				Value(formatMillis(app.seekValue)).Grow(1).Disabled(!app.player.Ready)
 			// The bar seeks once, when the pointer lets go or the keys move
 			// it: seeking on every frame of the drag stutters the player and
 			// leaves playback to be restarted. Dragged keeps the hold past
@@ -134,7 +135,8 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 					if mute.Clicked() {
 						app.toggleMute()
 					}
-					volumeSlider := ui.Slider(c, &app.volumeValue, 0, 1).Label(locales.PlayerVolume()).Width(110)
+					volumeSlider := ui.Slider(c, &app.volumeValue, 0, 1).Label(locales.PlayerVolume()).
+						Value(fmt.Sprintf("%d%%", int(math.Round(app.volumeValue*100)))).Width(110)
 					// A drag tells the player in volumeSendStep steps rather than
 					// on every pointer frame, which floods the page with commands
 					// and the window with the reports they bring; letting go sends
@@ -171,8 +173,8 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				if lyricsShown {
 					lyricsLabel = locales.LyricsClose()
 				}
-				lyrics := ui.Button(c, "").Label(lyricsLabel).Tooltip(lyricsLabel).Padding(6, 9).
-					BorderWidth(0).Disabled(app.player.WatchID == "")
+				lyrics := ui.Button(c, "").Label(lyricsLabel).Tooltip(lyricsLabel).Expanded(lyricsShown).
+					Padding(6, 9).BorderWidth(0).Disabled(app.player.WatchID == "")
 				if lyricsShown {
 					lyrics.Background(app.theme.SurfacePressed)
 				}
@@ -182,7 +184,8 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 				if lyrics.Clicked() {
 					app.toggleLyrics()
 				}
-				queue := ui.Button(c, "").Label(locales.PlayerQueue()).Tooltip(locales.PlayerQueue()).Padding(6, 9).BorderWidth(0)
+				queue := ui.Button(c, "").Label(locales.PlayerQueue()).Tooltip(locales.PlayerQueue()).Expanded(app.queueOpen).
+					Padding(6, 9).BorderWidth(0)
 				if app.queueOpen {
 					queue.Background(app.theme.SurfacePressed)
 				}
@@ -198,7 +201,7 @@ func (app *nativeApp) playerBar(c *ui.Context) {
 			app.toggleQueue()
 		}
 		if app.playerError != "" {
-			ui.Text(c, app.playerError).FontSize(12).TextColor(app.theme.Danger)
+			ui.Text(c, app.playerError).FontSize(12).TextColor(app.theme.Danger).Role(ui.RoleAlert)
 		}
 	})
 }

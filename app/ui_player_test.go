@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // TestNativeUIShowsQuality checks the band the player bar reports.
@@ -234,11 +235,20 @@ func TestNativeUIQueueMenuTogglesOnSecondClick(t *testing.T) {
 	if !app.queueMenuOpen || !tester.HasText("キューから削除") {
 		t.Fatal("the queue row menu did not open")
 	}
+	menu := accessOf(t, tester, ui.RoleButton, locales.TrackMenu())
+	if menu.HasPopup != ui.PopupMenu || !menu.Expanded {
+		t.Fatalf("the queue row menu button is %+v", menu)
+	}
+	accessOf(t, tester, ui.RoleMenu, locales.TrackMenu())
+	accessOf(t, tester, ui.RoleMenuItem, locales.QueueRemove())
 	if err := tester.Click("曲のメニュー"); err != nil {
 		t.Fatal(err)
 	}
 	if app.queueMenuOpen || tester.HasText("キューから削除") {
 		t.Fatal("the second click did not close the queue row menu")
+	}
+	if menu := accessOf(t, tester, ui.RoleButton, locales.TrackMenu()); menu.Expanded {
+		t.Fatalf("the closed queue row menu button is %+v", menu)
 	}
 }
 

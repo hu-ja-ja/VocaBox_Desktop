@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/hu-ja-ja/VocaBox_Desktop/app/discord"
 	"github.com/hu-ja-ja/VocaBox_Desktop/app/lyrics"
+	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
 )
 
 // PlayerCommand carries one player control or queue change from the UI to
@@ -415,12 +416,14 @@ var dialogFade = ui.ElementTransition{Enter: motionFade}
 // modalDialog shows fn's dialog the way ui.Modal does — the dimmed window
 // and the centered panel — and fades the whole of it in at once, as a
 // dialog is a new part of the interface that its transition does not move.
-func (app *nativeApp) modalDialog(c *ui.Context, open *bool, fn func()) {
+// The title names the dialog for assistive technology.
+func (app *nativeApp) modalDialog(c *ui.Context, open *bool, title string, fn func()) {
 	ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
 		backdrop.Background(ui.RGBA(0, 0, 0, 0.4)).Transition(dialogFade)
 		panel.Padding(app.theme.Space(5)).Gap(app.theme.Space(3)).
 			Radius(app.theme.Space(2.5)).Background(app.theme.Background).
-			Shadow(0, 10, 30, 0, ui.RGBA(0, 0, 0, 0.3))
+			Shadow(0, 10, 30, 0, ui.RGBA(0, 0, 0, 0.3)).
+			Label(title)
 		fn()
 	})
 }
@@ -485,11 +488,11 @@ func (app *nativeApp) view(c *ui.Context) {
 		})
 		app.playerBar(c)
 	})
-	app.modalDialog(c, &app.importing, func() { app.importDialog(c) })
-	app.modalDialog(c, &app.combining, func() { app.combineDialog(c) })
-	app.modalDialog(c, &app.confirmLogout, func() { app.logoutDialog(c) })
-	app.modalDialog(c, &app.confirmDelete, func() { app.deleteDialog(c) })
-	app.modalDialog(c, &app.licenseOpenDialog, func() { app.licenseDialog(c) })
+	app.modalDialog(c, &app.importing, locales.ImportTitle(), func() { app.importDialog(c) })
+	app.modalDialog(c, &app.combining, locales.CombineTitle(), func() { app.combineDialog(c) })
+	app.modalDialog(c, &app.confirmLogout, locales.LogoutTitle(), func() { app.logoutDialog(c) })
+	app.modalDialog(c, &app.confirmDelete, locales.DeleteTitle(), func() { app.deleteDialog(c) })
+	app.modalDialog(c, &app.licenseOpenDialog, app.licenseTitle, func() { app.licenseDialog(c) })
 	// A menu whose mylist left the screen, as after a refresh, does not stay
 	// open on the element that took its place.
 	if app.menuOpen && !app.menuBuilt {
@@ -525,7 +528,7 @@ func (app *nativeApp) navigate(path string) {
 // label, and no face of its own until the pointer is on it, so the panel is
 // the only outline the menu draws.
 func (app *nativeApp) menuItem(c *ui.Context, icon *ui.SVG, label string) ui.Element {
-	item := ui.Button(c, "").Label(label).FillWidth().BorderWidth(0).
+	item := ui.Button(c, "").Label(label).Role(ui.RoleMenuItem).FillWidth().BorderWidth(0).
 		Background(app.theme.Background).Justify(ui.Start).Gap(10)
 	if item.Hovered() {
 		item.Background(app.theme.SurfaceHover)
@@ -546,7 +549,7 @@ func (app *nativeApp) statusLine(c *ui.Context) {
 	if app.statusError {
 		color = app.theme.Danger
 	}
-	ui.Text(c, app.status).FontSize(12).TextColor(color).
+	ui.Text(c, app.status).FontSize(12).TextColor(color).Role(ui.RoleStatus).
 		Transition(ui.ElementTransition{Enter: motionIn, Exit: motionIn})
 }
 

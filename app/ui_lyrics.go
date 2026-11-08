@@ -89,7 +89,7 @@ func (app *nativeApp) lyricsSources(c *ui.Context) {
 func (app *nativeApp) lyricsHeader(c *ui.Context) {
 	ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Start).Children(func() {
 		ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(3).Children(func() {
-			ui.Text(c, locales.LyricsTitle()).FontSize(21).Bold().SingleLine().Ellipsis("…")
+			ui.Text(c, locales.LyricsTitle()).FontSize(21).Bold().SingleLine().Ellipsis("…").Role(ui.RoleHeading).Level(2)
 			if meta := app.lyricsMeta(); meta != "" {
 				ui.Text(c, meta).FontSize(12).SingleLine().Ellipsis("…").TextColor(app.theme.TextMuted)
 			}

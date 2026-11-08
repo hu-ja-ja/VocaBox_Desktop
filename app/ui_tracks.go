@@ -77,7 +77,7 @@ func (app *nativeApp) mylistPage(c *ui.Context) {
 func (app *nativeApp) mylistHeader(c *ui.Context) {
 	ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Gap(5).Children(func() {
-			ui.Text(c, app.page.Name).FontSize(27).Bold().SingleLine().Ellipsis("…")
+			ui.Text(c, app.page.Name).FontSize(27).Bold().SingleLine().Ellipsis("…").Role(ui.RoleHeading).Level(1)
 			meta := countMeta(app.page.TotalItemCount)
 			if app.page.Owner != "" {
 				meta = app.page.Owner + "  ·  " + meta
@@ -208,7 +208,7 @@ func (app *nativeApp) queueView(c *ui.Context, slide float32) {
 func (app *nativeApp) queuePanel(c *ui.Context) {
 	ui.Column(c).Grow(1).FillWidth().FillHeight().MinWidth(0).Gap(4).Padding(18, 26, 12).Children(func() {
 		ui.Column(c).Gap(3).Children(func() {
-			ui.Text(c, locales.PlayerQueue()).FontSize(21).Bold().SingleLine().Ellipsis("…")
+			ui.Text(c, locales.PlayerQueue()).FontSize(21).Bold().SingleLine().Ellipsis("…").Role(ui.RoleHeading).Level(1)
 			ui.Text(c, app.queueMeta()).FontSize(12).TextColor(app.theme.TextMuted)
 		})
 		app.queueRows(c)
@@ -324,11 +324,13 @@ func (app *nativeApp) followQueue(n int) {
 	app.queueList.ScrollTo(idx, ui.Start)
 }
 
-// queueMenu shows the menu button of a row with the menu it opens: only on
-// the row the pointer is over, as the three dots a queue row carries.
+// queueMenu shows the menu button of a row with the menu it opens: on the
+// row the pointer is over, and on every row while the queue has the keyboard
+// focus, as the three dots a queue row carries.
 func (app *nativeApp) queueMenu(c *ui.Context, item MylistItem, i int, hovered bool) {
-	button := ui.Button(c, "").Label(locales.TrackMenu()).Tooltip(locales.TrackMenu()).Padding(4, 7).Radius(6)
-	if !hovered {
+	button := ui.Button(c, "").Label(locales.TrackMenu()).Tooltip(locales.TrackMenu()).
+		HasPopup(ui.PopupMenu).Expanded(app.queueMenuOpen && app.queueMenuRow == i).Padding(4, 7).Radius(6)
+	if !hovered && !app.queueList.Focused(c) {
 		button.Invisible()
 	}
 	if button.Clicked() {
@@ -345,7 +347,12 @@ func (app *nativeApp) queueMenu(c *ui.Context, item MylistItem, i int, hovered b
 	if app.queueMenuRow != i {
 		return
 	}
-	ui.Popover(c, button, &app.queueMenuOpen, func() {
+	ui.PopoverBase(c, button, &app.queueMenuOpen, func(panel ui.Element) {
+		t := app.theme
+		panel.MinWidth(button.Bounds().W).Margin(t.Space(1), 0, 0, 0).Padding(t.Space(1)).
+			Radius(t.Radius+2).Background(t.Background).Border(1, t.Border).
+			Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).
+			Role(ui.RoleMenu).Label(locales.TrackMenu())
 		remove := app.menuItem(c, iconTrash, locales.QueueRemove())
 		if remove.Clicked() {
 			app.removeFromQueue(item)

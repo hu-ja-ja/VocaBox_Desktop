@@ -248,10 +248,10 @@ func (app *nativeApp) accountRow(c *ui.Context) {
 // sidebar's way out does not sign the user out.
 func (app *nativeApp) logoutDialog(c *ui.Context) {
 	ui.Column(c).Width(320).Gap(14).Children(func() {
-		ui.Text(c, locales.LogoutTitle()).FontSize(20).Bold()
+		ui.Text(c, locales.LogoutTitle()).FontSize(20).Bold().Role(ui.RoleHeading).Level(2)
 		ui.Text(c, locales.LogoutBody()).FontSize(12).TextColor(app.theme.TextMuted)
 		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
-			if button := ui.Button(c, locales.ActionCancel()); button.Clicked() {
+			if button := ui.Button(c, locales.ActionCancel()).AutoFocus(); button.Clicked() {
 				app.confirmLogout = false
 			}
 			if button := ui.PrimaryButton(c, locales.ActionLogoutConfirm()); button.Clicked() {
@@ -325,7 +325,7 @@ func (app *nativeApp) railHome(c *ui.Context) {
 	item := ui.Button(c, "").Label(locales.NavHome()).Tooltip(locales.NavHome()).
 		Size(36, 36).Padding(0).BorderWidth(0).Radius(10)
 	if app.router.Path() == homePath {
-		item.Background(app.theme.SurfacePressed)
+		item.Current(ui.CurrentPage).Background(app.theme.SurfacePressed)
 	}
 	item.Children(func() { ui.Icon(c, iconHome).FontSize(20) })
 	if item.Clicked() {
@@ -340,7 +340,7 @@ func (app *nativeApp) railMylist(c *ui.Context, entry mylistEntry) {
 	item := ui.Button(c, "").Label(locales.PinnedName(entry.Name)).Tooltip(entry.Name).
 		Size(36, 36).Padding(0).BorderWidth(0).Radius(10)
 	if app.router.Path() == mylistPath(entry.ID) {
-		item.Background(app.theme.SurfacePressed)
+		item.Current(ui.CurrentPage).Background(app.theme.SurfacePressed)
 	}
 	item.Children(func() { app.railTile(c, entry.Items) })
 	if item.RightClicked() {
@@ -401,6 +401,7 @@ func (app *nativeApp) railAvatar(c *ui.Context) {
 	}
 	avatar := app.accountAvatarSize()
 	button := ui.Button(c, "").Label(locales.Account()).Tooltip(tip).
+		HasPopup(ui.PopupMenu).Expanded(app.railAccountOpen).
 		Size(avatar, avatar).Padding(0).BorderWidth(0).Radius(10)
 	button.Children(func() { app.accountAvatar(c) })
 	if button.Clicked() {
@@ -445,8 +446,8 @@ func (app *nativeApp) sidebarToggle(c *ui.Context, opening bool) {
 	if opening {
 		label = locales.SidebarOpen()
 	}
-	button := ui.Button(c, "").Label(label).Tooltip(label).BorderWidth(0).Padding(6, 9).
-		Size(sidebarToggleWidth, sidebarToggleHeight).Children(func() {
+	button := ui.Button(c, "").Label(label).Tooltip(label).Expanded(app.sidebarOpen).
+		BorderWidth(0).Padding(6, 9).Size(sidebarToggleWidth, sidebarToggleHeight).Children(func() {
 		ui.Icon(c, iconMenu).FontSize(18)
 	})
 	if button.Clicked() {

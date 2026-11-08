@@ -48,7 +48,7 @@ type mylistEntry struct {
 func (app *nativeApp) homeView(c *ui.Context) {
 	ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Gap(18).Children(func() {
 		ui.Column(c).Gap(5).Children(func() {
-			ui.Text(c, locales.NavHome()).FontSize(27).Bold()
+			ui.Text(c, locales.NavHome()).FontSize(27).Bold().Role(ui.RoleHeading).Level(1)
 			sub := locales.HomeSubtitle()
 			if len(app.saved) == 0 {
 				sub = locales.HomeSubtitleEmpty()
@@ -166,7 +166,7 @@ func (app *nativeApp) importCard(c *ui.Context) {
 // or ID, and the buttons opening or dismissing it.
 func (app *nativeApp) importDialog(c *ui.Context) {
 	ui.Column(c).Width(380).Gap(14).Children(func() {
-		ui.Text(c, locales.ImportTitle()).FontSize(20).Bold()
+		ui.Text(c, locales.ImportTitle()).FontSize(20).Bold().Role(ui.RoleHeading).Level(2)
 		ui.Text(c, locales.ImportBody()).FontSize(12).TextColor(app.theme.TextMuted)
 		field := ui.TextInput(c, &app.input).Placeholder(locales.ImportPlaceholder()).AutoFocus().
 			Label(locales.ImportFieldLabel()).FillWidth()
@@ -203,7 +203,7 @@ func (app *nativeApp) importInput() {
 func (app *nativeApp) mylistCard(c *ui.Context, entry mylistEntry) {
 	card := ui.Button(c, "").Key(entry.ID).Transition(ui.ElementTransition{
 		Enter: motionRow, Exit: &ui.Motion{Opacity: 0, Collapse: true},
-	}).Label(entry.Name).Width(mylistCardWidth).
+	}).Label(entry.Name).Description(app.cardDescription(entry)).Width(mylistCardWidth).
 		Padding(12).Radius(12).Border(1, app.theme.Border).Justify(ui.Start).AlignItems(ui.Start)
 	if card.Hovered() {
 		card.Background(app.theme.SurfaceHover)
@@ -333,11 +333,11 @@ func (app *nativeApp) askDelete(entry mylistEntry) {
 // is never touched.
 func (app *nativeApp) deleteDialog(c *ui.Context) {
 	ui.Column(c).Width(360).Gap(14).Children(func() {
-		ui.Text(c, locales.DeleteTitle()).FontSize(20).Bold()
+		ui.Text(c, locales.DeleteTitle()).FontSize(20).Bold().Role(ui.RoleHeading).Level(2)
 		ui.Text(c, app.deleteEntry.Name).FontSize(13).SingleLine().Ellipsis("…")
 		ui.Text(c, locales.DeleteBody()).FontSize(12).TextColor(app.theme.TextMuted)
 		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
-			if button := ui.Button(c, locales.ActionCancel()); button.Clicked() {
+			if button := ui.Button(c, locales.ActionCancel()).AutoFocus(); button.Clicked() {
 				app.confirmDelete = false
 			}
 			if button := ui.PrimaryButton(c, locales.ActionDeleteConfirm()); button.Clicked() {
@@ -449,4 +449,28 @@ func savedMeta(entry SavedIndexEntry) string {
 		return entry.Owner + "  ·  " + countMeta(total)
 	}
 	return countMeta(total)
+}
+
+// cardDescription is what a card says beyond its name: its size and owner,
+// and the marks it carries, which a button's label alone hides from
+// assistive technology.
+func (app *nativeApp) cardDescription(entry mylistEntry) string {
+	parts := make([]string, 0, 5)
+	if entry.Meta != "" {
+		parts = append(parts, entry.Meta)
+	}
+	if entry.Pinned {
+		parts = append(parts, locales.ActionPin())
+	}
+	if entry.Combined {
+		parts = append(parts, locales.BadgeCombined())
+	}
+	if entry.Private {
+		parts = append(parts, locales.BadgePrivate())
+	}
+	if entry.Download {
+		_, tip, _, _ := app.audioIcon(app.audioMylistState(entry.ID))
+		parts = append(parts, tip)
+	}
+	return strings.Join(parts, "  ")
 }

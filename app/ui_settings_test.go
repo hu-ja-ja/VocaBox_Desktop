@@ -65,6 +65,9 @@ func TestNativeUIShowsLicenses(t *testing.T) {
 		t.Fatalf("the list names the module %q; want its package name", got)
 	}
 	key := entry.Name + " " + entry.Version
+	if a := accessOf(t, tester, ui.RoleDisclosure, licenseTitle(entry)); a.Expanded {
+		t.Fatalf("the licence row starts open: %+v", a)
+	}
 	// The list is longer than the page: scroll down until the row is in
 	// view and clicking it opens it.
 	for step := 0; step < 40 && !app.licenseOpen[key]; step++ {
@@ -77,6 +80,9 @@ func TestNativeUIShowsLicenses(t *testing.T) {
 	}
 	if !app.licenseOpen[key] {
 		t.Fatalf("the row of %s did not open: %#v", entry.Name, app.licenseOpen)
+	}
+	if a := accessOf(t, tester, ui.RoleDisclosure, licenseTitle(entry)); !a.Expanded {
+		t.Fatalf("the open licence row is %+v", a)
 	}
 	if !tester.HasText("github.com/egoist/mygo") {
 		t.Fatalf("the open row does not spell the module out: %q", tester.Texts())

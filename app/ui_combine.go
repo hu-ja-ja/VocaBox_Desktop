@@ -24,7 +24,7 @@ func (app *nativeApp) openCombineDialog(id string) {
 // list carries on the home, and the saved mylists to play as one.
 func (app *nativeApp) combineDialog(c *ui.Context) {
 	ui.Column(c).Width(420).Gap(14).Children(func() {
-		ui.Text(c, locales.CombineTitle()).FontSize(20).Bold()
+		ui.Text(c, locales.CombineTitle()).FontSize(20).Bold().Role(ui.RoleHeading).Level(2)
 		ui.Text(c, locales.CombineBody()).FontSize(12).TextColor(app.theme.TextMuted)
 		ui.Column(c).Gap(8).FillWidth().Children(func() {
 			ui.Text(c, locales.CombineNameLabel()).FontSize(12).TextColor(app.theme.TextMuted)

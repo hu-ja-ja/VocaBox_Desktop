@@ -22,7 +22,7 @@ const appRepo = "https://github.com/hu-ja-ja/VocaBox_Desktop"
 func (app *nativeApp) settingsView(c *ui.Context) {
 	ui.Column(c).Grow(1).FillHeight().Padding(24, 24, 16).Gap(18).Children(func() {
 		ui.Column(c).Gap(5).Children(func() {
-			ui.Text(c, locales.NavSettings()).FontSize(27).Bold()
+			ui.Text(c, locales.NavSettings()).FontSize(27).Bold().Role(ui.RoleHeading).Level(1)
 			ui.Text(c, locales.SettingsSubtitle()).FontSize(13).TextColor(app.theme.TextMuted)
 		})
 		ui.Scroll(c).Grow(1).Children(func() {
@@ -42,7 +42,7 @@ func (app *nativeApp) qualitySelect(c *ui.Context, options []string) ui.Element 
 	t := app.theme
 	sel := ui.SelectBase(c, &app.qualityOption)
 	trigger := sel.Trigger.Label(locales.SettingsQualityTitle()).Role(ui.RolePopUpButton).
-		Padding(t.Space(1.5), t.Space(3.5)).Gap(t.Space(1.5)).Radius(t.Radius).
+		HasPopup(ui.PopupListBox).Padding(t.Space(1.5), t.Space(3.5)).Gap(t.Space(1.5)).Radius(t.Radius).
 		Justify(ui.SpaceBetween).MinWidth(t.Space(35)).
 		Background(t.Surface).TextColor(t.Text).Border(1, t.Border)
 	if trigger.Hovered() {
@@ -55,7 +55,8 @@ func (app *nativeApp) qualitySelect(c *ui.Context, options []string) ui.Element 
 	sel.Popup(func(panel ui.Element) {
 		panel.MinWidth(trigger.Bounds().W).Margin(t.Space(1), 0, 0, 0).Padding(t.Space(1)).
 			Radius(t.Radius+2).Background(t.Background).Border(1, t.Border).
-			Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).Transition(menuIn)
+			Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18)).Transition(menuIn).
+			Label(locales.SettingsQualityTitle())
 		for _, opt := range options {
 			item := sel.Item(opt).Padding(t.Space(1.5), t.Space(2.5)).Radius(t.Radius)
 			switch {
@@ -229,14 +230,14 @@ func (app *nativeApp) openLicense(title, body string) {
 // scroll.
 func (app *nativeApp) licenseDialog(c *ui.Context) {
 	ui.Column(c).Width(640).Gap(14).Children(func() {
-		ui.Text(c, app.licenseTitle).FontSize(20).Bold()
+		ui.Text(c, app.licenseTitle).FontSize(20).Bold().Role(ui.RoleHeading).Level(2)
 		ui.Scroll(c).MaxHeight(420).Children(func() {
 			ui.Column(c).FillWidth().Children(func() {
 				ui.Text(c, app.licenseBody).FontSize(12).TextColor(app.theme.TextMuted)
 			})
 		})
 		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
-			if button := ui.PrimaryButton(c, locales.ActionClose()); button.Clicked() {
+			if button := ui.PrimaryButton(c, locales.ActionClose()).AutoFocus(); button.Clicked() {
 				app.licenseOpenDialog = false
 			}
 		})
