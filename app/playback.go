@@ -249,11 +249,12 @@ func (p *playback) adoptQueue() {
 }
 
 // selectTrack plays a track from its start: directly from the queue when chosen
-// on the queue screen, or from the shown mylist otherwise, adopting the shown
-// mylist's queue when it differs from the one playing.
+// on the queue screen, keeping the shuffled order the screen shows, or from the
+// shown mylist otherwise, adopting the shown mylist's queue when it differs from
+// the one playing.
 func (p *playback) selectTrack(watchID string) {
 	if p.app.queueOpen {
-		if item, ok := p.queue.selectTrack(MylistItem{WatchID: watchID}); ok {
+		if item, ok := p.queue.selectTrackKeepingOrder(MylistItem{WatchID: watchID}); ok {
 			p.play(item)
 			return
 		}

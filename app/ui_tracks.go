@@ -241,40 +241,54 @@ func (app *nativeApp) queueRows(c *ui.Context) {
 		return
 	}
 	app.followQueue(len(rows))
-	// The list chooses a clicked row into queueChoice, which plays it
-	// before the next frame: a list whose rows are not chosen at all does
-	// not take the pointer, and a reorder's drag needs that.
+	// The list keeps its choice on the track playing, so the keys move from
+	// where playback is rather than from no row at all.
+	if app.queueChoice < 0 || app.queueChoice >= len(rows) {
+		app.queueChoice = app.player.QueueIndex
+		if app.queueChoice >= len(rows) {
+			app.queueChoice = -1
+		}
+	}
 	app.queueList.Selected = &app.queueChoice
 	app.queueList.Key = func(row int) any { return rows[row].WatchID }
 	app.queueList.Label = func(row int) string { return trackLabel(rows[row]) }
 	app.queueList.Reorder = app.moveQueueRows
-	ui.List(c, &app.queueList, len(rows), func(i int) {
+	list := ui.List(c, &app.queueList, len(rows), func(i int) {
 		app.queueRow(c, rows[i], i)
 	}).Grow(1)
-	if app.queueChoice >= 0 && app.queueChoice < len(rows) {
-		item := rows[app.queueChoice]
-		app.queueChoice = -1
-		app.selectTrack(item)
+	if app.queueFocus && app.queueList.Focus(c) {
+		app.queueFocus = false
+	}
+	// The keys move the choice, which plays it; a row plays its own click in
+	// queueRow, as a click on the row already chosen marks no new choice.
+	if list.Changed() && app.queueChoice >= 0 && app.queueChoice < len(rows) {
+		app.selectTrack(rows[app.queueChoice])
 	}
 }
 
 // queueRow builds one track of the queue: its number, picture, title and
 // uploader, the menu on hover, and the track playing in the pressed
-// surface, with its number replaced by the play mark in the accent. Rows
-// take the pointer so a click chooses one and a drag reaches the list's
-// reordering.
+// surface, with its number replaced by the play mark in the accent. The row
+// takes the click itself, so one already chosen plays again, while a drag
+// still reaches the list's reordering.
 func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 	playable := isPlayable(item)
 	playing := item.WatchID != "" && item.WatchID == app.player.WatchID
 	row := ui.Box(c).Transition(ui.ElementTransition{Animation: &sidebarShift, Position: true, Colors: true, Enter: motionRow}).
 		FillWidth().Padding(8, 12).Justify(ui.Start).AlignItems(ui.Center).
 		BorderWidth(0, 0, 1, 0).BorderColor(app.theme.Border)
+	clicked := row.Clicked()
 	hovered := row.Hovered()
+	// The row paints its own surface in every state: the list fills the row
+	// it chooses with the accent, whose text and background both fight the
+	// queue's playing row.
 	switch {
 	case playing:
 		row.Background(app.theme.SurfacePressed)
 	case hovered:
 		row.Background(app.theme.SurfaceHover)
+	default:
+		row.Background(app.theme.Surface)
 	}
 	row.Children(func() {
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Justify(ui.Start).FillWidth().Children(func() {
@@ -289,7 +303,7 @@ func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 			}
 			app.thumbnail(c, item, thumbRowHeight)
 			ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(3).Children(func() {
-				title := ui.Text(c, trackLabel(item)).FontSize(13).Bold().SingleLine().Ellipsis("…")
+				title := ui.Text(c, trackLabel(item)).FontSize(13).Bold().SingleLine().Ellipsis("…").TextColor(app.theme.Text)
 				if playing {
 					title.TextColor(app.theme.Accent)
 				}
@@ -309,11 +323,15 @@ func (app *nativeApp) queueRow(c *ui.Context, item MylistItem, i int) {
 			app.queueMenu(c, item, i, hovered)
 		})
 	})
+	if clicked {
+		app.queueChoice = i
+		app.selectTrack(item)
+	}
 }
 
 // followQueue scrolls the track playing to the top of the queue as the
-// player moves on, one follow per track or row: a queue the user is reading
-// stays where they left it.
+// player moves on, one follow per track or row, and keeps the list's choice
+// on it: a queue the user is reading stays where they left it.
 func (app *nativeApp) followQueue(n int) {
 	idx := app.player.QueueIndex
 	if idx < 0 || idx >= n || (idx == app.queueFollow && app.player.WatchID == app.queueFollowTrack) {
@@ -321,16 +339,21 @@ func (app *nativeApp) followQueue(n int) {
 	}
 	app.queueFollow = idx
 	app.queueFollowTrack = app.player.WatchID
+	app.queueChoice = idx
 	app.queueList.ScrollTo(idx, ui.Start)
 }
 
 // queueMenu shows the menu button of a row with the menu it opens: on the
-// row the pointer is over, and on every row while the queue has the keyboard
-// focus, as the three dots a queue row carries.
+// row the pointer is over, on the chosen row while the queue has the
+// keyboard focus, and on the row whose menu is open, as the three dots a
+// queue row carries. Only the chosen row joins the Tab order, so Tab leaves
+// the list without walking the menu of every row.
 func (app *nativeApp) queueMenu(c *ui.Context, item MylistItem, i int, hovered bool) {
 	button := ui.Button(c, "").Label(locales.TrackMenu()).Tooltip(locales.TrackMenu()).
 		HasPopup(ui.PopupMenu).Expanded(app.queueMenuOpen && app.queueMenuRow == i).Padding(4, 7).Radius(6)
-	if !hovered && !app.queueList.Focused(c) {
+	shown := hovered || button.Focused() || (app.queueMenuOpen && app.queueMenuRow == i) ||
+		(app.queueChoice == i && app.queueList.FocusWithin(c))
+	if !shown {
 		button.Invisible()
 	}
 	if button.Clicked() {

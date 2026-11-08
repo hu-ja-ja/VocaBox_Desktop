@@ -411,6 +411,130 @@ func TestNativeUITrackClickPlaysIt(t *testing.T) {
 	}
 }
 
+// TestNativeUIQueueKeyboardStartsAtThePlayingTrack checks that the queue's
+// keys move from the track playing, rather than from no row at all, which
+// played the first track whatever the user had clicked.
+func TestNativeUIQueueKeyboardStartsAtThePlayingTrack(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.queueOpen = true
+	items := []MylistItem{
+		{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120},
+		{WatchID: "sm2", Title: "二曲目", Available: true, Duration: 120},
+		{WatchID: "sm3", Title: "三曲目", Available: true, Duration: 120},
+		{WatchID: "sm4", Title: "四曲目", Available: true, Duration: 120},
+	}
+	app.player = playerState{
+		WatchID: "sm2", MylistID: "123", Name: "作業用キー", Title: "二曲目",
+		Ready: true, Playing: true, Volume: 1,
+		Order: []string{"sm1", "sm2", "sm3", "sm4"}, Items: items, QueueIndex: 1,
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	app.sent = nil
+	if !tester.Focused("二曲目") {
+		t.Fatalf("opening the queue did not focus the track playing: %q", tester.Texts())
+	}
+	if len(app.sent) != 0 {
+		t.Fatalf("opening the queue sent commands: %#v", app.sent)
+	}
+
+	tester.Key(0, ui.KeyDown)
+	tester.Frame()
+	down, ok := lastCommand(app.sent, "select")
+	if !ok || down.WatchID != "sm3" {
+		t.Fatalf("Down did not move to the next track: %#v", app.sent)
+	}
+	app.sent = nil
+	tester.Key(0, ui.KeyUp)
+	tester.Frame()
+	up, ok := lastCommand(app.sent, "select")
+	if !ok || up.WatchID != "sm2" {
+		t.Fatalf("Up did not move back to the track playing: %#v", app.sent)
+	}
+}
+
+// TestNativeUIQueueKeyboardFollowsTheClickedRow checks that a row clicked
+// before the keys keeps the list's choice, so Up and Down move from it.
+func TestNativeUIQueueKeyboardFollowsTheClickedRow(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.queueOpen = true
+	items := []MylistItem{
+		{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120},
+		{WatchID: "sm2", Title: "二曲目", Available: true, Duration: 120},
+		{WatchID: "sm3", Title: "三曲目", Available: true, Duration: 120},
+		{WatchID: "sm4", Title: "四曲目", Available: true, Duration: 120},
+	}
+	app.player = playerState{
+		WatchID: "sm2", MylistID: "123", Name: "作業用クリック", Title: "二曲目",
+		Ready: true, Playing: true, Volume: 1,
+		Order: []string{"sm1", "sm2", "sm3", "sm4"}, Items: items, QueueIndex: 1,
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	app.sent = nil
+	three, ok := tester.Find("三曲目")
+	if !ok {
+		t.Fatalf("the queue is missing tracks: %q", tester.Texts())
+	}
+	tester.ClickAt(three.X+10, three.Y+three.H/2)
+	tester.Frame()
+	clicked, ok := lastCommand(app.sent, "select")
+	if !ok || clicked.WatchID != "sm3" {
+		t.Fatalf("clicking a queue row did not play it: %#v", app.sent)
+	}
+	if app.queueChoice != 2 {
+		t.Fatalf("the clicked row is not the list's choice: %d", app.queueChoice)
+	}
+
+	app.sent = nil
+	tester.Key(0, ui.KeyDown)
+	tester.Frame()
+	down, ok := lastCommand(app.sent, "select")
+	if !ok || down.WatchID != "sm4" {
+		t.Fatalf("Down did not move from the clicked row: %#v", app.sent)
+	}
+	app.sent = nil
+	tester.Key(0, ui.KeyUp)
+	tester.Frame()
+	up, ok := lastCommand(app.sent, "select")
+	if !ok || up.WatchID != "sm3" {
+		t.Fatalf("Up did not move back to the clicked row: %#v", app.sent)
+	}
+}
+
+// TestNativeUIQueueTabReachesTheChosenMenu checks the queue's stop in the Tab
+// order: the list, its chosen row's menu, then the player bar, with no focus
+// lost when the menu button appears.
+func TestNativeUIQueueTabReachesTheChosenMenu(t *testing.T) {
+	app := newNativeApp(NewMylist())
+	app.queueOpen = true
+	items := []MylistItem{
+		{WatchID: "sm1", Title: "一曲目", Available: true, Duration: 120},
+		{WatchID: "sm2", Title: "二曲目", Available: true, Duration: 120},
+	}
+	app.player = playerState{
+		WatchID: "sm2", MylistID: "123", Name: "作業用タブ", Title: "二曲目",
+		Ready: true, Playing: true, Volume: 1, DurationMS: 120_000,
+		Order: []string{"sm1", "sm2"}, Items: items, QueueIndex: 1,
+	}
+	tester := ui.NewTester(app.view, 1120, 760)
+	if !tester.Focused("二曲目") {
+		t.Fatalf("opening the queue did not focus the track playing: %q", tester.Texts())
+	}
+
+	tester.Key(0, ui.KeyTab)
+	tester.Frame()
+	if !tester.Focused(locales.TrackMenu()) {
+		t.Fatalf("Tab did not reach the chosen row's menu: %q", tester.Texts())
+	}
+	tester.Key(0, ui.KeyTab)
+	tester.Frame()
+	if tester.Focused(locales.TrackMenu()) {
+		t.Fatal("Tab stayed on the chosen row's menu")
+	}
+	if !tester.Focused(locales.PlayerSeek()) {
+		t.Fatalf("Tab did not leave the queue for the player bar: %q", tester.Texts())
+	}
+}
+
 // TestNativeUIPlayerBarCentersTransport checks the transport buttons sit in
 // the middle of the bar rather than following what shows beside them.
 func TestNativeUIPlayerBarCentersTransport(t *testing.T) {

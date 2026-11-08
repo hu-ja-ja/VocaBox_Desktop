@@ -210,6 +210,57 @@ func TestPlayQueueSelectUnderShufflePinsTheEntryToTheFront(t *testing.T) {
 	}
 }
 
+// TestPlayQueueSelectKeepingOrderKeepsTheShuffle checks the queue screen's
+// choice: the entry picked plays where the screen shows it, and the shuffled
+// order stays as it is.
+func TestPlayQueueSelectKeepingOrderKeepsTheShuffle(t *testing.T) {
+	q := &playQueue{}
+	items := queueTracks("a", "b", "c", "d", "e")
+	q.reset(items)
+	q.selectTrack(q.orderedItems()[0])
+	q.setShuffle(true)
+	order := q.orderIDs()
+	if len(order) != len(items) || order[0] != "a" {
+		t.Fatalf("shuffled order = %v; want a first", order)
+	}
+
+	// Choose row 2, not the row playing: the order is already the screen's,
+	// and the entry stays there.
+	picked := q.orderedItems()[2]
+	selected, ok := q.selectTrackKeepingOrder(picked)
+	if !ok || selected.WatchID != order[2] {
+		t.Fatalf("selecting %s = %#v, %v; want %s", order[2], selected, ok, order[2])
+	}
+	if got := q.orderIDs(); !slices.Equal(got, order) {
+		t.Fatalf("the choice reshuffled the queue: got %v want %v", got, order)
+	}
+	if q.currentIndex() != 2 {
+		t.Fatalf("the choice sits at %d; want 2", q.currentIndex())
+	}
+	if prev, ok := q.movePrev(); !ok || prev.WatchID != order[1] {
+		t.Fatalf("previous from the choice = %#v, %v; want %s", prev, ok, order[1])
+	}
+	if next, ok := q.moveNext(); !ok || next.WatchID != order[2] {
+		t.Fatalf("next from the choice = %#v, %v; want %s", next, ok, order[2])
+	}
+
+	// A queue not playing yet keeps its order too: the entry picked is where
+	// the screen shows it, not moved to the front.
+	q.reset(items)
+	q.setShuffle(true)
+	order = q.orderIDs()
+	picked = q.orderedItems()[3]
+	if selected, ok := q.selectTrackKeepingOrder(picked); !ok || selected.WatchID != order[3] {
+		t.Fatalf("selecting %s = %#v, %v; want %s", order[3], selected, ok, order[3])
+	}
+	if got := q.orderIDs(); !slices.Equal(got, order) {
+		t.Fatalf("the first choice reshuffled the queue: got %v want %v", got, order)
+	}
+	if q.currentIndex() != 3 {
+		t.Fatalf("the first choice sits at %d; want 3", q.currentIndex())
+	}
+}
+
 // TestPlayQueueRemoveKeepsThePlayingTrack checks entries come out without
 // moving the track playing.
 func TestPlayQueueRemoveKeepsThePlayingTrack(t *testing.T) {

@@ -199,6 +199,17 @@ func (q *playQueue) at(p int) (MylistItem, bool) {
 // it starts at the front of a fresh shuffle, as turning shuffle on would lay
 // the queue out, rather than sitting where the shuffle happened to put it.
 func (q *playQueue) selectTrack(item MylistItem) (MylistItem, bool) {
+	return q.selectTrackAt(item, false)
+}
+
+// selectTrackKeepingOrder puts the queue on the entry carrying item's watch
+// ID where it stands: the shuffled order stays as the queue screen shows it,
+// so moving the choice moves only the track playing.
+func (q *playQueue) selectTrackKeepingOrder(item MylistItem) (MylistItem, bool) {
+	return q.selectTrackAt(item, true)
+}
+
+func (q *playQueue) selectTrackAt(item MylistItem, keepOrder bool) (MylistItem, bool) {
 	p := -1
 	for i := range q.items {
 		if q.items[i].WatchID == item.WatchID {
@@ -212,7 +223,7 @@ func (q *playQueue) selectTrack(item MylistItem) (MylistItem, bool) {
 	at := indexOf(q.order, p)
 	if at != q.pos {
 		q.pos = at
-		if q.shuffled {
+		if q.shuffled && !keepOrder {
 			q.shuffleRange()
 		}
 	}

@@ -205,9 +205,13 @@ type nativeApp struct {
 	menuX, menuY float32
 	menuAnchorID uint64
 	menuBuilt    bool
-	// queueChoice is the queue row the list last chose, -1 for none: a
-	// choice plays the track before the next frame.
+	// queueChoice is the queue row the list keeps chosen, the track playing
+	// unless the user is moving the choice, -1 for none: a new choice plays
+	// the track.
 	queueChoice int
+	// queueFocus asks the queue list to take the keyboard focus as the
+	// screen opens, so the track playing is where the keys start.
+	queueFocus bool
 	// queueFollow and queueFollowTrack remember the track playing the queue
 	// screen was scrolled to, so it follows the player onto the next one;
 	// -2 and "" with nothing followed yet.
@@ -445,6 +449,7 @@ func (app *nativeApp) view(c *ui.Context) {
 		if app.queueOpen {
 			app.sidebarBeforeQueue = app.sidebarOpen
 			app.sidebarOpen = false
+			app.queueFocus = true
 			if app.lyricsOpen {
 				// The card comes back with the queue, whichever way it
 				// opened: bring the line playing to the middle.
@@ -452,6 +457,7 @@ func (app *nativeApp) view(c *ui.Context) {
 			}
 		} else {
 			app.sidebarOpen = app.sidebarBeforeQueue
+			app.queueFocus = false
 		}
 		app.queueWasOpen = app.queueOpen
 	}

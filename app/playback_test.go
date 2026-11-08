@@ -686,6 +686,32 @@ func TestPlaybackHelperCrashKeepsAPausedTrackPaused(t *testing.T) {
 	}
 }
 
+// TestPlaybackQueueSelectKeepsShuffleOrder checks the queue screen's choice
+// under shuffle: the track plays where the screen shows it, and the order
+// stays as it is.
+func TestPlaybackQueueSelectKeepsShuffleOrder(t *testing.T) {
+	p, helper, _ := newTestPlayback(t)
+	p.setItems("111", "マイリストA", testQueueItems())
+	p.handle(PlayerCommand{Action: "shuffle", Enabled: true})
+	selectPlayed(t, p, helper, "sm1")
+	order := append([]string(nil), p.app.player.Order...)
+	if len(order) != 2 || order[0] != "sm1" {
+		t.Fatalf("shuffle order = %v; want sm1 first", order)
+	}
+
+	// The queue screen chooses the other entry: it plays at its row, and the
+	// queue keeps the order the screen shows.
+	p.app.queueOpen = true
+	p.handle(PlayerCommand{Action: "select", WatchID: "sm2"})
+	waitFor(t, "the queue's play command", func() bool { return helper.count("play") == 2 })
+	if got := p.app.player.Order; len(got) != len(order) || got[0] != order[0] || got[1] != order[1] {
+		t.Fatalf("the queue's choice reshuffled the order: got %v want %v", got, order)
+	}
+	if p.app.player.QueueIndex != 1 {
+		t.Fatalf("the queue's choice sits at %d; want 1", p.app.player.QueueIndex)
+	}
+}
+
 func TestPlaybackSetItemsKeepsShuffleAndTrack(t *testing.T) {
 	p, helper, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
