@@ -39,6 +39,18 @@ const (
 	audioPartExtension = ".part"
 )
 
+// Windows' MPEG-4 file source reads a fragmented track through a window of
+// mediaStackWindow bytes and drops a fragment whose styp/moof header lands on
+// the window's last mediaStackGuard bytes: the track ends there, a few seconds
+// short. A segment boundary that happens to fall on such an edge is rare but a
+// real track hit it, so the writer keeps fragment headers off the edges.
+// shortcut: the window size and guard are measured on one Windows build;
+// revisit if a track still ends short after a Windows update.
+const (
+	mediaStackWindow = 2*1024*1024 + 512*1024 // 2.5 MiB
+	mediaStackGuard  = 32
+)
+
 // errAudioTrack is returned for an ID that cannot name a saved track: the
 // saved mylists are hand-editable files, and only a watch ID names one.
 var errAudioTrack = errors.New(locales.ErrAudioSave())
@@ -348,6 +360,7 @@ func (n *Nico) copyAudio(media *m3u8.MediaPlaylist, playlistURL string, out io.W
 	}()
 	var key audioKey
 	initURI := ""
+	written := int64(0)
 	for i, segment := range segments {
 		// shortcut: niconico's audio renditions use no byte ranges; a
 		// playlist that does needs range requests rather than whole files.
@@ -363,9 +376,11 @@ func (n *Nico) copyAudio(media *m3u8.MediaPlaylist, playlistURL string, out io.W
 			if err != nil {
 				return err
 			}
-			if _, err := out.Write(withMovieDuration(body, durationMS)); err != nil {
+			initBody := withMovieDuration(body, durationMS)
+			if _, err := out.Write(initBody); err != nil {
 				return errors.New(locales.ErrAudioSave())
 			}
+			written += int64(len(initBody))
 			initURI = init.URI
 		}
 		fetch := <-fetched[i]
@@ -394,13 +409,137 @@ func (n *Nico) copyAudio(media *m3u8.MediaPlaylist, playlistURL string, out io.W
 			}
 			body = decrypted
 		}
-		// A segment's own index box would have the media stack end the saved
-		// track before its last fragment.
-		if _, err := out.Write(dropSegmentIndexes(body)); err != nil {
-			return errors.New(locales.ErrAudioSave())
+		// A segment's own index box, and a fragment header on a media stack
+		// read window edge, would end the saved track before its last fragment.
+		next, err := writeSegment(out, written, dropSegmentIndexes(body))
+		if err != nil {
+			return err
 		}
+		written = next
 	}
 	return nil
+}
+
+// writeSegment writes one segment's boxes, moving its fragment header past a
+// media stack read window edge first when it would land on one.
+func writeSegment(out io.Writer, written int64, body []byte) (int64, error) {
+	if pad := mediaStackPad(written, fragmentHeaderLen(body)); pad != nil {
+		if _, err := out.Write(pad); err != nil {
+			return written, errors.New(locales.ErrAudioSave())
+		}
+		written += int64(len(pad))
+	}
+	if _, err := out.Write(body); err != nil {
+		return written, errors.New(locales.ErrAudioSave())
+	}
+	return written + int64(len(body)), nil
+}
+
+// boxAt returns the size and type of the box at off, false when b holds no
+// whole box there.
+func boxAt(b []byte, off int) (int64, string, bool) {
+	if off+8 > len(b) {
+		return 0, "", false
+	}
+	size := int64(binary.BigEndian.Uint32(b[off : off+4]))
+	if size == 1 {
+		if off+16 > len(b) {
+			return 0, "", false
+		}
+		size = int64(binary.BigEndian.Uint64(b[off+8 : off+16]))
+	}
+	if size < 8 || size > int64(len(b)-off) {
+		return 0, "", false
+	}
+	return size, string(b[off+4 : off+8]), true
+}
+
+// fragmentHeaderLen is how many leading bytes of one segment hold the fragment
+// header the media stack reads as a unit: its styp and moof boxes, 0 when it
+// starts with neither.
+func fragmentHeaderLen(b []byte) int {
+	off := 0
+	for {
+		size, kind, ok := boxAt(b, off)
+		if !ok || (kind != "styp" && kind != "moof") {
+			return off
+		}
+		off += int(size)
+	}
+}
+
+// windowEdgeAtOrAfter is the first media stack read window edge at or after
+// off: a fragment header there ends the track at that fragment.
+func windowEdgeAtOrAfter(off int64) int64 {
+	edge := (off+mediaStackGuard)/mediaStackWindow*mediaStackWindow - mediaStackGuard
+	if edge < off {
+		edge += mediaStackWindow
+	}
+	return edge
+}
+
+// mediaStackPad is the free box to write before a fragment whose header of
+// headerLen bytes at output offset off would land on a read window edge, nil
+// when it lands clear of every edge. The box moves the header past the edge.
+func mediaStackPad(off int64, headerLen int) []byte {
+	if headerLen <= 0 {
+		return nil
+	}
+	edge := windowEdgeAtOrAfter(off)
+	if edge >= off+int64(headerLen) {
+		return nil
+	}
+	size := int(edge-off) + 1
+	if size < 8 {
+		size = 8
+	}
+	return freeBox(size)
+}
+
+// freeBox is a free box of the given total size, which must hold its header. A
+// free box carries nothing and every reader skips it.
+func freeBox(size int) []byte {
+	box := make([]byte, size)
+	binary.BigEndian.PutUint32(box[0:4], uint32(size))
+	copy(box[4:8], "free")
+	return box
+}
+
+// padFragmentHeaders returns b with a free box ahead of every fragment whose
+// styp/moof header would land on a media stack read window edge, so no fragment
+// is lost on playback. b itself comes back when no header needs moving.
+func padFragmentHeaders(b []byte) []byte {
+	var out []byte
+	written := int64(0)
+	off := 0
+	inHeader := false
+	for {
+		size, kind, ok := boxAt(b, off)
+		if !ok {
+			break
+		}
+		if !inHeader && (kind == "styp" || kind == "moof") {
+			if hdr := fragmentHeaderLen(b[off:]); hdr > 0 {
+				if pad := mediaStackPad(written, hdr); pad != nil {
+					if out == nil {
+						out = append([]byte(nil), b[:off]...)
+					}
+					out = append(out, pad...)
+					written += int64(len(pad))
+				}
+			}
+		}
+		if out != nil {
+			out = append(out, b[off:off+int(size)]...)
+		}
+		written += size
+		inHeader = kind == "styp" || kind == "moof"
+		off += int(size)
+	}
+	if out == nil {
+		return b
+	}
+	return append(out, b[off:]...)
 }
 
 // withMovieDuration returns the initialization section with its movie header's
@@ -486,41 +625,43 @@ func dropSegmentIndexes(b []byte) []byte {
 	return append(out, b[off:]...)
 }
 
-// repairSavedAudio drops the per-segment indexes a track saved before they were
-// left out carries, so the whole track plays. The file is rewritten once; one
-// already without them is left alone.
+// repairSavedAudio rewrites a track saved in a shape the media stack plays
+// short: the per-segment indexes a track saved before they were left out
+// carries, and a fragment header landing on a read window edge. The file is
+// rewritten once; one already in shape is left alone.
 func repairSavedAudio(path string) {
 	f, err := os.Open(path)
 	if err != nil {
 		return
 	}
-	indexed := segmentIndexesIn(f)
+	needsRepair := audioNeedsRepair(f)
 	f.Close()
-	if !indexed {
+	if !needsRepair {
 		return
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
-	stripped := dropSegmentIndexes(body)
-	if len(stripped) == len(body) {
+	repaired := padFragmentHeaders(dropSegmentIndexes(body))
+	if bytes.Equal(repaired, body) {
 		return
 	}
-	if err := writeFileAtomic(path, stripped, 0o644, locales.ErrAudioSave()); err != nil {
+	if err := writeFileAtomic(path, repaired, 0o644, locales.ErrAudioSave()); err != nil {
 		log.Printf("audio: repairing %s: %v", path, err)
 	}
 }
 
-// boxWalkLimit bounds the headers segmentIndexesIn reads: a track of
+// boxWalkLimit bounds the headers audioNeedsRepair reads: a track of
 // one-second segments holds a few hundred, and a file of more box headers
 // than that is read whole rather than walked a syscall at a time.
 const boxWalkLimit = 1 << 12
 
-// segmentIndexesIn reports whether the saved track still holds a per-segment
-// sidx box. It walks the top-level boxes by their headers alone, so a track
-// already repaired costs no read of its media on every play.
-func segmentIndexesIn(f *os.File) bool {
+// audioNeedsRepair reports whether the saved track still holds a per-segment
+// sidx box or a fragment header on a media stack read window edge. It walks the
+// top-level boxes by their headers alone, so a track already repaired costs no
+// read of its media on every play.
+func audioNeedsRepair(f *os.File) bool {
 	var header [16]byte
 	for off, boxes := int64(0), 0; boxes < boxWalkLimit; boxes++ {
 		if _, err := f.ReadAt(header[:8], off); err != nil {
@@ -536,8 +677,13 @@ func segmentIndexesIn(f *os.File) bool {
 		if size < 8 {
 			return false
 		}
-		if string(header[4:8]) == "sidx" {
+		switch string(header[4:8]) {
+		case "sidx":
 			return true
+		case "styp", "moof":
+			if edge := windowEdgeAtOrAfter(off); edge < off+size {
+				return true
+			}
 		}
 		off += size
 	}

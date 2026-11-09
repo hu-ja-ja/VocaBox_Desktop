@@ -325,9 +325,15 @@ func TestDropSegmentIndexes(t *testing.T) {
 	}
 }
 
-// TestSegmentIndexesIn checks the cheap question the repair asks first: a
-// segment with its index says yes, and one without it says no.
-func TestSegmentIndexesIn(t *testing.T) {
+// TestAudioNeedsRepair checks the cheap question the repair asks first: a
+// segment with its index or a fragment header on a read window edge says yes,
+// and one already in shape says no.
+func TestAudioNeedsRepair(t *testing.T) {
+	edge := mediaStackWindow - mediaStackGuard
+	onEdge := append(
+		audioTestBox("free", make([]byte, edge-4-8)),
+		audioTestBox("styp", nil)...,
+	)
 	dir := t.TempDir()
 	for _, tc := range []struct {
 		name string
@@ -336,6 +342,7 @@ func TestSegmentIndexesIn(t *testing.T) {
 	}{
 		{"indexed", audioTestSegment(0x11), true},
 		{"repaired", audioTestSavedSegment(0x11), false},
+		{"on edge", onEdge, true},
 	} {
 		path := filepath.Join(dir, tc.name+".m4a")
 		if err := os.WriteFile(path, tc.body, 0o644); err != nil {
@@ -345,11 +352,91 @@ func TestSegmentIndexesIn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got := segmentIndexesIn(f)
+		got := audioNeedsRepair(f)
 		f.Close()
 		if got != tc.want {
-			t.Fatalf("%s: segmentIndexesIn = %v; want %v", tc.name, got, tc.want)
+			t.Fatalf("%s: audioNeedsRepair = %v; want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// TestMediaStackPad checks the guard the writer keeps: a header clear of every
+// window edge needs no box, and one on an edge is moved past it.
+func TestMediaStackPad(t *testing.T) {
+	edge := int64(mediaStackWindow - mediaStackGuard)
+	if pad := mediaStackPad(0, 128); pad != nil {
+		t.Fatalf("a header clear of the edge was padded: %v", pad)
+	}
+	pad := mediaStackPad(edge-4, 128)
+	if len(pad) < 8 {
+		t.Fatalf("a header on the edge was not moved: %v", pad)
+	}
+	if start := edge - 4 + int64(len(pad)); start <= edge {
+		t.Fatalf("the header starts at %d, not past the edge %d", start, edge)
+	}
+	if pad := mediaStackPad(mediaStackWindow, 128); pad != nil {
+		t.Fatalf("the next window's header was padded: %v", pad)
+	}
+	if pad := mediaStackPad(edge+1, 128); pad != nil {
+		t.Fatalf("a header just past the edge was padded: %v", pad)
+	}
+}
+
+// TestPadFragmentHeaders checks the repair: a fragment header on a read window
+// edge is moved past it with a free box, and one already clear is left alone.
+func TestPadFragmentHeaders(t *testing.T) {
+	edge := mediaStackWindow - mediaStackGuard
+	init := mvhdInit(0, 1000)
+	// A free box ahead of the first fragment puts its styp four bytes before
+	// the first window edge.
+	filler := audioTestBox("free", make([]byte, edge-4-len(init)-8))
+	body := bytes.Join([][]byte{init, filler, audioTestSavedSegment(0x11), audioTestSavedSegment(0x22)}, nil)
+
+	got := padFragmentHeaders(body)
+	if len(got) == len(body) {
+		t.Fatal("a fragment header on the edge was not moved")
+	}
+	if !bytes.HasPrefix(got, body[:len(init)+len(filler)]) {
+		t.Fatal("the bytes before the fragment changed")
+	}
+	if next := padFragmentHeaders(got); !bytes.Equal(next, got) {
+		t.Fatal("a moved header was moved again")
+	}
+	if !bytes.HasSuffix(got, body[len(init)+len(filler):]) {
+		t.Fatal("the fragments after the padding changed")
+	}
+	if plain := audioTestSavedSegment(0x33); !bytes.Equal(padFragmentHeaders(plain), plain) {
+		t.Fatal("a fragment clear of every edge was rewritten")
+	}
+}
+
+// TestWriteSegmentPadsHeaderOnWindowEdge checks the save path: a segment whose
+// header lands on a read window edge is written behind a free box, and one
+// clear of every edge is written as it is.
+func TestWriteSegmentPadsHeaderOnWindowEdge(t *testing.T) {
+	edge := int64(mediaStackWindow - mediaStackGuard)
+	seg := audioTestSavedSegment(0x11)
+	var out bytes.Buffer
+	written, err := writeSegment(&out, edge-4, seg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out.Bytes()
+	if len(got) <= len(seg) || string(got[4:8]) != "free" {
+		t.Fatalf("the segment was not padded: %d bytes", len(got))
+	}
+	if !bytes.HasSuffix(got, seg) {
+		t.Fatal("the segment changed")
+	}
+	if written != edge-4+int64(len(got)) {
+		t.Fatalf("the write ended at %d; want %d", written, edge-4+int64(len(got)))
+	}
+	var plain bytes.Buffer
+	if _, err := writeSegment(&plain, 0, seg); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(plain.Bytes(), seg) {
+		t.Fatal("a segment clear of every edge was padded")
 	}
 }
 
