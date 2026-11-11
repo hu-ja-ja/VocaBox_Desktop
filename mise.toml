@@ -1,9 +1,9 @@
 [tools]
-go = "1.27.3"
+go = "1.27.4"
 # The GNU target carries the MinGW-w64 C runtime and rust-lld, so the helper
 # builds without MSVC or a separate MinGW install.
 rust = { version = "1.99.1-x86_64-pc-windows-gnu", mr_boxington = true }
-"mr-boxington" = "1.29.2"
+"mr-boxington" = "1.30.0"
 # The notices generator: cargo-about reads the helper's crates, go-licenses
 # the app's modules.
 "cargo:cargo-about" = "0.9.3"
