@@ -6,8 +6,6 @@ import (
 	"log"
 	"math"
 	"strconv"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
@@ -20,7 +18,7 @@ import (
 //
 // Every mutation happens on the window's UI thread: UI callbacks call the
 // command handler directly, and background work (acquisition, module events,
-// the position pull) comes back through post. In tests, without a window,
+// the position reports) comes back through post. In tests, without a window,
 // post runs inline.
 type playback struct {
 	app  *nativeApp
@@ -91,19 +89,18 @@ type playback struct {
 	// post runs fn on the UI thread; tests (no window) run it inline.
 	post func(fn func())
 
-	pollOnce sync.Once
-	polling  atomic.Bool
+	// positionRate is the rate last given to the player: zero while it
+	// reports none.
+	positionRate time.Duration
 }
 
-// positionPollInterval is how often the app reads the player's position
-// while a timed lyrics document shows: often enough for the lyrics to turn
-// with the vocal. positionPollIdleInterval is the rate otherwise, rare enough
-// that each pull's window rebuild does not crowd the player. The pull ticks at
-// the fast rate and skips ticks until the idle one, so the idle rate is a
-// whole number of ticks rather than the next one after it.
+// positionRateLyrics is how often the player reports its position while a
+// timed lyrics document follows the track: often enough for the lines to turn
+// with the vocal. positionRateIdle is the rate otherwise, rare enough that
+// each report's window rebuild does not crowd the player.
 const (
-	positionPollInterval     = 100 * time.Millisecond
-	positionPollIdleInterval = 3 * positionPollInterval
+	positionRateLyrics = 100 * time.Millisecond
+	positionRateIdle   = 3 * positionRateLyrics
 )
 
 // previousRestartMS is how far into a track the previous button restarts it
@@ -391,8 +388,7 @@ func (p *playback) sendPlay() {
 	_ = p.player.SetVolume(p.app.player.Volume)
 }
 
-// ensurePlayer makes the module's player when none runs, and the position
-// pull with it.
+// ensurePlayer makes the module's player when none runs.
 func (p *playback) ensurePlayer() error {
 	if p.player != nil {
 		return nil
@@ -403,7 +399,7 @@ func (p *playback) ensurePlayer() error {
 	}
 	p.player = player
 	p.events = player.OnEvent(p.handleEvent)
-	p.pollOnce.Do(func() { go p.pollPosition() })
+	p.positionRate = 0
 	return nil
 }
 
@@ -416,36 +412,37 @@ func (p *playback) closePlayer() {
 		_ = p.player.Close()
 	}
 	p.player, p.events = nil, nil
+	p.positionRate = 0
 }
 
-// pollInterval is how often the position pull runs now: the fast rate while
-// a timed lyrics document follows the track, the idle one otherwise.
-func (p *playback) pollInterval() time.Duration {
+// positionRateFor is the rate the player should report its position at: the
+// fast one while a timed lyrics document follows the track, the idle one
+// otherwise, and none while nothing plays.
+func (p *playback) positionRateFor() time.Duration {
+	if p.player == nil || !p.app.player.Ready || !p.app.player.Playing {
+		return 0
+	}
 	if p.app.lyricsSync.Load() {
-		return positionPollInterval
+		return positionRateLyrics
 	}
-	return positionPollIdleInterval
+	return positionRateIdle
 }
 
-// pollPosition reads the player's position while a track is playing. The
-// module keeps it as the media stack reports it, so the read is a cached
-// value, not work on the UI thread.
-func (p *playback) pollPosition() {
-	// The tick is the fast rate; the idle rate skips its ticks until enough
-	// time passed, so the window rebuilds less while no lyrics follow.
-	last := time.Time{}
-	for now := range time.Tick(positionPollInterval) {
-		if !p.polling.Load() || (!last.IsZero() && now.Sub(last) < p.pollInterval()) {
-			continue
-		}
-		last = now
-		p.post(func() {
-			if p.closing || p.player == nil || !p.app.player.Ready || !p.app.player.Playing {
-				return
-			}
-			p.applyPosition(p.player.Position())
-		})
+// syncPositionRate tells the player the rate the app reads its position at,
+// when it changed. The player reports only while a track plays, so a paused
+// app leaves it silent.
+func (p *playback) syncPositionRate() {
+	if p.player == nil {
+		return
 	}
+	rate := p.positionRateFor()
+	if rate == p.positionRate {
+		return
+	}
+	if err := p.player.SetPositionRate(rate); err != nil {
+		return
+	}
+	p.positionRate = rate
 }
 
 // handleEvent queues one player event for the UI thread.
@@ -489,12 +486,14 @@ func (p *playback) applyEvent(event ams.Event) {
 		p.app.advance()
 	case "failed":
 		p.bandFailed(event)
+	case "position":
+		p.applyPosition(event.MS)
 	}
 }
 
-// applyPosition records where the player is heard, as the position pull
-// reads it. While a lyric seek is on its way, the position lags the seek: the
-// target holds until the media stack gets there.
+// applyPosition records where the player reports it is heard. While a lyric
+// seek is on its way, the position lags the seek: the target holds until the
+// media stack gets there.
 func (p *playback) applyPosition(position float64) {
 	if !p.app.player.Ready {
 		return
@@ -707,7 +706,7 @@ func (p *playback) publish() {
 	} else {
 		st.Quality = qualityLabel(p.bitrates, p.variant)
 	}
-	p.polling.Store(!p.closing && p.player != nil && st.Ready && st.Playing)
+	p.syncPositionRate()
 	// The tray is the only place the app speaks while its window is hidden.
 	p.app.refreshTray()
 	// The tray and the window show the same player: a change made from the
@@ -721,7 +720,6 @@ func (p *playback) publish() {
 // shutdown ends the player for good, as the app quits.
 func (p *playback) shutdown() {
 	p.closing = true
-	p.polling.Store(false)
 	p.closePlayer()
 }
 

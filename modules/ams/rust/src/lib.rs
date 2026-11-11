@@ -8,7 +8,7 @@ mod mygo;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mygo::*;
 use windows::core::{Error as WinError, IInspectable, Ref, HRESULT, HSTRING};
@@ -26,8 +26,7 @@ use windows::Web::Http::HttpClient;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
-// How often the engine looks at a manifest download on its way, and refreshes
-// the position the app reads.
+// How often the engine looks at a manifest download on its way.
 const POLL: Duration = Duration::from_millis(20);
 
 // Subscribers is the app's event callback per subscription.
@@ -36,22 +35,12 @@ type Subscribers = Arc<Mutex<Vec<(u64, Arc<dyn Fn(Event) + Send + Sync>)>>>;
 pub fn make_player() -> Result<Arc<dyn Player>, Error> {
     let (ready_tx, ready_rx) = sync_channel::<Result<(), Error>>(1);
     let (tx, rx) = std::sync::mpsc::channel::<Command>();
-    let position = Arc::new(AtomicU64::new(0));
     let generation = Arc::new(AtomicI64::new(0));
     let subscribers: Subscribers = Arc::new(Mutex::new(Vec::new()));
-    let (worker_position, worker_generation, worker_subscribers) =
-        (position.clone(), generation.clone(), subscribers.clone());
+    let (worker_generation, worker_subscribers) = (generation.clone(), subscribers.clone());
     std::thread::Builder::new()
         .name("ams".into())
-        .spawn(move || {
-            run(
-                rx,
-                ready_tx,
-                worker_position,
-                worker_generation,
-                worker_subscribers,
-            )
-        })
+        .spawn(move || run(rx, ready_tx, worker_generation, worker_subscribers))
         .map_err(|err| Error::other(format!("ams: starting the player thread: {err}")))?;
     match ready_rx.recv() {
         Ok(Ok(())) => {}
@@ -60,7 +49,6 @@ pub fn make_player() -> Result<Arc<dyn Player>, Error> {
     }
     Ok(Arc::new(NativePlayer {
         tx: Mutex::new(tx),
-        position,
         subscribers,
         closed: AtomicBool::new(false),
         next_subscriber: AtomicU64::new(1),
@@ -69,10 +57,6 @@ pub fn make_player() -> Result<Arc<dyn Player>, Error> {
 
 struct NativePlayer {
     tx: Mutex<Sender<Command>>,
-    // position is the last position the media stack reported, in bits of an
-    // f64: the app reads it at its own rate instead of asking the media stack
-    // on the UI thread.
-    position: Arc<AtomicU64>,
     subscribers: Subscribers,
     closed: AtomicBool,
     next_subscriber: AtomicU64,
@@ -116,8 +100,8 @@ impl Player for NativePlayer {
         self.send(Command::Stop)
     }
 
-    fn position(&self) -> f64 {
-        f64::from_bits(self.position.load(Ordering::Relaxed))
+    fn set_position_rate(&self, every: Duration) -> Result<(), Error> {
+        self.send(Command::Rate(every))
     }
 
     fn on_event(&self, f: Arc<dyn Fn(Event) + Send + Sync>) -> Box<dyn Closer> {
@@ -140,7 +124,6 @@ impl Player for NativePlayer {
         if let Ok(tx) = self.tx.lock() {
             let _ = tx.send(Command::Close);
         }
-        self.position.store(0.0f64.to_bits(), Ordering::Relaxed);
         Ok(())
     }
 }
@@ -152,15 +135,15 @@ enum Command {
     Seek(f64),
     Volume(f64),
     Stop,
+    Rate(Duration),
     Close,
 }
 
 // run is the player's thread: it makes the media stack, hears the app's
-// commands, and keeps the position the app reads up to date.
+// commands, and reports the position at the rate the app asks for.
 fn run(
     rx: Receiver<Command>,
     ready: std::sync::mpsc::SyncSender<Result<(), Error>>,
-    position: Arc<AtomicU64>,
     generation: Arc<AtomicI64>,
     subscribers: Subscribers,
 ) {
@@ -273,22 +256,34 @@ fn run(
         pending: None,
         generation: 0,
         want_play: false,
-        position,
+        position_every: Duration::ZERO,
+        next_position: None,
         generation_name: generation,
         subscribers,
     };
     let _ = ready.send(Ok(()));
     loop {
         engine.poll();
-        engine.tick();
-        match rx.recv_timeout(POLL) {
-            Ok(Command::Close) => {
+        engine.report_position();
+        // Sleep until the next position is due, or a manifest needs looking
+        // at; with neither, until the app says something.
+        let command = match engine.wait() {
+            Some(wait) => match rx.recv_timeout(wait) {
+                Ok(command) => command,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            },
+            None => match rx.recv() {
+                Ok(command) => command,
+                Err(_) => break,
+            },
+        };
+        match command {
+            Command::Close => {
                 engine.stop();
                 break;
             }
-            Ok(command) => engine.handle(command),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
+            command => engine.handle(command),
         }
     }
     engine.stop();
@@ -307,7 +302,10 @@ struct Engine {
     pending: Option<Pending>,
     generation: i64,
     want_play: bool,
-    position: Arc<AtomicU64>,
+    // position_every is how often the app wants a position, zero for none;
+    // next_position is when the next one is due, none while it wants none.
+    position_every: Duration,
+    next_position: Option<Instant>,
     // generation_name names the load the current source belongs to, on every
     // event the media stack reports: the app drops the events of a replaced
     // track by it.
@@ -342,6 +340,11 @@ impl Engine {
             }
             Command::Volume(value) => {
                 let _ = self.player.SetVolume(value.clamp(0.0, 1.0));
+            }
+            Command::Rate(every) => {
+                self.position_every = every;
+                self.next_position =
+                    (every > Duration::ZERO && self.source.is_some()).then(Instant::now);
             }
             Command::Stop => self.stop(),
             Command::Close => {}
@@ -416,6 +419,7 @@ impl Engine {
             .store(load.generation, Ordering::SeqCst);
         let _ = self.player.SetSource(&source);
         self.source = Some(source);
+        self.arm_position();
         if self.want_play {
             let _ = self.player.Play();
         }
@@ -510,6 +514,7 @@ impl Engine {
         if let Some(source) = self.source.as_ref() {
             let _ = self.player.SetSource(source);
         }
+        self.arm_position();
         // A track installed for a pause, or paused while its manifest
         // downloaded, stays paused: the UI's play state and the app's
         // wantPlaying must agree.
@@ -518,26 +523,67 @@ impl Engine {
         }
     }
 
-    // tick refreshes the position the app reads. The media stack is asked on
-    // this thread only.
-    fn tick(&mut self) {
-        let ms = if self.source.is_none() {
-            0.0
-        } else {
-            self.player
-                .PlaybackSession()
-                .and_then(|session| session.Position())
-                .map_or(0.0, |position| position.Duration as f64 / 10_000.0)
+    // report_position sends the position when one is due, at the rate the app
+    // set. Only this thread asks the media stack for it.
+    fn report_position(&mut self) {
+        let Some(due) = self.next_position else {
+            return;
         };
-        self.position.store(ms.to_bits(), Ordering::Relaxed);
+        if self.position_every == Duration::ZERO || self.source.is_none() {
+            self.next_position = None;
+            return;
+        }
+        let now = Instant::now();
+        if now < due {
+            return;
+        }
+        let ms = self
+            .player
+            .PlaybackSession()
+            .and_then(|session| session.Position())
+            .map_or(0.0, |position| position.Duration as f64 / 10_000.0);
+        emit(
+            &self.subscribers,
+            Event {
+                event: "position".into(),
+                ms,
+                generation: self.generation_name.load(Ordering::SeqCst),
+                ..Default::default()
+            },
+        );
+        self.next_position = Some(now + self.position_every);
+    }
+
+    // wait is how long the thread may sleep: until the next position is due,
+    // or a manifest needs looking at. None when nothing is pending.
+    fn wait(&self) -> Option<Duration> {
+        let mut wait: Option<Duration> = None;
+        if self.pending.is_some() {
+            wait = Some(POLL);
+        }
+        if self.position_every > Duration::ZERO && self.source.is_some() {
+            if let Some(due) = self.next_position {
+                let left = due.saturating_duration_since(Instant::now());
+                wait = Some(wait.map_or(left, |wait| wait.min(left)));
+            }
+        }
+        wait
+    }
+
+    // arm_position makes a source that just landed report its position at
+    // once, so the app does not wait a whole interval for the first one.
+    fn arm_position(&mut self) {
+        if self.position_every > Duration::ZERO && self.source.is_some() {
+            self.next_position = Some(Instant::now());
+        }
     }
 
     fn stop(&mut self) {
         self.generation += 1;
         self.generation_name.store(0, Ordering::SeqCst);
-        self.position.store(0.0f64.to_bits(), Ordering::Relaxed);
         self.want_play = false;
         self.pending = None;
+        self.next_position = None;
         let _ = self.player.Pause();
         let _ = self.player.SetSource(None::<&IMediaPlaybackSource>);
         self.source = None;

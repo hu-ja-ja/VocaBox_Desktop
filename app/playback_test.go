@@ -16,10 +16,9 @@ import (
 // fakePlayer is the module's Player: it records what the playback asks of it,
 // and lets a test fire events into the engine.
 type fakePlayer struct {
-	mu       sync.Mutex
-	calls    []fakeCall
-	onEvent  func(ams.Event)
-	position float64
+	mu      sync.Mutex
+	calls   []fakeCall
+	onEvent func(ams.Event)
 	// failPlay makes the next Play fail, as a player the module lost does.
 	failPlay error
 	closed   bool
@@ -30,8 +29,9 @@ type fakePlayer struct {
 type fakeCall struct {
 	Name string
 	ams.Load
-	MS    float64 // seek
-	Value float64 // volume
+	MS    float64       // seek
+	Value float64       // volume
+	Rate  time.Duration // rate
 }
 
 func (f *fakePlayer) Play(load ams.Load) error {
@@ -70,10 +70,11 @@ func (f *fakePlayer) SetVolume(v float64) error {
 	return nil
 }
 
-func (f *fakePlayer) Position() float64 {
+func (f *fakePlayer) SetPositionRate(every time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.position
+	f.calls = append(f.calls, fakeCall{Name: "rate", Rate: every})
+	return nil
 }
 
 func (f *fakePlayer) OnEvent(fn func(ams.Event)) io.Closer {
@@ -232,20 +233,26 @@ func TestPlaybackCarriesTheWatchLyricsAnswer(t *testing.T) {
 	}
 }
 
-// TestPositionPollIntervalFollowsTheLyrics checks the position pull keeps the
-// slow rate until a timed document follows the track.
-func TestPositionPollIntervalFollowsTheLyrics(t *testing.T) {
-	p, _, _ := newTestPlayback(t)
-	if positionPollIdleInterval%positionPollInterval != 0 {
-		t.Fatalf("the idle interval %v is not whole ticks of %v, so every pull would drift",
-			positionPollIdleInterval, positionPollInterval)
+// TestPositionRateFollowsTheLyrics checks the rate the player reports at: the
+// idle one while it plays, the fast one while a timed document follows, and
+// none while nothing plays.
+func TestPositionRateFollowsTheLyrics(t *testing.T) {
+	p, player, _ := newTestPlayback(t)
+	if positionRateIdle%positionRateLyrics != 0 {
+		t.Fatalf("the idle rate %v is not whole reports of %v", positionRateIdle, positionRateLyrics)
 	}
-	if got := p.pollInterval(); got != positionPollIdleInterval {
-		t.Fatalf("poll interval = %v; want the idle %v", got, positionPollIdleInterval)
+	p.player = player
+	p.app.player.Ready, p.app.player.Playing = true, true
+	if got := p.positionRateFor(); got != positionRateIdle {
+		t.Fatalf("rate = %v; want the idle %v", got, positionRateIdle)
 	}
 	p.app.lyricsSync.Store(true)
-	if got := p.pollInterval(); got != positionPollInterval {
-		t.Fatalf("poll interval = %v; want the lyrics %v", got, positionPollInterval)
+	if got := p.positionRateFor(); got != positionRateLyrics {
+		t.Fatalf("rate = %v; want the lyrics %v", got, positionRateLyrics)
+	}
+	p.app.player.Playing = false
+	if got := p.positionRateFor(); got != 0 {
+		t.Fatalf("rate = %v; want none while paused", got)
 	}
 }
 
@@ -288,9 +295,18 @@ func TestPlaybackOpenedReportsDuration(t *testing.T) {
 	if !p.app.player.Ready || !p.app.player.Playing || p.app.player.DurationMS != 120000 {
 		t.Fatalf("player = %#v", p.app.player)
 	}
-	p.applyPosition(42000)
+	// Playing tells the player to report its position: the idle rate while
+	// no timed lyrics follow.
+	if rate, ok := player.last("rate"); !ok || rate.Rate != positionRateIdle {
+		t.Fatalf("position rate = %#v, %v; want the idle %v", rate, ok, positionRateIdle)
+	}
+	p.handleEvent(ams.Event{Event: "position", MS: 42000, Generation: play.Generation})
 	if p.app.player.PositionMS != 42000 {
 		t.Fatalf("position = %v", p.app.player.PositionMS)
+	}
+	p.pause()
+	if rate, ok := player.last("rate"); !ok || rate.Rate != 0 {
+		t.Fatalf("position rate while paused = %#v, %v; want none", rate, ok)
 	}
 }
 

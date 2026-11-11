@@ -146,7 +146,7 @@ func TestNativeUILyricsFloatsOverTheQueue(t *testing.T) {
 		t.Fatalf("the provider was called %d times; want the document reused", provider.calls)
 	}
 	if !app.lyricsSync.Load() {
-		t.Fatal("a timed document did not ask for the fast position pull")
+		t.Fatal("a timed document did not ask for the fast position reports")
 	}
 }
 
@@ -165,7 +165,7 @@ func TestNativeUILyricsStateSurvivesQueueToggle(t *testing.T) {
 		t.Fatalf("the lyrics card remained visible after the queue closed: %q", tester.Texts())
 	}
 	if app.lyricsSync.Load() {
-		t.Fatal("hidden timed lyrics kept the fast position pull enabled")
+		t.Fatal("hidden timed lyrics kept the fast position reports enabled")
 	}
 
 	app.toggleQueue()
@@ -178,7 +178,7 @@ func TestNativeUILyricsStateSurvivesQueueToggle(t *testing.T) {
 		t.Fatalf("reopening the card fetched lyrics again: %d calls", provider.calls)
 	}
 	if !app.lyricsSync.Load() {
-		t.Fatal("visible timed lyrics did not restore the fast position pull")
+		t.Fatal("visible timed lyrics did not restore the fast position reports")
 	}
 
 	if err := tester.Click(locales.LyricsClose()); err != nil {
@@ -753,7 +753,7 @@ func TestNativeUILyricsUntimedShowsTheWhole(t *testing.T) {
 		t.Fatalf("the whole document is not shown: %q", tester.Texts())
 	}
 	if app.lyricsSync.Load() {
-		t.Fatal("an untimed document asked for the fast position pull")
+		t.Fatal("an untimed document asked for the fast position reports")
 	}
 }
 

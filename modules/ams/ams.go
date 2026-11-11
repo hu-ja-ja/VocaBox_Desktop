@@ -4,7 +4,10 @@
 // pipe (see 要件/再生バックエンド調査-決定.md).
 package ams
 
-import "io"
+import (
+	"io"
+	"time"
+)
 
 // Player plays one track at a time.
 //
@@ -27,9 +30,10 @@ type Player interface {
 	SetVolume(v float64) error
 	// Stop drops the track.
 	Stop() error
-	// Position is where the track playing is heard, in milliseconds. It is
-	// the last position the media stack reported, not a query.
-	Position() float64
+	// SetPositionRate says how often the player reports its position, about
+	// every every; zero stops the reports. The reports come as "position"
+	// events.
+	SetPositionRate(every time.Duration) error
 	// OnEvent calls f for each event of the player until the subscription
 	// is closed. f runs on the main thread.
 	OnEvent(f func(Event)) io.Closer
@@ -55,12 +59,14 @@ type Load struct {
 	Start bool
 }
 
-// Event is what the player reports: opened, ended or failed.
+// Event is what the player reports: opened, ended, failed or position.
 type Event struct {
-	// Event is "opened", "ended" or "failed".
+	// Event is "opened", "ended", "failed" or "position".
 	Event string
 	// DurationMS is the track's length, when the media stack knows it.
 	DurationMS float64
+	// MS is where the track is heard, a "position" event's.
+	MS float64
 	// Code, Ext and Msg describe a failure: the media stack's error name,
 	// its HResult for the log, and its message for the user.
 	Code string

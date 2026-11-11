@@ -38,12 +38,12 @@ func TestPlaybackE2E(t *testing.T) {
 	}
 
 	// The position advances on its own.
-	position := waitPosition(t, player, 1000, 15*time.Second)
+	position := waitPosition(t, events, 1000, 15*time.Second)
 	// A seek lands where it was asked to.
 	if err := player.Seek(55_000); err != nil {
 		t.Fatal(err)
 	}
-	position = waitPosition(t, player, 54_000, 15*time.Second)
+	position = waitPosition(t, events, 54_000, 15*time.Second)
 	if position > 60_000 {
 		t.Fatalf("seek overshot: %vms", position)
 	}
@@ -53,14 +53,14 @@ func TestPlaybackE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(500 * time.Millisecond)
-	paused := player.Position()
+	paused := waitPosition(t, events, position, 5*time.Second)
 	if paused-position > 300 {
 		t.Fatalf("the position moved while paused: %v -> %v", position, paused)
 	}
 	if err := player.Resume(); err != nil {
 		t.Fatal(err)
 	}
-	waitPosition(t, player, paused+500, 10*time.Second)
+	waitPosition(t, events, paused+500, 10*time.Second)
 
 	// Switching tracks replaces the source playing: the replaced track's
 	// media objects are disposed, and the one replacing it opens in their
@@ -89,6 +89,10 @@ func e2ePlayer(t *testing.T) (ams.Player, <-chan ams.Event) {
 	if err := player.SetVolume(0); err != nil {
 		t.Fatal(err)
 	}
+	// The app asks for a position at a rate; nothing comes unasked.
+	if err := player.SetPositionRate(positionRateLyrics); err != nil {
+		t.Fatal(err)
+	}
 	events := make(chan ams.Event, 64)
 	sub := player.OnEvent(func(event ams.Event) { events <- event })
 	t.Cleanup(func() { _ = sub.Close() })
@@ -115,20 +119,23 @@ func waitEvent(t *testing.T, events <-chan ams.Event, name string, timeout time.
 	}
 }
 
-// waitPosition reads the position until it reaches at least min.
-func waitPosition(t *testing.T, player ams.Player, min float64, timeout time.Duration) float64 {
+// waitPosition waits for a position report at or past min.
+func waitPosition(t *testing.T, events <-chan ams.Event, min float64, timeout time.Duration) float64 {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	var position float64
-	for time.Now().Before(deadline) {
-		position = player.Position()
-		if position >= min {
-			return position
+	deadline := time.After(timeout)
+	for {
+		select {
+		case event := <-events:
+			if event.Event == "failed" {
+				t.Fatalf("player failed: code=%s ext=0x%08X msg=%s", event.Code, event.Ext, event.Msg)
+			}
+			if event.Event == "position" && event.MS >= min {
+				return event.MS
+			}
+		case <-deadline:
+			t.Fatalf("no position of %vms within %s", min, timeout)
 		}
-		time.Sleep(200 * time.Millisecond)
 	}
-	t.Fatalf("position stuck at %vms; want at least %vms", position, min)
-	return position
 }
 
 // TestOfflineSaveE2E saves a real track and plays the saved file through the
@@ -158,11 +165,11 @@ func TestOfflineSaveE2E(t *testing.T) {
 	if opened.DurationMS < 60_000 {
 		t.Fatalf("duration = %vms; want the track's", opened.DurationMS)
 	}
-	waitPosition(t, player, 1000, 15*time.Second)
+	waitPosition(t, events, 1000, 15*time.Second)
 	if err := player.Seek(55_000); err != nil {
 		t.Fatal(err)
 	}
-	if position := waitPosition(t, player, 54_000, 15*time.Second); position > 60_000 {
+	if position := waitPosition(t, events, 54_000, 15*time.Second); position > 60_000 {
 		t.Fatalf("seek overshot: %vms", position)
 	}
 }

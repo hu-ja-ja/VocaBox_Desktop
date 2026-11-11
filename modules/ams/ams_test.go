@@ -9,8 +9,8 @@ import (
 )
 
 // TestPlayerPlaysASilentFile drives the real module with a silent WAV: the
-// player is made, a load opens with its generation, the position advances,
-// and the track ends. The volume is zero, so nothing is heard.
+// player is made, a load opens with its generation, the position reports as
+// the app asks, and the track ends. The volume is zero, so nothing is heard.
 func TestPlayerPlaysASilentFile(t *testing.T) {
 	player, err := NewPlayer()
 	if err != nil {
@@ -18,6 +18,10 @@ func TestPlayerPlaysASilentFile(t *testing.T) {
 	}
 	defer player.Close()
 	_ = player.SetVolume(0)
+	// The app asks for a position at a rate; nothing comes unasked.
+	if err := player.SetPositionRate(50 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
 	events := make(chan Event, 16)
 	sub := player.OnEvent(func(event Event) { events <- event })
 	defer sub.Close()
@@ -36,15 +40,30 @@ func TestPlayerPlaysASilentFile(t *testing.T) {
 		t.Fatalf("opened duration = %vms; want the file's second", opened.DurationMS)
 	}
 
-	// The position is the media stack's, refreshed while the track plays.
-	deadline := time.Now().Add(5 * time.Second)
-	for player.Position() < 100 && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if position := player.Position(); position < 100 {
+	// The position is the media stack's, reported while the track plays.
+	if position := waitPosition(t, events, 100); position < 100 {
 		t.Fatalf("position stuck at %vms; want it to advance", position)
 	}
 	waitEvent(t, events, "ended")
+}
+
+// waitPosition waits for a position event at or past min.
+func waitPosition(t *testing.T, events <-chan Event, min float64) float64 {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Event == "failed" {
+				t.Fatalf("player failed: code=%s ext=%d msg=%s", event.Code, event.Ext, event.Msg)
+			}
+			if event.Event == "position" && event.MS >= min {
+				return event.MS
+			}
+		case <-deadline:
+			t.Fatalf("no position of %vms within 10s", min)
+		}
+	}
 }
 
 // waitEvent waits for one event of the named kind, failing on playback
