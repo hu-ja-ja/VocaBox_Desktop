@@ -478,15 +478,16 @@ func TestNativeUILyricsClickSeeksToTheLine(t *testing.T) {
 	if app.seekValue != app.player.PositionMS {
 		t.Fatalf("the player bar did not follow the clicked line: value=%v position=%v", app.seekValue, app.player.PositionMS)
 	}
-	// The helper starts 100ms early. Its first report must not rewind the
-	// highlighted line; the normal position takes over once playback catches up.
+	// The media stack starts 100ms early. Its first report must not rewind
+	// the highlighted line; the normal position takes over once playback
+	// catches up.
 	app.player.Playing = true
 	player := &playback{app: app, gen: 1}
-	player.applyEvent(helperEvent{Gen: 1, Event: "position", MS: 6000 - lyricsSeekLeadMS})
+	player.applyPosition(6000 - lyricsSeekLeadMS)
 	if app.player.PositionMS != 6000 || app.lyricsDoc.LineAt(app.lyricsPosition()) != 1 {
 		t.Fatalf("the first playback report rewound the lyrics: position=%v line=%d", app.player.PositionMS, app.lyricsDoc.LineAt(app.lyricsPosition()))
 	}
-	player.applyEvent(helperEvent{Gen: 1, Event: "position", MS: 6020})
+	player.applyPosition(6020)
 	if app.player.PositionMS != 6020 || app.lyricsSeekPending {
 		t.Fatalf("the player position did not take over after reaching the clicked line: position=%v pending=%v", app.player.PositionMS, app.lyricsSeekPending)
 	}

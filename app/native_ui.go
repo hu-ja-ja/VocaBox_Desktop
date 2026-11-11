@@ -95,7 +95,7 @@ type nativeApp struct {
 	// view's state to one goroutine, in the app and in a test alike.
 	heldMu sync.Mutex
 	held   []func()
-	// playback is the player: the queue and the AmsHelper child process.
+	// playback is the player: the queue and the ams native module.
 	// Tests leave it nil and inspect the commands the UI sent instead.
 	playback *playback
 	// discordOn says the Discord Rich Presence is on, and discord the client

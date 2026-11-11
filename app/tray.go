@@ -14,7 +14,7 @@ import (
 )
 
 // VocaBox lives on in the notification area once its window closes: playback
-// goes on in the AmsHelper child process, and the tray icon is both the way
+// goes on in the app's process, and the tray icon is both the way
 // back in and the transport while the window is away.
 
 // trayIconSize is the icon's edge in pixels: 32 for a 16-point icon on a

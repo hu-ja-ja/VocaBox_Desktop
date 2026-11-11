@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/hu-ja-ja/VocaBox_Desktop/modules/ams"
 )
 
 // TestDiscordPresenceCard checks the card the track playing shows: the shape
@@ -77,12 +79,12 @@ func (f *fakeDiscord) Disconnect()                     { f.stops++ }
 // not show, and the card taken off when the track goes or the setting turns
 // off.
 func TestPlaybackSendsDiscordPresence(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	discord := &fakeDiscord{}
 	p.app.discord = discord
 	p.app.discordOn = true
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
+	play := selectPlayed(t, p, player, "sm1")
 
 	if len(discord.activities) != 1 {
 		t.Fatalf("activities = %#v", discord.activities)
@@ -92,7 +94,7 @@ func TestPlaybackSendsDiscordPresence(t *testing.T) {
 	}
 
 	// The track opening reports the same card: it is not sent again.
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: play.Gen})
+	p.handleEvent(ams.Event{Event: "opened", DurationMS: 120000, Generation: play.Generation})
 	if len(discord.activities) != 1 {
 		t.Fatalf("the same card was sent again: %#v", discord.activities)
 	}

@@ -136,7 +136,7 @@ func (app *nativeApp) aboutCard(c *ui.Context) {
 	})
 }
 
-// licensesCard lists the works the app and its playback helper bundle: each
+// licensesCard lists the works the app and its player bundle: each
 // row names the work and the terms it is under, and opens onto the copyright,
 // where it comes from, and the text of those terms.
 func (app *nativeApp) licensesCard(c *ui.Context) {

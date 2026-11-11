@@ -199,7 +199,7 @@ func (n *Nico) User() (nicoUser, error) {
 	return nicoUser{Nickname: resp.Data.User.Nickname, IconURL: icon}, nil
 }
 
-// playbackSources is everything the helper needs for one track: the audio
+// playbackSources is everything the player needs for one track: the audio
 // media playlist URLs, the highest band first (the Go side falls back to the
 // next one when playback of a band fails), and the Cookie and User-Agent the
 // delivery hosts expect. File is the track's saved copy instead: it plays
@@ -430,7 +430,7 @@ var (
 // (#EXT-X-MEDIA TYPE=AUDIO, which is how niconico lists them — the same
 // video media playlist is shared by several stream variants), highest
 // bitrate first. The URI is the absolute signed URL of the audio media
-// playlist, which is what the helper must be fed: handed the master, AMS
+// playlist, which is what the player must be fed: handed the master, AMS
 // would download video too.
 func audioVariants(master string) []audioVariant {
 	var audio []audioVariant
@@ -451,7 +451,7 @@ func audioVariants(master string) []audioVariant {
 func (n *Nico) SessionCookie(rawURL string) string { return n.cookieHeader(rawURL) }
 
 // cookieHeader is the Cookie header value the jar would send to rawURL. The
-// helper hands it to its own HTTP stack, which has no jar of the app's.
+// the player hands it to its own HTTP stack, which has no jar of the app's.
 func (n *Nico) cookieHeader(rawURL string) string {
 	u, err := neturl.Parse(rawURL)
 	if err != nil {

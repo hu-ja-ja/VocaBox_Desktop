@@ -1,31 +1,32 @@
 [tools]
 go = "1.27.3"
-# The GNU target carries the MinGW-w64 C runtime and rust-lld, so the helper
-# builds without MSVC or a separate MinGW install.
-rust = { version = "1.99.1-x86_64-pc-windows-gnu", mr_boxington = true }
+# mygo builds native modules with MSVC on Windows, and the Visual Studio
+# build tools carry its linker and Windows SDK.
+rust = { version = "1.99.1-x86_64-pc-windows-msvc", mr_boxington = true }
 "mr-boxington" = "1.29.2"
-# The notices generator: cargo-about reads the helper's crates, go-licenses
-# the app's modules.
+# The notices generator: cargo-about reads the native module's crates,
+# go-licenses the app's modules.
 "cargo:cargo-about" = "0.9.3"
 "go:github.com/google/go-licenses/v2" = "2.0.1"
 
-[tasks.helper]
-run = 'cargo build --release --manifest-path helper/Cargo.toml && copy /y helper\target\release\AmsHelper.exe resources\AmsHelper.exe'
-
-[tasks.dev]
-depends = ["helper"]
 # A language it ships, as ja, en, zh-Hans or zh-Hant, for one run: -lang
 # leaves the app's own language setting alone. Without one the app follows
 # the system's.
+[tasks.dev]
 usage = 'arg "[lang]" help="language tag, as ja, en, zh-Hans or zh-Hant"'
 run = 'go tool mygo dev{% if usage.lang is defined and usage.lang %} -lang {{ usage.lang }}{% endif %}'
 
 [tasks.build]
-depends = ["helper"]
 run = "go tool mygo build"
 
-# Writes THIRD_PARTY_NOTICES.md from the app's Go modules, the helper's Rust
-# crates and the Lucide icons; notices-check reports a stale file instead.
+# go test runs the module MyGo built last, so build it for this machine
+# first: without it the module's own test skips itself.
+[tasks.test]
+run = "go tool mygo native build -target host ./modules/ams && go test ./..."
+
+# Writes THIRD_PARTY_NOTICES.md from the app's Go modules, the native
+# module's Rust crates and the Lucide icons; notices-check reports a stale
+# file instead.
 [tasks.notices]
 run = "go run ./tools/notices"
 

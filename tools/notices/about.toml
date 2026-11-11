@@ -5,7 +5,7 @@ accepted = [
     "Unlicense",
 ]
 
-# AmsHelper is this app's own crate: its licence is the app's, stated in the
-# header of the notices.
+# The ams module is this app's own crate: its licence is the app's, stated in
+# the header of the notices.
 [private]
 ignore = true

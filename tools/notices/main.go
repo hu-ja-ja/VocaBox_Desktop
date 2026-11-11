@@ -134,7 +134,7 @@ func mainModule() (file, module string, err error) {
 
 // collect lists every work the app bundles, the fonts it draws its interface
 // in, the icons it takes from Lucide, the Go modules it links and the crates
-// the helper bundles, sorted by name.
+// its native module bundles, sorted by name.
 func collect(root, module string) ([]entry, error) {
 	fonts, err := fontEntries(root)
 	if err != nil {
@@ -370,8 +370,8 @@ func savedLicense(dir, module string) ([]string, error) {
 	return texts, nil
 }
 
-// rustEntries flattens what cargo-about found in the helper's crates: one
-// entry per crate, under the licence whose text the app shows for it.
+// rustEntries flattens what cargo-about found in the native module's crates:
+// one entry per crate, under the licence whose text the app shows for it.
 func rustEntries(root string) ([]entry, error) {
 	dir, err := os.MkdirTemp("", "notices-rust")
 	if err != nil {
@@ -380,7 +380,7 @@ func rustEntries(root string) ([]entry, error) {
 	defer os.RemoveAll(dir)
 	out := filepath.Join(dir, "about.json")
 	if _, err := output(root, "cargo", "about", "generate", "--format", "json",
-		"-m", filepath.Join("helper", "Cargo.toml"),
+		"-m", filepath.Join("modules", "ams", "rust", "Cargo.toml"),
 		"-c", filepath.Join("tools", "notices", "about.toml"),
 		"-o", out); err != nil {
 		return nil, err
@@ -472,7 +472,7 @@ const (
 	GroupRustCrates   = "Rust crates"
 )
 
-// Entries lists the works the app and its playback helper bundle, sorted by
+// Entries lists the works the app and its player bundle, sorted by
 // name.
 var Entries = []Entry{
 `)
@@ -575,7 +575,7 @@ func groupIntro(group string) string {
 	case goModules:
 		return "The app links the modules below."
 	case rustCrates:
-		return "AmsHelper, the playback helper, bundles the crates below."
+		return "ams, the app's player, bundles the crates below."
 	}
 	return ""
 }

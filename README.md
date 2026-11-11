@@ -66,5 +66,5 @@ mise dev zh-Hant  # 中国語（繁体字）
 
 ```sh
 mise build
-go test ./...
+mise test
 ```
