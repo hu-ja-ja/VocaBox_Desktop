@@ -636,7 +636,7 @@ For more information, please refer to <https://unlicense.org/>
 
 Used by:
 
-- github.com/egoist/mygo v0.8.3
+- github.com/egoist/mygo v0.9.0
 
 ```
 MIT License
