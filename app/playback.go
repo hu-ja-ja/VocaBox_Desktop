@@ -507,6 +507,9 @@ func (p *playback) applyPosition(position float64) {
 		}
 	}
 	p.app.player.PositionMS = position
+	// The card the tray shows reads the same position: a window of its own
+	// gets no frame from the main window's updates.
+	p.app.refreshTray()
 }
 
 // bandFailed handles a failed band: the next one down is tried from the
