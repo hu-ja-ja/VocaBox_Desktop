@@ -262,29 +262,42 @@ fn run(
         subscribers,
     };
     let _ = ready.send(Ok(()));
-    loop {
-        engine.poll();
-        engine.report_position();
-        // Sleep until the next position is due, or a manifest needs looking
-        // at; with neither, until the app says something.
-        let command = match engine.wait() {
-            Some(wait) => match rx.recv_timeout(wait) {
-                Ok(command) => command,
-                Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => break,
-            },
-            None => match rx.recv() {
-                Ok(command) => command,
-                Err(_) => break,
-            },
-        };
-        match command {
-            Command::Close => {
-                engine.stop();
-                break;
+    // A panic here would leave the app talking to a player that no longer
+    // answers: report it as the load's failure instead, so the app falls back
+    // or shows the error, and the next play makes a new player.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        loop {
+            engine.poll();
+            engine.report_position();
+            // Sleep until the next position is due, or a manifest needs
+            // looking at; with neither, until the app says something.
+            let command = match engine.wait() {
+                Some(wait) => match rx.recv_timeout(wait) {
+                    Ok(command) => command,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                },
+                None => match rx.recv() {
+                    Ok(command) => command,
+                    Err(_) => return,
+                },
+            };
+            match command {
+                Command::Close => return,
+                command => engine.handle(command),
             }
-            command => engine.handle(command),
         }
+    }));
+    if outcome.is_err() {
+        let generation = engine.generation;
+        let name = engine.generation_name.load(Ordering::SeqCst);
+        engine.fail(
+            generation,
+            name,
+            "Exception",
+            0,
+            "ams: the player thread stopped after an unexpected error",
+        );
     }
     engine.stop();
 }

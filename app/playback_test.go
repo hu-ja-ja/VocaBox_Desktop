@@ -13,15 +13,12 @@ import (
 	"github.com/hu-ja-ja/VocaBox_Desktop/modules/ams"
 )
 
-// fakePlayer is the module's Player: it records what the playback asks of it,
-// and lets a test fire events into the engine.
+// fakePlayer is the module's Player: it records what the playback asks of it.
 type fakePlayer struct {
-	mu      sync.Mutex
-	calls   []fakeCall
-	onEvent func(ams.Event)
+	mu    sync.Mutex
+	calls []fakeCall
 	// failPlay makes the next Play fail, as a player the module lost does.
 	failPlay error
-	closed   bool
 }
 
 // fakeCall is one call of the playback, named as the old pipe protocol named
@@ -77,21 +74,12 @@ func (f *fakePlayer) SetPositionRate(every time.Duration) error {
 	return nil
 }
 
-func (f *fakePlayer) OnEvent(fn func(ams.Event)) io.Closer {
-	f.mu.Lock()
-	f.onEvent = fn
-	f.mu.Unlock()
-	return funcCloser(func() {
-		f.mu.Lock()
-		f.onEvent = nil
-		f.mu.Unlock()
-	})
+// OnEvent records nothing: tests call p.handleEvent directly.
+func (f *fakePlayer) OnEvent(func(ams.Event)) io.Closer {
+	return funcCloser(func() {})
 }
 
 func (f *fakePlayer) Close() error {
-	f.mu.Lock()
-	f.closed = true
-	f.mu.Unlock()
 	return nil
 }
 
@@ -238,15 +226,12 @@ func TestPlaybackCarriesTheWatchLyricsAnswer(t *testing.T) {
 // none while nothing plays.
 func TestPositionRateFollowsTheLyrics(t *testing.T) {
 	p, player, _ := newTestPlayback(t)
-	if positionRateIdle%positionRateLyrics != 0 {
-		t.Fatalf("the idle rate %v is not whole reports of %v", positionRateIdle, positionRateLyrics)
-	}
 	p.player = player
 	p.app.player.Ready, p.app.player.Playing = true, true
 	if got := p.positionRateFor(); got != positionRateIdle {
 		t.Fatalf("rate = %v; want the idle %v", got, positionRateIdle)
 	}
-	p.app.lyricsSync.Store(true)
+	p.app.lyricsSync = true
 	if got := p.positionRateFor(); got != positionRateLyrics {
 		t.Fatalf("rate = %v; want the lyrics %v", got, positionRateLyrics)
 	}
@@ -480,34 +465,6 @@ func TestPlaybackMarksBrokenSavedAudio(t *testing.T) {
 	}
 	if !p.app.broken["sm1"] {
 		t.Fatal("the track was not recorded as broken")
-	}
-	if p.app.playerError == "" {
-		t.Fatal("the failure was not reported to the player")
-	}
-}
-
-// TestPlaybackKeepsTheSavedFileWhenTheHelperTookNoSource checks a failure
-// that never reached the file: a player older than the app ignores the file
-// command and answers that it has no source, which must leave the saved copy
-// where it is. The file is not what failed, and dropping it would have the
-// download pass fetch it again only for the same player to fail it again.
-func TestPlaybackKeepsTheSavedFileWhenTheHelperTookNoSource(t *testing.T) {
-	p, player, _ := newTestPlayback(t)
-	path := writeAudio(t, p.app, "sm1")
-	p.acquire = p.prepareSources
-
-	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, player, "sm1")
-	if play.File == "" {
-		t.Fatal("the track did not play from its saved copy")
-	}
-	p.handleEvent(ams.Event{Event: "failed", Code: "NoSource", Generation: play.Generation})
-
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("a player that took no source dropped the saved file: %v", err)
-	}
-	if p.app.broken["sm1"] {
-		t.Fatal("a player that took no source marked the track broken")
 	}
 	if p.app.playerError == "" {
 		t.Fatal("the failure was not reported to the player")

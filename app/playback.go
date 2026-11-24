@@ -69,8 +69,6 @@ type playback struct {
 	// it.
 	player ams.Player
 	events io.Closer
-	// closing says the app is quitting: a module failure is then no error.
-	closing bool
 	// loadToken invalidates the acquisitions of earlier tracks.
 	loadToken uint64
 	// gen names the track load the player's current source was started for:
@@ -363,7 +361,10 @@ func (p *playback) prepareSources(item MylistItem) (playbackSources, error) {
 // not play on its own.
 func (p *playback) sendPlay() {
 	if err := p.ensurePlayer(); err != nil {
-		p.fail(err)
+		// The module's own error names what failed (a missing DLL, the media
+		// stack): it belongs in the log, not in the player bar.
+		log.Printf("ams: making the player: %v", err)
+		p.fail(errors.New(locales.ErrPlayerConnect()))
 		return
 	}
 	load := ams.Load{Generation: p.gen, Start: p.wantPlaying}
@@ -422,15 +423,15 @@ func (p *playback) positionRateFor() time.Duration {
 	if p.player == nil || !p.app.player.Ready || !p.app.player.Playing {
 		return 0
 	}
-	if p.app.lyricsSync.Load() {
+	if p.app.lyricsSync {
 		return positionRateLyrics
 	}
 	return positionRateIdle
 }
 
 // syncPositionRate tells the player the rate the app reads its position at,
-// when it changed. The player reports only while a track plays, so a paused
-// app leaves it silent.
+// when it changed. The player reports while a source is loaded, paused or
+// not, so the app asks for none unless the track plays.
 func (p *playback) syncPositionRate() {
 	if p.player == nil {
 		return
@@ -524,10 +525,8 @@ func (p *playback) bandFailed(event ams.Event) {
 		return
 	}
 	// A saved copy that failed is dropped and recorded, so the list shows it
-	// as broken and the next pass fetches it again. A play that never took
-	// the file on at all — an unknown request — leaves it where it is: the
-	// file is not what failed.
-	if p.file != "" && event.Code != "NoSource" {
+	// as broken and the next pass fetches it again.
+	if p.file != "" {
 		p.app.markAudioBroken(p.track.WatchID)
 	}
 	p.fail(playbackErrorMessage(event))
@@ -719,7 +718,6 @@ func (p *playback) publish() {
 
 // shutdown ends the player for good, as the app quits.
 func (p *playback) shutdown() {
-	p.closing = true
 	p.closePlayer()
 }
 

@@ -46,7 +46,7 @@ VocaBoxはニコニコ動画の非公式アプリであり、株式会社ドワ�
 
 ## 開発
 
-Windows環境に[mise](https://mise.jdx.dev/)をインストールし、リポジトリのフォルダーで実行します。
+Windows環境に[mise](https://mise.jdx.dev/)をインストールし、リポジトリのフォルダーで実行します。ネイティブモジュールのビルドにはMSVCを使うため、「C++によるデスクトップ開発」を含むVisual Studio Build Toolsも必要です。
 
 ```sh
 mise install

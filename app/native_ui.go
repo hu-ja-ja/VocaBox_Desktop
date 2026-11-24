@@ -183,9 +183,8 @@ type nativeApp struct {
 	lyricsSeekTargetMS float64
 	lyricsSeekPending  bool
 	// lyricsSync mirrors whether the open queue shows a timed lyrics card, so
-	// the player reports its position at the fast rate. The module's events
-	// run off the UI thread, so it cannot read the state above.
-	lyricsSync atomic.Bool
+	// the player reports its position at the fast rate instead of the idle one.
+	lyricsSync bool
 	// lyricsScroll keeps the lyrics view's place; the viewport bounds place
 	// the active line and let UI tests verify it stays centered.
 	lyricsScroll ui.ScrollState
@@ -440,10 +439,9 @@ func (app *nativeApp) view(c *ui.Context) {
 	// cache keeps when it trims.
 	app.thumbFrame++
 	c.SetTheme(app.theme)
-	// The player reports its position off this thread: tell it whether a
-	// timed document follows the track, so it reports at the fast rate only
-	// then.
-	app.lyricsSync.Store(app.queueOpen && app.lyricsOpen && app.lyricsDoc != nil && app.lyricsDoc.Timed)
+	// Tell the player the rate to report its position at: the fast one while
+	// a timed document follows the track, the idle one otherwise.
+	app.lyricsSync = app.queueOpen && app.lyricsOpen && app.lyricsDoc != nil && app.lyricsDoc.Timed
 	if app.playback != nil {
 		app.playback.syncPositionRate()
 	}

@@ -52,10 +52,13 @@ func TestPlaybackE2E(t *testing.T) {
 	if err := player.Pause(); err != nil {
 		t.Fatal(err)
 	}
+	// The player keeps reporting at the rate it was given, and the pause
+	// lands through the queue: let it, then compare two samples from after it.
+	time.Sleep(300 * time.Millisecond)
+	paused := latestPosition(t, events)
 	time.Sleep(500 * time.Millisecond)
-	paused := waitPosition(t, events, position, 5*time.Second)
-	if paused-position > 300 {
-		t.Fatalf("the position moved while paused: %v -> %v", position, paused)
+	if moved := latestPosition(t, events); moved-paused > 300 {
+		t.Fatalf("the position moved while paused: %v -> %v", paused, moved)
 	}
 	if err := player.Resume(); err != nil {
 		t.Fatal(err)
@@ -134,6 +137,31 @@ func waitPosition(t *testing.T, events <-chan ams.Event, min float64, timeout ti
 			}
 		case <-deadline:
 			t.Fatalf("no position of %vms within %s", min, timeout)
+		}
+	}
+}
+
+// latestPosition drains the reports queued for 200ms and returns the newest
+// position among them, failing when there is none.
+func latestPosition(t *testing.T, events <-chan ams.Event) float64 {
+	t.Helper()
+	deadline := time.After(200 * time.Millisecond)
+	var latest float64
+	found := false
+	for {
+		select {
+		case event := <-events:
+			if event.Event == "failed" {
+				t.Fatalf("player failed: code=%s ext=0x%08X msg=%s", event.Code, event.Ext, event.Msg)
+			}
+			if event.Event == "position" {
+				latest, found = event.MS, true
+			}
+		case <-deadline:
+			if !found {
+				t.Fatal("no position report within 200ms")
+			}
+			return latest
 		}
 	}
 }
