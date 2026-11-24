@@ -8,9 +8,14 @@ import (
 	"time"
 )
 
+// noAudioSink is 0xC00D36FA, MF_E_CANNOT_CREATE_SINK: the machine has no audio
+// output device, as a CI runner does, so the media stack cannot play anything.
+const noAudioSink = -1072875782
+
 // TestPlayerPlaysASilentFile drives the real module with a silent WAV: the
 // player is made, a load opens with its generation, the position reports as
 // the app asks, and the track ends. The volume is zero, so nothing is heard.
+// It is skipped where the machine has no audio output device.
 func TestPlayerPlaysASilentFile(t *testing.T) {
 	player, err := NewPlayer()
 	if err != nil {
@@ -75,6 +80,9 @@ func waitEvent(t *testing.T, events <-chan Event, name string) Event {
 		select {
 		case event := <-events:
 			if event.Event == "failed" {
+				if event.Ext == noAudioSink {
+					t.Skipf("the machine has no audio output device (%s)", event.Code)
+				}
 				t.Fatalf("player failed: code=%s ext=%d msg=%s", event.Code, event.Ext, event.Msg)
 			}
 			if event.Event == name {
