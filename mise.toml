@@ -1,9 +1,9 @@
 [tools]
-go = "1.27.3"
+go = "1.27.4"
 # mygo builds native modules with MSVC on Windows, and the Visual Studio
 # build tools carry its linker and Windows SDK.
 rust = { version = "1.99.1-x86_64-pc-windows-msvc", mr_boxington = true }
-"mr-boxington" = "1.29.2"
+"mr-boxington" = "1.31.0"
 # The notices generator: cargo-about reads the native module's crates,
 # go-licenses the app's modules.
 "cargo:cargo-about" = "0.9.3"
