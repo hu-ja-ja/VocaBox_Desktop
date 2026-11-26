@@ -30,7 +30,7 @@ jobs:
           }
       # mise.toml is the only source of the tool versions (Go, Rust, mr-boxington
       # and the licence tools), so the release builds what a developer's mise install does.
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.3.0
       # mygo build downloads NSIS on a fresh runner; the cache keeps it.
       - uses: actions/cache@v6.1.0
         with:
