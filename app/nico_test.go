@@ -102,7 +102,7 @@ func TestNicoPrepareFollowsThePlaybackFlow(t *testing.T) {
 			t.Errorf("access-rights body: %v", err)
 		}
 		// The delivery edge needs this cookie on every manifest and segment
-		// fetch, including the helper's own.
+		// fetch, including the player's own.
 		w.Header().Set("Set-Cookie", "domand_bid=bid-1; Path=/")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{

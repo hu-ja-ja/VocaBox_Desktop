@@ -197,7 +197,7 @@ func isWatchID(s string) bool {
 	return true
 }
 
-// savedAudioURI is a saved track as the helper's play command names it.
+// savedAudioURI is a saved track as the player's load names it.
 func savedAudioURI(path string) string {
 	return "file:///" + filepath.ToSlash(path)
 }

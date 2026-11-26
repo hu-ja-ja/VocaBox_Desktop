@@ -38,7 +38,4 @@ go.work.sum
 /.mygo/
 mygo_windows_*.syso
 
-# AmsHelper build output (mise run helper)
-/helper/target/
-
 要件/

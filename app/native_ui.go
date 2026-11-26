@@ -95,7 +95,7 @@ type nativeApp struct {
 	// view's state to one goroutine, in the app and in a test alike.
 	heldMu sync.Mutex
 	held   []func()
-	// playback is the player: the queue and the AmsHelper child process.
+	// playback is the player: the queue and the ams native module.
 	// Tests leave it nil and inspect the commands the UI sent instead.
 	playback *playback
 	// discordOn says the Discord Rich Presence is on, and discord the client
@@ -182,10 +182,9 @@ type nativeApp struct {
 	// short audio lead, until the player reports reaching it.
 	lyricsSeekTargetMS float64
 	lyricsSeekPending  bool
-	// lyricsSync mirrors whether the open queue shows a timed lyrics card, for
-	// the position pull: it runs off the UI thread, so it cannot read the state
-	// above.
-	lyricsSync atomic.Bool
+	// lyricsSync mirrors whether the open queue shows a timed lyrics card, so
+	// the player reports its position at the fast rate instead of the idle one.
+	lyricsSync bool
 	// lyricsScroll keeps the lyrics view's place; the viewport bounds place
 	// the active line and let UI tests verify it stays centered.
 	lyricsScroll ui.ScrollState
@@ -440,9 +439,12 @@ func (app *nativeApp) view(c *ui.Context) {
 	// cache keeps when it trims.
 	app.thumbFrame++
 	c.SetTheme(app.theme)
-	// The position pull runs off this thread: tell it whether a timed
-	// document follows the track, so it asks at the fast rate only then.
-	app.lyricsSync.Store(app.queueOpen && app.lyricsOpen && app.lyricsDoc != nil && app.lyricsDoc.Timed)
+	// Tell the player the rate to report its position at: the fast one while
+	// a timed document follows the track, the idle one otherwise.
+	app.lyricsSync = app.queueOpen && app.lyricsOpen && app.lyricsDoc != nil && app.lyricsDoc.Timed
+	if app.playback != nil {
+		app.playback.syncPositionRate()
+	}
 	// The queue takes the window: opening it folds the sidebar away, and
 	// closing it brings back the sidebar the queue was opened in.
 	if app.queueOpen != app.queueWasOpen {

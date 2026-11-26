@@ -2,26 +2,23 @@ package main
 
 import (
 	"errors"
+	"io"
 	"log"
 	"math"
-	"os"
-	"path/filepath"
 	"strconv"
-	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/egoist/mygo"
 	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
+	"github.com/hu-ja-ja/VocaBox_Desktop/modules/ams"
 )
 
 // playback is the app's player: it keeps the queue, acquires what a track
-// needs from niconico, and drives the AmsHelper child process that plays it.
-// It is the Go home of the former WebView player (src/audio-page.ts).
+// needs from niconico, and drives the ams native module that plays it. It is
+// the Go home of the former WebView player (src/audio-page.ts).
 //
 // Every mutation happens on the window's UI thread: UI callbacks call the
-// command handler directly, and background work (acquisition, helper events,
-// the position pull) comes back through post. In tests, without a window,
+// command handler directly, and background work (acquisition, module events,
+// the position reports) comes back through post. In tests, without a window,
 // post runs inline.
 type playback struct {
 	app  *nativeApp
@@ -52,7 +49,7 @@ type playback struct {
 	// uris are the playable bands of the track, highest first, bitrates
 	// their kbps for the quality shown, and variant the band playing: a
 	// band whose playback fails falls back to the next. cookie and ua are
-	// what the helper's own requests carry. file is the track's saved copy,
+	// what the player's own requests carry. file is the track's saved copy,
 	// which plays instead of the bands when it is there.
 	uris     []string
 	bitrates []int
@@ -63,59 +60,45 @@ type playback struct {
 	// fileQuality is the band the saved file stands at, "192kbps"; "" when
 	// its size and the track's length name none.
 	fileQuality string
-	// resumeMS is where a fallback replay or a restarted helper picks the
-	// track up; zero means from the start.
+	// resumeMS is where a fallback band picks the track up; zero means from
+	// the start.
 	resumeMS float64
 
-	// proc is the running helper, nil before the first play and after a
-	// crash loop gave up.
-	proc helperConn
-	// lastProc is the process gen was counted for, so a fresh helper after
-	// a crash starts the generation over.
-	lastProc helperConn
-	// restarted says the helper was already restarted once for the track
-	// playing, so a crash loop gives up rather than spinning.
-	restarted bool
-	// closing says the app is quitting: an exit is then no crash.
-	closing bool
+	// player is the native module playing tracks, nil before the first play
+	// and after the module failed. events is its subscription, closed with
+	// it.
+	player ams.Player
+	events io.Closer
 	// loadToken invalidates the acquisitions of earlier tracks.
 	loadToken uint64
-	// gen names the track load the helper's current source was started for:
-	// events carrying another gen belong to a replaced track or helper and
-	// are dropped.
+	// gen names the track load the player's current source was started for:
+	// events carrying another gen belong to a replaced track and are
+	// dropped.
 	gen int
 
 	// discordKey is the presence last handed to Discord, so a renewal that
 	// changes nothing is skipped against it; "" with nothing sent yet.
 	discordKey string
 
-	// spawn launches the helper; acquire fetches a track's sources. Tests
-	// replace both with stubs.
-	spawn   func(onEvent func(helperEvent), onExit func(error)) (helperConn, error)
-	acquire func(item MylistItem) (playbackSources, error)
+	// newPlayer makes the module's player; acquire fetches a track's
+	// sources. Tests replace both with stubs.
+	newPlayer func() (ams.Player, error)
+	acquire   func(item MylistItem) (playbackSources, error)
 	// post runs fn on the UI thread; tests (no window) run it inline.
 	post func(fn func())
 
-	pollOnce sync.Once
-	polling  atomic.Bool
+	// positionRate is the rate last given to the player: zero while it
+	// reports none.
+	positionRate time.Duration
 }
 
-// helperConn is the engine's view of the running helper: the JSON-line link
-// and the kill switch.
-type helperConn interface {
-	Send(helperCommand) error
-	Shutdown()
-}
-
-// positionPollInterval is how often the app pulls the helper's position
-// while a timed lyrics document shows: often enough for the lyrics to turn
-// with the vocal. positionPollIdleInterval is the rate otherwise, rare enough
-// that each pull's window rebuild does not crowd the player. The pull ticks at
-// the fast rate and skips ticks until the idle one, so the idle rate is a
-// whole number of ticks rather than the next one after it.
+// positionRateLyrics is how often the player reports its position while a
+// timed lyrics document follows the track: often enough for the lines to turn
+// with the vocal. positionRateIdle is the rate otherwise, rare enough that
+// each report's window rebuild does not crowd the player.
 const (
-	positionPollInterval     = 100 * time.Millisecond
-	positionPollIdleInterval = 3 * positionPollInterval
+	positionRateLyrics = 100 * time.Millisecond
+	positionRateIdle   = 3 * positionRateLyrics
 )
 
 // previousRestartMS is how far into a track the previous button restarts it
@@ -129,7 +112,7 @@ func newPlayback(app *nativeApp) *playback {
 	// private ones included, answer only with its cookies.
 	app.mylist.session = p.nico.SessionCookie
 	p.acquire = p.prepareSources
-	p.spawn = p.spawnHelper
+	p.newPlayer = ams.NewPlayer
 	p.post = func(fn func()) {
 		if app.window != nil {
 			app.window.Update(fn)
@@ -276,7 +259,7 @@ func (p *playback) selectTrack(watchID string) {
 }
 
 // play starts item from its beginning: the sources are acquired in the
-// background, and the best band goes to the helper as soon as they arrive.
+// background, and the best band goes to the player as soon as they arrive.
 func (p *playback) play(item MylistItem) {
 	item, ok := p.skippable(item)
 	if !ok {
@@ -296,7 +279,6 @@ func (p *playback) play(item MylistItem) {
 	p.variant = 0
 	p.uris, p.bitrates, p.cookie, p.ua, p.file = nil, nil, "", "", ""
 	p.fileQuality = ""
-	p.restarted = false
 	st := &p.app.player
 	st.WatchID = item.WatchID
 	st.VideoID = item.VideoID
@@ -313,8 +295,8 @@ func (p *playback) play(item MylistItem) {
 	st.DurationMS = float64(item.Duration) * 1000
 	p.app.playerError = ""
 	// The old track stops at once rather than playing on under the new one.
-	if p.proc != nil {
-		_ = p.proc.Send(helperCommand{Cmd: "stop"})
+	if p.player != nil {
+		_ = p.player.Stop()
 	}
 	p.publish()
 	go func() {
@@ -373,118 +355,109 @@ func (p *playback) prepareSources(item MylistItem) (playbackSources, error) {
 	return p.nico.Prepare(videoID)
 }
 
-// sendPlay hands the current band to the helper, starting the helper when it
-// is not running. The track's load names the attempt, and wantPlaying says
-// whether it starts playing: a paused track is installed paused, so neither
-// a fallback band nor a restarted helper plays on its own. A restarted helper
-// takes a new name for the same load: the events of the process it replaced
-// must not speak for it either.
+// sendPlay hands the current band to the player, making it when it is not
+// there. The track's load names the attempt, and wantPlaying says whether it
+// starts playing: a paused track is installed paused, so a fallback band does
+// not play on its own.
 func (p *playback) sendPlay() {
-	if err := p.ensureHelper(); err != nil {
-		p.fail(err)
+	if err := p.ensurePlayer(); err != nil {
+		// The module's own error names what failed (a missing DLL, the media
+		// stack): it belongs in the log, not in the player bar.
+		log.Printf("ams: making the player: %v", err)
+		p.fail(errors.New(locales.ErrPlayerConnect()))
 		return
 	}
-	if p.proc != p.lastProc {
-		p.gen++
-		p.lastProc = p.proc
-	}
-	command := helperCommand{Cmd: "play", Gen: p.gen, Play: p.wantPlaying}
+	load := ams.Load{Generation: p.gen, Start: p.wantPlaying}
 	if p.file != "" {
-		command.File = savedAudioURI(p.file)
+		load.File = savedAudioURI(p.file)
 	} else {
 		if p.variant >= len(p.uris) {
 			p.fail(errors.New(locales.ErrNoAudio()))
 			return
 		}
-		command.URL = p.uris[p.variant]
-		command.Cookie = p.cookie
-		command.UA = p.ua
+		load.URL = p.uris[p.variant]
+		load.Cookie = p.cookie
+		load.UserAgent = p.ua
 	}
-	if err := p.proc.Send(command); err != nil {
+	if err := p.player.Play(load); err != nil {
+		// A player the module lost, as a panic at its boundary, is dropped
+		// so the next play makes a fresh one.
+		p.closePlayer()
 		p.fail(errors.New(locales.ErrPlayerConnect()))
 		return
 	}
-	_ = p.proc.Send(helperCommand{Cmd: "volume", Value: p.app.player.Volume})
+	_ = p.player.SetVolume(p.app.player.Volume)
 }
 
-// ensureHelper starts the helper process when none runs, and the position
-// pull with it.
-func (p *playback) ensureHelper() error {
-	if p.proc != nil {
+// ensurePlayer makes the module's player when none runs.
+func (p *playback) ensurePlayer() error {
+	if p.player != nil {
 		return nil
 	}
-	helper, err := p.spawn(p.handleEvent, p.helperExited)
+	player, err := p.newPlayer()
 	if err != nil {
 		return err
 	}
-	p.proc = helper
-	p.pollOnce.Do(func() { go p.pollPosition() })
+	p.player = player
+	p.events = player.OnEvent(p.handleEvent)
+	p.positionRate = 0
 	return nil
 }
 
-// spawnHelper launches the AmsHelper beside the app's resources.
-func (p *playback) spawnHelper(onEvent func(helperEvent), onExit func(error)) (helperConn, error) {
-	path, err := helperExecutable()
-	if err != nil {
-		return nil, err
+// closePlayer ends the player and its event subscription.
+func (p *playback) closePlayer() {
+	if p.events != nil {
+		_ = p.events.Close()
 	}
-	return startHelper(path, filepath.Dir(path), onEvent, onExit)
+	if p.player != nil {
+		_ = p.player.Close()
+	}
+	p.player, p.events = nil, nil
+	p.positionRate = 0
 }
 
-// helperExecutable is the helper beside the app's other resources.
-func helperExecutable() (string, error) {
-	dir, err := mygo.App.Path(mygo.PathResources)
-	if err != nil {
-		return "", errors.New(locales.ErrPlayerMissing())
+// positionRateFor is the rate the player should report its position at: the
+// fast one while a timed lyrics document follows the track, the idle one
+// otherwise, and none while nothing plays.
+func (p *playback) positionRateFor() time.Duration {
+	if p.player == nil || !p.app.player.Ready || !p.app.player.Playing {
+		return 0
 	}
-	path := filepath.Join(dir, "AmsHelper.exe")
-	if _, err := os.Stat(path); err != nil {
-		return "", errors.New(locales.ErrPlayerMissingHelper())
+	if p.app.lyricsSync {
+		return positionRateLyrics
 	}
-	return path, nil
+	return positionRateIdle
 }
 
-// pollInterval is how often the position pull runs now: the fast rate while
-// a timed lyrics document follows the track, the idle one otherwise.
-func (p *playback) pollInterval() time.Duration {
-	if p.app.lyricsSync.Load() {
-		return positionPollInterval
+// syncPositionRate tells the player the rate the app reads its position at,
+// when it changed. The player reports while a source is loaded, paused or
+// not, so the app asks for none unless the track plays.
+func (p *playback) syncPositionRate() {
+	if p.player == nil {
+		return
 	}
-	return positionPollIdleInterval
+	rate := p.positionRateFor()
+	if rate == p.positionRate {
+		return
+	}
+	if err := p.player.SetPositionRate(rate); err != nil {
+		return
+	}
+	p.positionRate = rate
 }
 
-// pollPosition pulls the helper's position while a track is playing: the app
-// asks, the helper answers with a position event.
-func (p *playback) pollPosition() {
-	// The tick is the fast rate; the idle rate skips its ticks until enough
-	// time passed, so the window rebuilds less while no lyrics follow.
-	last := time.Time{}
-	for now := range time.Tick(positionPollInterval) {
-		if !p.polling.Load() || (!last.IsZero() && now.Sub(last) < p.pollInterval()) {
-			continue
-		}
-		last = now
-		p.post(func() {
-			if p.closing || p.proc == nil || !p.app.player.Ready || !p.app.player.Playing {
-				return
-			}
-			_ = p.proc.Send(helperCommand{Cmd: "position"})
-		})
-	}
-}
-
-// handleEvent queues one helper event for the UI thread.
-func (p *playback) handleEvent(event helperEvent) { p.post(func() { p.applyEvent(event) }) }
+// handleEvent queues one player event for the UI thread.
+func (p *playback) handleEvent(event ams.Event) { p.post(func() { p.applyEvent(event) }) }
 
 // staleEvent reports whether an event belongs to a replaced track load,
-// after a new track was selected or a new helper replaced a dead one: the
-// events of the replaced source must not speak for the new one. Every event
-// carries the load it was started for; only the current load's events pass.
-func (p *playback) staleEvent(event helperEvent) bool {
-	return event.Gen != p.gen
+// after a new track was selected: the events of the replaced source must not
+// speak for the new one. Every event carries the load it was started for;
+// only the current load's events pass.
+func (p *playback) staleEvent(event ams.Event) bool {
+	return event.Generation != p.gen
 }
 
-func (p *playback) applyEvent(event helperEvent) {
+func (p *playback) applyEvent(event ams.Event) {
 	if p.staleEvent(event) {
 		if event.Event == "failed" {
 			log.Printf("stale playback failed: code=%s ext=0x%08X msg=%s", event.Code, event.Ext, event.Msg)
@@ -499,9 +472,8 @@ func (p *playback) applyEvent(event helperEvent) {
 			st.DurationMS = event.DurationMS
 		}
 		st.Playing = p.wantPlaying
-		p.restarted = false
-		// A fallback band or a restarted helper resumes where the track
-		// was, when that is not already the end.
+		// A fallback band resumes where the track was, when that is not
+		// already the end.
 		if p.resumeMS > 0 && p.resumeMS < st.DurationMS-1000 {
 			st.PositionMS = p.resumeMS
 			p.sendSeek(p.resumeMS)
@@ -516,27 +488,37 @@ func (p *playback) applyEvent(event helperEvent) {
 	case "failed":
 		p.bandFailed(event)
 	case "position":
-		if p.app.player.Ready {
-			position := event.MS
-			if p.app.lyricsSeekPending {
-				if position < p.app.lyricsSeekTargetMS {
-					position = p.app.lyricsSeekTargetMS
-				} else {
-					p.app.lyricsSeekPending = false
-				}
-			}
-			p.app.player.PositionMS = position
+		p.applyPosition(event.MS)
+	}
+}
+
+// applyPosition records where the player reports it is heard. While a lyric
+// seek is on its way, the position lags the seek: the target holds until the
+// media stack gets there.
+func (p *playback) applyPosition(position float64) {
+	if !p.app.player.Ready {
+		return
+	}
+	if p.app.lyricsSeekPending {
+		if position < p.app.lyricsSeekTargetMS {
+			position = p.app.lyricsSeekTargetMS
+		} else {
+			p.app.lyricsSeekPending = false
 		}
 	}
+	p.app.player.PositionMS = position
+	// The card the tray shows reads the same position: a window of its own
+	// gets no frame from the main window's updates.
+	p.app.refreshTray()
 }
 
 // bandFailed handles a failed band: the next one down is tried from the
 // position reached, and with none left the track reports the error.
-func (p *playback) bandFailed(event helperEvent) {
+func (p *playback) bandFailed(event ams.Event) {
 	log.Printf("playback failed: code=%s ext=0x%08X msg=%s", event.Code, event.Ext, event.Msg)
 	p.app.player.Ready = false
 	p.app.player.Playing = false
-	if p.variant+1 < len(p.uris) && p.proc != nil {
+	if p.variant+1 < len(p.uris) && p.player != nil {
 		p.variant++
 		p.resumeMS = p.app.player.PositionMS
 		p.sendPlay()
@@ -546,17 +528,15 @@ func (p *playback) bandFailed(event helperEvent) {
 		return
 	}
 	// A saved copy that failed is dropped and recorded, so the list shows it
-	// as broken and the next pass fetches it again. A helper that never took
-	// the file on at all — one older than the command, an unknown request —
-	// leaves it where it is: the file is not what failed.
-	if p.file != "" && event.Code != "NoSource" {
+	// as broken and the next pass fetches it again.
+	if p.file != "" {
 		p.app.markAudioBroken(p.track.WatchID)
 	}
 	p.fail(playbackErrorMessage(event))
 }
 
-// playbackErrorMessage maps a helper failure to what the player shows.
-func playbackErrorMessage(event helperEvent) error {
+// playbackErrorMessage maps a player failure to what the player shows.
+func playbackErrorMessage(event ams.Event) error {
 	switch event.Code {
 	case "NetworkError", "ManifestDownloadFailure":
 		return errors.New(locales.ErrTrackLoadNetwork())
@@ -569,37 +549,6 @@ func playbackErrorMessage(event helperEvent) error {
 	}
 }
 
-// helperExited handles an unexpected helper death: one restart per track,
-// resuming where the track was, and an error when the restarted helper dies
-// too.
-func (p *playback) helperExited(error) {
-	p.post(func() {
-		if p.closing {
-			return
-		}
-		log.Printf("AmsHelper died; restarting (track=%q retry=%v)", p.track.WatchID, !p.restarted)
-		p.proc = nil
-		p.polling.Store(false)
-		if p.track.WatchID == "" {
-			return
-		}
-		if p.restarted {
-			p.fail(errors.New(locales.ErrPlayerHang()))
-			return
-		}
-		p.restarted = true
-		if len(p.uris) == 0 {
-			// The acquisition is still running; its sendPlay starts a fresh
-			// helper.
-			return
-		}
-		p.resumeMS = p.app.player.PositionMS
-		p.app.player.Ready = false
-		p.app.player.Playing = false
-		p.sendPlay()
-	})
-}
-
 // resume plays on, pause stops; both run what the app last asked for, so a
 // pause that lands while a track is still opening holds.
 func (p *playback) resume() {
@@ -608,8 +557,8 @@ func (p *playback) resume() {
 	}
 	p.wantPlaying = true
 	p.app.player.Playing = true
-	if p.proc != nil {
-		_ = p.proc.Send(helperCommand{Cmd: "resume"})
+	if p.player != nil {
+		_ = p.player.Resume()
 	}
 	p.publish()
 }
@@ -617,15 +566,15 @@ func (p *playback) resume() {
 func (p *playback) pause() {
 	p.wantPlaying = false
 	p.app.player.Playing = false
-	if p.proc != nil {
-		_ = p.proc.Send(helperCommand{Cmd: "pause"})
+	if p.player != nil {
+		_ = p.player.Pause()
 	}
 	p.publish()
 }
 
 // seek moves the track playing, clamped to the track's bounds.
 func (p *playback) seek(positionMS float64) {
-	if p.proc == nil {
+	if p.player == nil {
 		return
 	}
 	if math.IsNaN(positionMS) || positionMS < 0 {
@@ -637,18 +586,18 @@ func (p *playback) seek(positionMS float64) {
 	p.sendSeek(positionMS)
 }
 
-// sendSeek passes an already clamped position to the helper.
+// sendSeek passes an already clamped position to the player.
 func (p *playback) sendSeek(positionMS float64) {
-	if p.proc != nil {
-		_ = p.proc.Send(helperCommand{Cmd: "seek", MS: positionMS})
+	if p.player != nil {
+		_ = p.player.Seek(positionMS)
 	}
 }
 
 func (p *playback) setVolume(volume float64) {
 	volume = clampVolume(volume)
 	p.app.player.Volume = volume
-	if p.proc != nil {
-		_ = p.proc.Send(helperCommand{Cmd: "volume", Value: volume})
+	if p.player != nil {
+		_ = p.player.SetVolume(volume)
 	}
 	p.publish()
 }
@@ -695,8 +644,8 @@ func (p *playback) remove(watchID string) {
 		p.wantPlaying = false
 		p.loadToken++
 		p.uris = nil
-		if p.proc != nil {
-			_ = p.proc.Send(helperCommand{Cmd: "stop"})
+		if p.player != nil {
+			_ = p.player.Stop()
 		}
 		st := &p.app.player
 		st.WatchID, st.VideoID, st.Title, st.Uploader, st.ThumbURL = "", "", "", "", ""
@@ -759,7 +708,7 @@ func (p *playback) publish() {
 	} else {
 		st.Quality = qualityLabel(p.bitrates, p.variant)
 	}
-	p.polling.Store(!p.closing && p.proc != nil && st.Ready && st.Playing)
+	p.syncPositionRate()
 	// The tray is the only place the app speaks while its window is hidden.
 	p.app.refreshTray()
 	// The tray and the window show the same player: a change made from the
@@ -770,13 +719,9 @@ func (p *playback) publish() {
 	p.syncDiscord(false)
 }
 
-// shutdown ends the helper for good, as the app quits.
+// shutdown ends the player for good, as the app quits.
 func (p *playback) shutdown() {
-	p.closing = true
-	p.polling.Store(false)
-	if p.proc != nil {
-		p.proc.Shutdown()
-	}
+	p.closePlayer()
 }
 
 // playableItems keeps the entries that can be played: callers of the mylist

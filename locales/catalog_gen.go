@@ -1837,36 +1837,6 @@ func (msgs Messages) ErrPlayerConnect() string {
 	return Catalog.Format(msgs.locale, "errPlayerConnect", nil)
 }
 
-// ErrPlayerMissing says "再生に必要なプレイヤーが見つかりませんでした"
-// in the language the app shows.
-func ErrPlayerMissing() string { return In(i18n.Locale()).ErrPlayerMissing() }
-
-// ErrPlayerMissing says "再生に必要なプレイヤーが見つかりませんでした"
-// in the language of msgs.
-func (msgs Messages) ErrPlayerMissing() string {
-	return Catalog.Format(msgs.locale, "errPlayerMissing", nil)
-}
-
-// ErrPlayerMissingHelper says "再生に必要なプレイヤー（AmsHelper.exe）が見つかりませんでした"
-// in the language the app shows.
-func ErrPlayerMissingHelper() string { return In(i18n.Locale()).ErrPlayerMissingHelper() }
-
-// ErrPlayerMissingHelper says "再生に必要なプレイヤー（AmsHelper.exe）が見つかりませんでした"
-// in the language of msgs.
-func (msgs Messages) ErrPlayerMissingHelper() string {
-	return Catalog.Format(msgs.locale, "errPlayerMissingHelper", nil)
-}
-
-// ErrPlayerHang says "プレイヤーが応答しなくなりました"
-// in the language the app shows.
-func ErrPlayerHang() string { return In(i18n.Locale()).ErrPlayerHang() }
-
-// ErrPlayerHang says "プレイヤーが応答しなくなりました"
-// in the language of msgs.
-func (msgs Messages) ErrPlayerHang() string {
-	return Catalog.Format(msgs.locale, "errPlayerHang", nil)
-}
-
 // ErrTrackLoadNetwork says "音源を読み込めませんでした（通信エラー）"
 // in the language the app shows.
 func ErrTrackLoadNetwork() string { return In(i18n.Locale()).ErrTrackLoadNetwork() }

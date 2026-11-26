@@ -13,11 +13,10 @@ jobs:
       # and the licence tools), so CI installs what a developer's mise install does.
       - uses: actions/checkout@v7.0.1
       - uses: jdx/mise-action@v5.2.7
-      # The helper first: the app bundles resources/AmsHelper.exe, and its
-      # smoke test only runs once the file is there.
-      - run: mise run helper
+      # The module first: go test runs the library MyGo built, and without
+      # it the module's own test skips.
+      - run: mise run test
       - run: go vet ./...
-      - run: go test ./...
       - run: mise run build
 
   actions:

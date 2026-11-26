@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -9,55 +10,116 @@ import (
 	"time"
 
 	"github.com/hu-ja-ja/VocaBox_Desktop/locales"
+	"github.com/hu-ja-ja/VocaBox_Desktop/modules/ams"
 )
 
-// fakeHelper records what a playback sends it, and lets a test fire events
-// and an exit into the engine.
-type fakeHelper struct {
-	mu       sync.Mutex
-	commands []helperCommand
-	onEvent  func(helperEvent)
-	onExit   func(error)
+// fakePlayer is the module's Player: it records what the playback asks of it.
+type fakePlayer struct {
+	mu    sync.Mutex
+	calls []fakeCall
+	// failPlay makes the next Play fail, as a player the module lost does.
+	failPlay error
 }
 
-func (h *fakeHelper) Send(command helperCommand) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.commands = append(h.commands, command)
+// fakeCall is one call of the playback, named as the old pipe protocol named
+// it.
+type fakeCall struct {
+	Name string
+	ams.Load
+	MS    float64       // seek
+	Value float64       // volume
+	Rate  time.Duration // rate
+}
+
+func (f *fakePlayer) Play(load ams.Load) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failPlay != nil {
+		err := f.failPlay
+		f.failPlay = nil
+		return err
+	}
+	f.calls = append(f.calls, fakeCall{Name: "play", Load: load})
 	return nil
 }
 
-func (h *fakeHelper) Shutdown() {}
-
-func (h *fakeHelper) all() []helperCommand {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return append([]helperCommand(nil), h.commands...)
+func (f *fakePlayer) record(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fakeCall{Name: name})
 }
 
-func (h *fakeHelper) count(action string) int {
+func (f *fakePlayer) Pause() error  { f.record("pause"); return nil }
+func (f *fakePlayer) Resume() error { f.record("resume"); return nil }
+func (f *fakePlayer) Stop() error   { f.record("stop"); return nil }
+
+func (f *fakePlayer) Seek(ms float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fakeCall{Name: "seek", MS: ms})
+	return nil
+}
+
+func (f *fakePlayer) SetVolume(v float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fakeCall{Name: "volume", Value: v})
+	return nil
+}
+
+func (f *fakePlayer) SetPositionRate(every time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fakeCall{Name: "rate", Rate: every})
+	return nil
+}
+
+// OnEvent records nothing: tests call p.handleEvent directly.
+func (f *fakePlayer) OnEvent(func(ams.Event)) io.Closer {
+	return funcCloser(func() {})
+}
+
+func (f *fakePlayer) Close() error {
+	return nil
+}
+
+// funcCloser is an io.Closer around a function.
+type funcCloser func()
+
+func (c funcCloser) Close() error {
+	c()
+	return nil
+}
+
+func (f *fakePlayer) all() []fakeCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]fakeCall(nil), f.calls...)
+}
+
+func (f *fakePlayer) count(action string) int {
 	n := 0
-	for _, command := range h.all() {
-		if command.Cmd == action {
+	for _, call := range f.all() {
+		if call.Name == action {
 			n++
 		}
 	}
 	return n
 }
 
-func (h *fakeHelper) last(action string) (helperCommand, bool) {
-	commands := h.all()
-	for i := len(commands) - 1; i >= 0; i-- {
-		if commands[i].Cmd == action {
-			return commands[i], true
+func (f *fakePlayer) last(action string) (fakeCall, bool) {
+	calls := f.all()
+	for i := len(calls) - 1; i >= 0; i-- {
+		if calls[i].Name == action {
+			return calls[i], true
 		}
 	}
-	return helperCommand{}, false
+	return fakeCall{}, false
 }
 
-// newTestPlayback is a playback whose helper and acquisition are stubs and
-// whose events run inline: engine tests need no process and no network.
-func newTestPlayback(t *testing.T) (*playback, *fakeHelper, *int) {
+// newTestPlayback is a playback whose player and acquisition are stubs and
+// whose events run inline: engine tests need no module and no network.
+func newTestPlayback(t *testing.T) (*playback, *fakePlayer, *int) {
 	t.Helper()
 	mylist := NewMylist()
 	// The engine may forget a stored session; tests never touch the real
@@ -66,14 +128,11 @@ func newTestPlayback(t *testing.T) (*playback, *fakeHelper, *int) {
 	app := newNativeApp(mylist)
 	p := newPlayback(app)
 	app.playback = p
-	helper := &fakeHelper{}
-	spawns := 0
-	p.spawn = func(onEvent func(helperEvent), onExit func(error)) (helperConn, error) {
-		spawns++
-		helper.mu.Lock()
-		helper.onEvent, helper.onExit = onEvent, onExit
-		helper.mu.Unlock()
-		return helper, nil
+	player := &fakePlayer{}
+	makes := 0
+	p.newPlayer = func() (ams.Player, error) {
+		makes++
+		return player, nil
 	}
 	p.acquire = func(item MylistItem) (playbackSources, error) {
 		return playbackSources{
@@ -82,7 +141,7 @@ func newTestPlayback(t *testing.T) (*playback, *fakeHelper, *int) {
 			UserAgent: "ua",
 		}, nil
 	}
-	return p, helper, &spawns
+	return p, player, &makes
 }
 
 func waitFor(t *testing.T, what string, ok func() bool) {
@@ -115,40 +174,40 @@ func testQueueItems() []MylistItem {
 	}
 }
 
-// helperPlay is the last play command the helper received.
-func helperPlay(t *testing.T, h *fakeHelper) helperCommand {
+// playerPlay is the last play the player received.
+func playerPlay(t *testing.T, h *fakePlayer) fakeCall {
 	t.Helper()
 	play, ok := h.last("play")
 	if !ok {
-		t.Fatal("the helper received no play command")
+		t.Fatal("the player received no play command")
 	}
 	return play
 }
 
-// selectPlayed starts item's track and waits for the helper to receive its
-// play command.
-func selectPlayed(t *testing.T, p *playback, helper *fakeHelper, sm string) helperCommand {
+// selectPlayed starts item's track and waits for the player to receive its
+// load.
+func selectPlayed(t *testing.T, p *playback, player *fakePlayer, sm string) fakeCall {
 	t.Helper()
 	p.selectTrack(sm)
-	waitFor(t, "the play command", func() bool { return helper.count("play") == 1 })
-	return helperPlay(t, helper)
+	waitFor(t, "the play command", func() bool { return player.count("play") == 1 })
+	return playerPlay(t, player)
 }
 
 // TestPlaybackCarriesTheWatchLyricsAnswer checks the watch API's answer
 // reaches the player state: known for a fetched track, unknown for a saved
 // file, whose playback never asks.
 func TestPlaybackCarriesTheWatchLyricsAnswer(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.acquire = func(MylistItem) (playbackSources, error) {
 		return playbackSources{URIs: []string{"https://x/hi.m3u8"}, HasLyrics: true}, nil
 	}
 	p.setItems("111", "A", []MylistItem{{
 		WatchID: "sm1", VideoID: "sm1", Title: "曲", Available: true, Duration: 120,
 	}})
-	selectPlayed(t, p, helper, "sm1")
-	player := p.app.player
-	if !player.LyricsKnown || !player.HasLyrics || player.VideoID != "sm1" {
-		t.Fatalf("player = %#v; want the watch answer known", player)
+	selectPlayed(t, p, player, "sm1")
+	st := p.app.player
+	if !st.LyricsKnown || !st.HasLyrics || st.VideoID != "sm1" {
+		t.Fatalf("player = %#v; want the watch answer known", st)
 	}
 
 	// A saved file plays without the watch call: its answer is unknown.
@@ -156,42 +215,45 @@ func TestPlaybackCarriesTheWatchLyricsAnswer(t *testing.T) {
 		return playbackSources{File: filepath.Join(t.TempDir(), "saved.m4a")}, nil
 	}
 	p.selectTrack("sm1")
-	waitFor(t, "the saved play command", func() bool { return helper.count("play") == 2 })
+	waitFor(t, "the saved play command", func() bool { return player.count("play") == 2 })
 	if p.app.player.LyricsKnown {
 		t.Fatal("a saved file's lyrics answer reads as known")
 	}
 }
 
-// TestPositionPollIntervalFollowsTheLyrics checks the position pull keeps the
-// slow rate until a timed document follows the track.
-func TestPositionPollIntervalFollowsTheLyrics(t *testing.T) {
-	p, _, _ := newTestPlayback(t)
-	if positionPollIdleInterval%positionPollInterval != 0 {
-		t.Fatalf("the idle interval %v is not whole ticks of %v, so every pull would drift",
-			positionPollIdleInterval, positionPollInterval)
+// TestPositionRateFollowsTheLyrics checks the rate the player reports at: the
+// idle one while it plays, the fast one while a timed document follows, and
+// none while nothing plays.
+func TestPositionRateFollowsTheLyrics(t *testing.T) {
+	p, player, _ := newTestPlayback(t)
+	p.player = player
+	p.app.player.Ready, p.app.player.Playing = true, true
+	if got := p.positionRateFor(); got != positionRateIdle {
+		t.Fatalf("rate = %v; want the idle %v", got, positionRateIdle)
 	}
-	if got := p.pollInterval(); got != positionPollIdleInterval {
-		t.Fatalf("poll interval = %v; want the idle %v", got, positionPollIdleInterval)
+	p.app.lyricsSync = true
+	if got := p.positionRateFor(); got != positionRateLyrics {
+		t.Fatalf("rate = %v; want the lyrics %v", got, positionRateLyrics)
 	}
-	p.app.lyricsSync.Store(true)
-	if got := p.pollInterval(); got != positionPollInterval {
-		t.Fatalf("poll interval = %v; want the lyrics %v", got, positionPollInterval)
+	p.app.player.Playing = false
+	if got := p.positionRateFor(); got != 0 {
+		t.Fatalf("rate = %v; want none while paused", got)
 	}
 }
 
 func TestPlaybackSelectAcquiresAndPlaysTopBand(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
+	play := selectPlayed(t, p, player, "sm1")
 
-	if play.URL != "https://x/hi.m3u8" || play.Cookie != "domand_bid=1" || play.UA != "ua" {
+	if play.URL != "https://x/hi.m3u8" || play.Cookie != "domand_bid=1" || play.UserAgent != "ua" {
 		t.Fatalf("play = %#v", play)
 	}
-	if !play.Play {
-		t.Fatal("the track playing must ask the helper to play")
+	if !play.Start {
+		t.Fatal("the track playing must ask the player to play")
 	}
-	// The level goes over too, so a restarted helper hears it before playing.
-	volume, ok := helper.last("volume")
+	// The level goes over too, so a restarted player hears it before playing.
+	volume, ok := player.last("volume")
 	if !ok || volume.Value != 1 {
 		t.Fatalf("volume = %#v, %v", volume, ok)
 	}
@@ -210,40 +272,49 @@ func TestPlaybackSelectAcquiresAndPlaysTopBand(t *testing.T) {
 }
 
 func TestPlaybackOpenedReportsDuration(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
+	play := selectPlayed(t, p, player, "sm1")
 
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: play.Gen})
+	p.handleEvent(ams.Event{Event: "opened", DurationMS: 120000, Generation: play.Generation})
 	if !p.app.player.Ready || !p.app.player.Playing || p.app.player.DurationMS != 120000 {
 		t.Fatalf("player = %#v", p.app.player)
 	}
-	p.handleEvent(helperEvent{Event: "position", MS: 42000, Gen: play.Gen})
+	// Playing tells the player to report its position: the idle rate while
+	// no timed lyrics follow.
+	if rate, ok := player.last("rate"); !ok || rate.Rate != positionRateIdle {
+		t.Fatalf("position rate = %#v, %v; want the idle %v", rate, ok, positionRateIdle)
+	}
+	p.handleEvent(ams.Event{Event: "position", MS: 42000, Generation: play.Generation})
 	if p.app.player.PositionMS != 42000 {
 		t.Fatalf("position = %v", p.app.player.PositionMS)
+	}
+	p.pause()
+	if rate, ok := player.last("rate"); !ok || rate.Rate != 0 {
+		t.Fatalf("position rate while paused = %#v, %v; want none", rate, ok)
 	}
 }
 
 func TestPlaybackBandFailureFallsBackThenReports(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
-	gen := play.Gen
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: gen})
-	p.handleEvent(helperEvent{Event: "position", MS: 30000, Gen: gen})
+	play := selectPlayed(t, p, player, "sm1")
+	gen := play.Generation
+	p.handleEvent(ams.Event{Event: "opened", DurationMS: 120000, Generation: gen})
+	p.applyPosition(30000)
 
 	// The top band fails: the next one down resumes where the track was.
-	p.handleEvent(helperEvent{Event: "failed", Code: "DecodingError", Ext: -1073479653, Msg: "no decoder", Gen: gen})
-	waitFor(t, "the fallback band", func() bool { return helper.count("play") == 2 })
-	play, _ = helper.last("play")
-	if play.URL != "https://x/lo.m3u8" || play.Gen != gen {
+	p.handleEvent(ams.Event{Event: "failed", Code: "DecodingError", Ext: -1073479653, Msg: "no decoder", Generation: gen})
+	waitFor(t, "the fallback band", func() bool { return player.count("play") == 2 })
+	play, _ = player.last("play")
+	if play.URL != "https://x/lo.m3u8" || play.Generation != gen {
 		t.Fatalf("fallback play = %#v", play)
 	}
-	if !play.Play {
+	if !play.Start {
 		t.Fatal("the fallback band of a track playing must keep playing")
 	}
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: gen})
-	seek, ok := helper.last("seek")
+	p.handleEvent(ams.Event{Event: "opened", DurationMS: 120000, Generation: gen})
+	seek, ok := player.last("seek")
 	if !ok || seek.MS != 30000 {
 		t.Fatalf("fallback did not resume at the position: %#v, %v", seek, ok)
 	}
@@ -253,9 +324,9 @@ func TestPlaybackBandFailureFallsBackThenReports(t *testing.T) {
 
 	// The last band fails too: the track reports the error, and the band is
 	// not retried.
-	p.handleEvent(helperEvent{Event: "failed", Code: "NetworkError", Ext: -2147012889, Msg: "boom", Gen: gen})
-	if helper.count("play") != 2 {
-		t.Fatalf("a failed band was retried: %d plays", helper.count("play"))
+	p.handleEvent(ams.Event{Event: "failed", Code: "NetworkError", Ext: -2147012889, Msg: "boom", Generation: gen})
+	if player.count("play") != 2 {
+		t.Fatalf("a failed band was retried: %d plays", player.count("play"))
 	}
 	if p.app.playerError == "" || p.app.player.Ready || p.app.player.Playing {
 		t.Fatalf("player = %#v error=%q", p.app.player, p.app.playerError)
@@ -263,8 +334,8 @@ func TestPlaybackBandFailureFallsBackThenReports(t *testing.T) {
 
 	// Selecting again starts the top band over.
 	p.selectTrack("sm1")
-	waitFor(t, "the replayed track", func() bool { return helper.count("play") == 3 })
-	play, _ = helper.last("play")
+	waitFor(t, "the replayed track", func() bool { return player.count("play") == 3 })
+	play, _ = player.last("play")
 	if play.URL != "https://x/hi.m3u8" || p.app.playerError != "" {
 		t.Fatalf("play = %#v error=%q", play, p.app.playerError)
 	}
@@ -273,7 +344,7 @@ func TestPlaybackBandFailureFallsBackThenReports(t *testing.T) {
 // TestPlaybackReportsQuality checks the audio band the player bar shows,
 // which follows a fallback to the next band down.
 func TestPlaybackReportsQuality(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.acquire = func(MylistItem) (playbackSources, error) {
 		return playbackSources{
 			URIs:     []string{"https://x/320.m3u8", "https://x/192.m3u8"},
@@ -281,26 +352,26 @@ func TestPlaybackReportsQuality(t *testing.T) {
 		}, nil
 	}
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
+	play := selectPlayed(t, p, player, "sm1")
 	if quality := p.app.player.Quality; quality != "" {
 		t.Fatalf("quality before the track opens = %q", quality)
 	}
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: play.Gen})
+	p.handleEvent(ams.Event{Event: "opened", DurationMS: 120000, Generation: play.Generation})
 	if quality := p.app.player.Quality; quality != "320kbps" {
 		t.Fatalf("quality = %q", quality)
 	}
-	p.handleEvent(helperEvent{Event: "failed", Code: "DecodingError", Ext: -1, Msg: "no decoder", Gen: play.Gen})
+	p.handleEvent(ams.Event{Event: "failed", Code: "DecodingError", Ext: -1, Msg: "no decoder", Generation: play.Generation})
 	if quality := p.app.player.Quality; quality != "192kbps" {
 		t.Fatalf("fallback quality = %q", quality)
 	}
 }
 
 // TestPlaybackPlaysTheSavedAudio checks that a track this PC has saved plays
-// from disk: the helper is handed the file rather than a manifest, the bar
+// from disk: the player is handed the file rather than a manifest, the bar
 // says the track is offline, and an open that names no length (a saved file
 // from before the movie header carried one) leaves the track's own standing.
 func TestPlaybackPlaysTheSavedAudio(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	path, err := p.app.mylist.audioPath("sm1")
 	if err != nil {
 		t.Fatal(err)
@@ -316,11 +387,11 @@ func TestPlaybackPlaysTheSavedAudio(t *testing.T) {
 	p.acquire = p.prepareSources
 
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
+	play := selectPlayed(t, p, player, "sm1")
 	if play.File != savedAudioURI(path) || play.URL != "" || play.Cookie != "" {
 		t.Fatalf("play = %#v; want the saved file", play)
 	}
-	p.handleEvent(helperEvent{Event: "opened", Gen: play.Gen})
+	p.handleEvent(ams.Event{Event: "opened", Generation: play.Generation})
 	if quality := p.app.player.Quality; quality != locales.PlayerOffline() {
 		t.Fatalf("quality = %q; want %q", quality, locales.PlayerOffline())
 	}
@@ -334,7 +405,7 @@ func TestPlaybackPlaysTheSavedAudio(t *testing.T) {
 // size and the track's length, so a file saved before this app recorded
 // anything shows one too.
 func TestPlaybackShowsSavedAudioQuality(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	path, err := p.app.mylist.audioPath("sm1")
 	if err != nil {
 		t.Fatal(err)
@@ -357,8 +428,8 @@ func TestPlaybackShowsSavedAudioQuality(t *testing.T) {
 	p.acquire = p.prepareSources
 
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
-	p.handleEvent(helperEvent{Event: "opened", Gen: play.Gen})
+	play := selectPlayed(t, p, player, "sm1")
+	p.handleEvent(ams.Event{Event: "opened", Generation: play.Generation})
 	want := locales.PlayerOfflineQuality("192kbps")
 	if quality := p.app.player.Quality; quality != want {
 		t.Fatalf("quality = %q; want %q", quality, want)
@@ -369,7 +440,7 @@ func TestPlaybackShowsSavedAudioQuality(t *testing.T) {
 // cannot open is dropped and recorded: the list shows it as broken, and the
 // next pass fetches it again.
 func TestPlaybackMarksBrokenSavedAudio(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	path, err := p.app.mylist.audioPath("sm1")
 	if err != nil {
 		t.Fatal(err)
@@ -383,11 +454,11 @@ func TestPlaybackMarksBrokenSavedAudio(t *testing.T) {
 	p.acquire = p.prepareSources
 
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
+	play := selectPlayed(t, p, player, "sm1")
 	if play.File == "" {
 		t.Fatal("the track did not play from its saved copy")
 	}
-	p.handleEvent(helperEvent{Event: "failed", Code: "DecodingError", Ext: -1, Msg: "no decoder", Gen: play.Gen})
+	p.handleEvent(ams.Event{Event: "failed", Code: "DecodingError", Ext: -1, Msg: "no decoder", Generation: play.Generation})
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("the broken file is still there: %v", err)
@@ -400,56 +471,28 @@ func TestPlaybackMarksBrokenSavedAudio(t *testing.T) {
 	}
 }
 
-// TestPlaybackKeepsTheSavedFileWhenTheHelperTookNoSource checks a failure
-// that never reached the file: a helper older than the app ignores the file
-// command and answers that it has no source, which must leave the saved copy
-// where it is. The file is not what failed, and dropping it would have the
-// download pass fetch it again only for the same helper to fail it again.
-func TestPlaybackKeepsTheSavedFileWhenTheHelperTookNoSource(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
-	path := writeAudio(t, p.app, "sm1")
-	p.acquire = p.prepareSources
-
-	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
-	if play.File == "" {
-		t.Fatal("the track did not play from its saved copy")
-	}
-	p.handleEvent(helperEvent{Event: "failed", Code: "NoSource", Gen: play.Gen})
-
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("a helper that took no source dropped the saved file: %v", err)
-	}
-	if p.app.broken["sm1"] {
-		t.Fatal("a helper that took no source marked the track broken")
-	}
-	if p.app.playerError == "" {
-		t.Fatal("the failure was not reported to the player")
-	}
-}
-
 // TestPlaybackSkipsTracksNiconicoNoLongerServes checks that the queue moves
 // on when it lands on a track that cannot play: shuffle and next pass it over
 // rather than stopping on it, and a queue with nothing playable starts
 // nothing.
 func TestPlaybackSkipsTracksNiconicoNoLongerServes(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.queue.reset(testQueueItems())
 	deleted := MylistItem{WatchID: "sm9", Title: "削除された動画", Available: true}
 
 	p.play(deleted)
 
-	waitFor(t, "the play command", func() bool { return helper.count("play") == 1 })
+	waitFor(t, "the play command", func() bool { return player.count("play") == 1 })
 	if p.track.WatchID != "sm1" {
 		t.Fatalf("the player landed on %q; want the track after the deleted one", p.track.WatchID)
 	}
 
 	// A queue left with nothing playable starts nothing at all.
-	p2, helper2, _ := newTestPlayback(t)
+	p2, player2, _ := newTestPlayback(t)
 	p2.queue.reset([]MylistItem{deleted})
 	p2.play(deleted)
-	if helper2.count("play") != 0 {
-		t.Fatal("a track niconico no longer serves was handed to the helper")
+	if player2.count("play") != 0 {
+		t.Fatal("a track niconico no longer serves was handed to the player")
 	}
 	if p2.track.WatchID != "" {
 		t.Fatalf("the player shows %q; want nothing playing", p2.track.WatchID)
@@ -459,7 +502,7 @@ func TestPlaybackSkipsTracksNiconicoNoLongerServes(t *testing.T) {
 // TestPlaybackForgetsExpiredSession checks that a session niconico refuses
 // is forgotten, so the next track plays as a guest.
 func TestPlaybackForgetsExpiredSession(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	if err := p.app.session.Save("user_session=abc"); err != nil {
 		t.Fatal(err)
 	}
@@ -488,33 +531,33 @@ func TestPlaybackForgetsExpiredSession(t *testing.T) {
 	if p.nico.LoggedIn() {
 		t.Fatal("the player still carries the session")
 	}
-	if p.app.playerError == "" || helper.count("play") != 0 {
-		t.Fatalf("error=%q plays=%d", p.app.playerError, helper.count("play"))
+	if p.app.playerError == "" || player.count("play") != 0 {
+		t.Fatalf("error=%q plays=%d", p.app.playerError, player.count("play"))
 	}
 }
 
 func TestPlaybackPauseDuringLoadHolds(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
-	if !play.Play {
+	play := selectPlayed(t, p, player, "sm1")
+	if !play.Start {
 		t.Fatal("the load started playing")
 	}
 	p.pause()
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: play.Gen})
+	p.handleEvent(ams.Event{Event: "opened", DurationMS: 120000, Generation: play.Generation})
 	if p.app.player.Playing {
 		t.Fatal("a pause during the load must hold once the track opens")
 	}
-	if _, ok := helper.last("pause"); !ok {
-		t.Fatal("the pause did not reach the helper")
+	if _, ok := player.last("pause"); !ok {
+		t.Fatal("the pause did not reach the player")
 	}
 
 	// The track fails at its top band while paused: the fallback band must
 	// be installed paused too, so a pause never turns into sound.
-	p.handleEvent(helperEvent{Event: "failed", Code: "NetworkError", Ext: -1, Msg: "boom", Gen: play.Gen})
-	waitFor(t, "the fallback band", func() bool { return helper.count("play") == 2 })
-	fallback := helperPlay(t, helper)
-	if fallback.Play {
+	p.handleEvent(ams.Event{Event: "failed", Code: "NetworkError", Ext: -1, Msg: "boom", Generation: play.Generation})
+	waitFor(t, "the fallback band", func() bool { return player.count("play") == 2 })
+	fallback := playerPlay(t, player)
+	if fallback.Start {
 		t.Fatalf("a fallback band played on without being asked: %#v", fallback)
 	}
 	if fallback.URL != "https://x/lo.m3u8" {
@@ -523,15 +566,15 @@ func TestPlaybackPauseDuringLoadHolds(t *testing.T) {
 }
 
 func TestPlaybackPreviousRestartsThenMovesBack(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm2")
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: play.Gen})
+	play := selectPlayed(t, p, player, "sm2")
+	p.handleEvent(ams.Event{Event: "opened", DurationMS: 120000, Generation: play.Generation})
 
 	// Past the opening, previous restarts the track.
-	p.handleEvent(helperEvent{Event: "position", MS: 5000, Gen: play.Gen})
+	p.applyPosition(5000)
 	p.previous()
-	if seek, ok := helper.last("seek"); !ok || seek.MS != 0 {
+	if seek, ok := player.last("seek"); !ok || seek.MS != 0 {
 		t.Fatalf("previous did not restart the track: %#v, %v", seek, ok)
 	}
 	if p.app.player.WatchID != "sm2" {
@@ -539,12 +582,12 @@ func TestPlaybackPreviousRestartsThenMovesBack(t *testing.T) {
 	}
 
 	// From the start it moves to the one before.
-	p.handleEvent(helperEvent{Event: "position", MS: 1000, Gen: play.Gen})
+	p.applyPosition(1000)
 	p.previous()
 	if p.app.player.WatchID != "sm1" {
 		t.Fatalf("previous did not move back: %q", p.app.player.WatchID)
 	}
-	waitFor(t, "the previous track", func() bool { return helper.count("play") == 2 })
+	waitFor(t, "the previous track", func() bool { return player.count("play") == 2 })
 }
 
 // TestPlaybackDropsStaleEventsOfAReplacedTrack makes sure the events of a
@@ -552,60 +595,60 @@ func TestPlaybackPreviousRestartsThenMovesBack(t *testing.T) {
 // the old track must not skip the new, and a late failure must not mark it
 // failed.
 func TestPlaybackDropsStaleEventsOfAReplacedTrack(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
-	old := selectPlayed(t, p, helper, "sm1")
+	old := selectPlayed(t, p, player, "sm1")
 
 	p.selectTrack("sm2")
-	waitFor(t, "the new track's play", func() bool { return helper.count("play") == 2 })
-	current := helperPlay(t, helper)
+	waitFor(t, "the new track's play", func() bool { return player.count("play") == 2 })
+	current := playerPlay(t, player)
 	if current.URL != "https://x/hi.m3u8" {
 		t.Fatalf("play = %#v", current)
 	}
 
 	// The old track's events, held up past the switch, must be dropped.
-	p.handleEvent(helperEvent{Event: "ended", Gen: old.Gen})
+	p.handleEvent(ams.Event{Event: "ended", Generation: old.Generation})
 	if p.app.player.WatchID != "sm2" {
 		t.Fatalf("a stale ended skipped the new track: %#v", p.app.player)
 	}
-	p.handleEvent(helperEvent{Event: "failed", Code: "NetworkError", Msg: "stale", Gen: old.Gen})
+	p.handleEvent(ams.Event{Event: "failed", Code: "NetworkError", Msg: "stale", Generation: old.Generation})
 	if p.app.playerError != "" {
 		t.Fatalf("a stale failure marked the new track failed: %q", p.app.playerError)
 	}
 	// A stale opened must not ready or replace the new track.
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 111, Gen: old.Gen})
+	p.handleEvent(ams.Event{Event: "opened", DurationMS: 111, Generation: old.Generation})
 	if p.app.player.Ready || p.app.player.WatchID != "sm2" {
 		t.Fatalf("a stale opened touched the new track: %#v", p.app.player)
 	}
 
 	// The new track's own events still reach it.
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: current.Gen})
+	p.handleEvent(ams.Event{Event: "opened", DurationMS: 120000, Generation: current.Generation})
 	if !p.app.player.Ready || p.app.player.DurationMS != 120000 {
 		t.Fatalf("player = %#v", p.app.player)
 	}
-	p.handleEvent(helperEvent{Event: "position", MS: 7000, Gen: current.Gen})
+	p.applyPosition(7000)
 	if p.app.player.PositionMS != 7000 {
 		t.Fatalf("position = %v; want the new track's", p.app.player.PositionMS)
 	}
 }
 
 func TestPlaybackEndedAdvances(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: play.Gen})
-	p.handleEvent(helperEvent{Event: "ended", Gen: play.Gen})
+	play := selectPlayed(t, p, player, "sm1")
+	p.handleEvent(ams.Event{Event: "opened", DurationMS: 120000, Generation: play.Generation})
+	p.handleEvent(ams.Event{Event: "ended", Generation: play.Generation})
 	if p.app.player.WatchID != "sm2" {
 		t.Fatalf("ended did not advance: %q", p.app.player.WatchID)
 	}
-	waitFor(t, "the next track", func() bool { return helper.count("play") == 2 })
+	waitFor(t, "the next track", func() bool { return player.count("play") == 2 })
 }
 
 func TestPlaybackKeepsThePlayingMylistAcrossMylists(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems()[:1])
 	p.selectTrack("sm1")
-	waitFor(t, "the play command", func() bool { return helper.count("play") == 1 })
+	waitFor(t, "the play command", func() bool { return player.count("play") == 1 })
 
 	// Opening another mylist keeps the queue and the track playing.
 	p.setItems("222", "マイリストB", []MylistItem{{WatchID: "sm2", Title: "Bの曲", Available: true, Duration: 120}})
@@ -615,7 +658,7 @@ func TestPlaybackKeepsThePlayingMylistAcrossMylists(t *testing.T) {
 
 	// Playing a track of the shown mylist moves the queue to it.
 	p.selectTrack("sm2")
-	waitFor(t, "the new mylist's track", func() bool { return helper.count("play") == 2 })
+	waitFor(t, "the new mylist's track", func() bool { return player.count("play") == 2 })
 	if p.app.player.MylistID != "222" || p.app.player.Name != "マイリストB" || p.app.player.WatchID != "sm2" {
 		t.Fatalf("player = %#v", p.app.player)
 	}
@@ -624,65 +667,35 @@ func TestPlaybackKeepsThePlayingMylistAcrossMylists(t *testing.T) {
 	}
 }
 
-func TestPlaybackHelperCrashResumesTheTrack(t *testing.T) {
-	p, helper, spawns := newTestPlayback(t)
+// TestPlaybackDropsThePlayerWhenTheModuleFails checks that a player the
+// module lost (a panic at its boundary, a closed player) is dropped rather
+// than failing every track after it: the track reports the error, and the
+// next play makes a fresh player.
+func TestPlaybackDropsThePlayerWhenTheModuleFails(t *testing.T) {
+	p, player, makes := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
-	play := selectPlayed(t, p, helper, "sm1")
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: play.Gen})
-	p.handleEvent(helperEvent{Event: "position", MS: 40000, Gen: play.Gen})
+	selectPlayed(t, p, player, "sm1")
 
-	// The helper dies: one restart, resuming where the track was.
-	helper.onExit(errors.New("boom"))
-	waitFor(t, "the restarted helper", func() bool { return *spawns == 2 && p.proc != nil })
-	waitFor(t, "the resumed track", func() bool { return helper.count("play") == 2 })
-	restarted := helperPlay(t, helper)
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: restarted.Gen})
-	seek, ok := helper.last("seek")
-	if !ok || seek.MS != 40000 {
-		t.Fatalf("the restart did not resume: %#v, %v", seek, ok)
+	player.mu.Lock()
+	player.failPlay = errors.New("ams: panicked")
+	player.mu.Unlock()
+	p.selectTrack("sm2")
+	waitFor(t, "the failed play", func() bool { return p.app.playerError != "" })
+	if p.player != nil {
+		t.Fatal("the failed player was kept")
 	}
-}
-
-func TestPlaybackHelperCrashLoopGivesUp(t *testing.T) {
-	p, helper, spawns := newTestPlayback(t)
-	p.setItems("111", "マイリストA", testQueueItems())
-	p.selectTrack("sm1")
-	waitFor(t, "the play command", func() bool { return helper.count("play") == 1 })
-
-	// Die once: restarted. Die again before the track ever opened: the one
-	// restart is used up, so the track reports the failure rather than
-	// spinning on crashes.
-	helper.onExit(errors.New("boom"))
-	waitFor(t, "the restarted helper", func() bool { return *spawns == 2 })
-	waitFor(t, "the resumed track", func() bool { return helper.count("play") == 2 })
-	helper.onExit(errors.New("boom again"))
-	if *spawns != 2 {
-		t.Fatalf("the helper was restarted into a crash loop: %d spawns", *spawns)
-	}
-	if p.app.playerError == "" || p.app.player.Playing {
-		t.Fatalf("player = %#v error=%q", p.app.player, p.app.playerError)
-	}
-}
-
-// TestPlaybackHelperCrashKeepsAPausedTrackPaused: a restarted helper must
-// not turn a pause into sound.
-func TestPlaybackHelperCrashKeepsAPausedTrackPaused(t *testing.T) {
-	p, helper, spawns := newTestPlayback(t)
-	p.setItems("111", "マイリストA", testQueueItems())
-	selectPlayed(t, p, helper, "sm1")
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000})
-	p.pause()
-
-	helper.onExit(errors.New("boom"))
-	waitFor(t, "the restarted helper", func() bool { return *spawns == 2 })
-	waitFor(t, "the resumed track", func() bool { return helper.count("play") == 2 })
-	restarted := helperPlay(t, helper)
-	if restarted.Play {
-		t.Fatalf("the restarted helper played on without being asked: %#v", restarted)
-	}
-	p.handleEvent(helperEvent{Event: "opened", DurationMS: 120000, Gen: restarted.Gen})
 	if p.app.player.Playing {
-		t.Fatal("the restarted helper started a paused track")
+		t.Fatalf("player = %#v", p.app.player)
+	}
+
+	player.mu.Lock()
+	player.failPlay = nil
+	player.mu.Unlock()
+	p.selectTrack("sm1")
+	waitFor(t, "the fresh player", func() bool { return *makes == 2 })
+	waitFor(t, "the replayed track", func() bool { return player.count("play") == 2 })
+	if p.app.playerError != "" {
+		t.Fatalf("the fresh player kept the error: %q", p.app.playerError)
 	}
 }
 
@@ -690,10 +703,10 @@ func TestPlaybackHelperCrashKeepsAPausedTrackPaused(t *testing.T) {
 // under shuffle: the track plays where the screen shows it, and the order
 // stays as it is.
 func TestPlaybackQueueSelectKeepsShuffleOrder(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
 	p.handle(PlayerCommand{Action: "shuffle", Enabled: true})
-	selectPlayed(t, p, helper, "sm1")
+	selectPlayed(t, p, player, "sm1")
 	order := append([]string(nil), p.app.player.Order...)
 	if len(order) != 2 || order[0] != "sm1" {
 		t.Fatalf("shuffle order = %v; want sm1 first", order)
@@ -703,7 +716,7 @@ func TestPlaybackQueueSelectKeepsShuffleOrder(t *testing.T) {
 	// queue keeps the order the screen shows.
 	p.app.queueOpen = true
 	p.handle(PlayerCommand{Action: "select", WatchID: "sm2"})
-	waitFor(t, "the queue's play command", func() bool { return helper.count("play") == 2 })
+	waitFor(t, "the queue's play command", func() bool { return player.count("play") == 2 })
 	if got := p.app.player.Order; len(got) != len(order) || got[0] != order[0] || got[1] != order[1] {
 		t.Fatalf("the queue's choice reshuffled the order: got %v want %v", got, order)
 	}
@@ -713,11 +726,11 @@ func TestPlaybackQueueSelectKeepsShuffleOrder(t *testing.T) {
 }
 
 func TestPlaybackSetItemsKeepsShuffleAndTrack(t *testing.T) {
-	p, helper, _ := newTestPlayback(t)
+	p, player, _ := newTestPlayback(t)
 	p.setItems("111", "マイリストA", testQueueItems())
 	p.handle(PlayerCommand{Action: "shuffle", Enabled: true})
 	p.selectTrack("sm1")
-	waitFor(t, "the play command", func() bool { return helper.count("play") == 1 })
+	waitFor(t, "the play command", func() bool { return player.count("play") == 1 })
 	if !p.app.player.Shuffle {
 		t.Fatal("shuffle did not reach the player state")
 	}

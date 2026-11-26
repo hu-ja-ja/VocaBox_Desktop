@@ -26,7 +26,7 @@ const (
 	GroupRustCrates   = "Rust crates"
 )
 
-// Entries lists the works the app and its playback helper bundle, sorted by
+// Entries lists the works the app and its player bundle, sorted by
 // name.
 var Entries = []Entry{
 	{Name: "Lucide", Version: "", Group: GroupLucideIcons, License: "ISC, MIT", Copyright: "", URL: "https://lucide.dev", TextIndex: 0},
@@ -35,34 +35,26 @@ var Entries = []Entry{
 	{Name: "Noto Sans TC", Version: "", Group: GroupBundledFonts, License: "OFL-1.1", Copyright: "Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'", URL: "https://github.com/notofonts/noto-cjk", TextIndex: 2},
 	{Name: "github.com/Eyevinn/hls-m3u8", Version: "v0.6.5", Group: GroupGoModules, License: "BSD-3-Clause", Copyright: "", URL: "https://github.com/Eyevinn/hls-m3u8/blob/v0.6.5/LICENSE", TextIndex: 3},
 	{Name: "github.com/ebitengine/purego", Version: "v0.11.2", Group: GroupGoModules, License: "Apache-2.0", Copyright: "", URL: "https://github.com/ebitengine/purego/blob/v0.11.2/LICENSE", TextIndex: 4},
-	{Name: "github.com/egoist/mygo", Version: "v0.8.3", Group: GroupGoModules, License: "MIT", Copyright: "", URL: "https://github.com/egoist/mygo/blob/v0.8.3/LICENSE", TextIndex: 5},
+	{Name: "github.com/egoist/mygo", Version: "v0.9.0", Group: GroupGoModules, License: "MIT", Copyright: "", URL: "https://github.com/egoist/mygo/blob/v0.9.0/LICENSE", TextIndex: 5},
 	{Name: "github.com/go-text/typesetting", Version: "v0.3.5", Group: GroupGoModules, License: "BSD-3-Clause, Unlicense", Copyright: "", URL: "https://github.com/go-text/typesetting/blob/v0.3.5/LICENSE", TextIndex: 6},
 	{Name: "golang.org/x/image", Version: "v0.47.0", Group: GroupGoModules, License: "BSD-3-Clause", Copyright: "", URL: "https://cs.opensource.google/go/x/image/+/v0.47.0:LICENSE", TextIndex: 7},
 	{Name: "golang.org/x/net", Version: "v0.62.0", Group: GroupGoModules, License: "BSD-3-Clause", Copyright: "", URL: "https://cs.opensource.google/go/x/net/+/v0.62.0:LICENSE", TextIndex: 7},
 	{Name: "golang.org/x/text", Version: "v0.43.0", Group: GroupGoModules, License: "BSD-3-Clause", Copyright: "", URL: "https://cs.opensource.google/go/x/text/+/v0.43.0:LICENSE", TextIndex: 7},
-	{Name: "itoa", Version: "1.0.18", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "David Tolnay <dtolnay@gmail.com>", URL: "https://github.com/dtolnay/itoa", TextIndex: 8},
-	{Name: "memchr", Version: "2.8.3", Group: GroupRustCrates, License: "MIT", Copyright: "Andrew Gallant <jamslam@gmail.com>, bluss", URL: "https://github.com/BurntSushi/memchr", TextIndex: 9},
 	{Name: "proc-macro2", Version: "1.0.107", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "David Tolnay <dtolnay@gmail.com>, Alex Crichton <alex@alexcrichton.com>", URL: "https://github.com/dtolnay/proc-macro2", TextIndex: 8},
 	{Name: "quote", Version: "1.0.47", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "David Tolnay <dtolnay@gmail.com>", URL: "https://github.com/dtolnay/quote", TextIndex: 8},
-	{Name: "serde", Version: "1.0.229", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>", URL: "https://github.com/serde-rs/serde", TextIndex: 8},
-	{Name: "serde_core", Version: "1.0.229", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>", URL: "https://github.com/serde-rs/serde", TextIndex: 8},
-	{Name: "serde_derive", Version: "1.0.229", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>", URL: "https://github.com/serde-rs/serde", TextIndex: 8},
-	{Name: "serde_json", Version: "1.0.154", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/serde-rs/json", TextIndex: 8},
 	{Name: "syn", Version: "2.0.119", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "David Tolnay <dtolnay@gmail.com>", URL: "https://github.com/dtolnay/syn", TextIndex: 8},
-	{Name: "syn", Version: "3.0.9", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "David Tolnay <dtolnay@gmail.com>", URL: "https://github.com/dtolnay/syn", TextIndex: 8},
 	{Name: "unicode-ident", Version: "1.0.27", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "David Tolnay <dtolnay@gmail.com>", URL: "https://github.com/dtolnay/unicode-ident", TextIndex: 8},
-	{Name: "windows", Version: "0.62.2", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "windows-collections", Version: "0.3.2", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "windows-core", Version: "0.62.2", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "windows-future", Version: "0.3.2", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "windows-implement", Version: "0.60.2", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "windows-interface", Version: "0.59.3", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "windows-link", Version: "0.2.1", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "windows-numerics", Version: "0.3.1", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "windows-result", Version: "0.4.1", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "windows-strings", Version: "0.5.1", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "windows-threading", Version: "0.2.1", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 10},
-	{Name: "zmij", Version: "1.0.23", Group: GroupRustCrates, License: "MIT", Copyright: "David Tolnay <dtolnay@gmail.com>", URL: "https://github.com/dtolnay/zmij", TextIndex: 11},
+	{Name: "windows", Version: "0.62.2", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
+	{Name: "windows-collections", Version: "0.3.2", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
+	{Name: "windows-core", Version: "0.62.2", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
+	{Name: "windows-future", Version: "0.3.2", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
+	{Name: "windows-implement", Version: "0.60.2", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
+	{Name: "windows-interface", Version: "0.59.3", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
+	{Name: "windows-link", Version: "0.2.1", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
+	{Name: "windows-numerics", Version: "0.3.1", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
+	{Name: "windows-result", Version: "0.4.1", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
+	{Name: "windows-strings", Version: "0.5.1", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
+	{Name: "windows-threading", Version: "0.2.1", Group: GroupRustCrates, License: "Apache-2.0", Copyright: "", URL: "https://github.com/microsoft/windows-rs", TextIndex: 9},
 }
 
 // Texts holds the terms, one copy each.
@@ -716,27 +708,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.`,
-	`The MIT License (MIT)
-
-Copyright (c) 2015 Andrew Gallant
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.`,
 	`                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -938,27 +909,4 @@ THE SOFTWARE.`,
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.`,
-	`Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.`,
 }
