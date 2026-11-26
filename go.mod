@@ -4,9 +4,9 @@ go 1.27.3
 
 require (
 	github.com/Eyevinn/hls-m3u8 v0.6.5
-	github.com/egoist/mygo v0.9.0
-	golang.org/x/image v0.47.0
-	golang.org/x/text v0.43.0
+	github.com/egoist/mygo v0.10.0
+	golang.org/x/image v0.48.0
+	golang.org/x/text v0.44.0
 )
 
 require (
@@ -19,7 +19,7 @@ require (
 	go.digitalxero.dev/rpm v0.3.4 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 )
 
 tool github.com/egoist/mygo/cmd/mygo
